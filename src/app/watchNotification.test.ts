@@ -35,20 +35,43 @@ describe("createWatchNotification", () => {
         new Date("2026-05-16T12:10:00Z"),
       ),
     ).toEqual({
+      watchId: "getsentry/sentry/run/123",
       title: "CI: tests",
+      url: "https://github.com/getsentry/sentry/actions/runs/123",
       body:
         "getsentry/sentry\n" +
         "Successful - This check was successful.\n" +
         "Completed 1m ago · 7m\n" +
-        "Was In progress",
+        "Previously in progress",
       largeBody:
         "getsentry/sentry\n" +
         "Successful - This check was successful.\n" +
         "Completed 1m ago · 7m\n" +
-        "Was In progress",
+        "Previously in progress",
       summary: "getsentry/sentry",
       group: "getsentry/sentry",
-      requireInteraction: true,
     });
+  });
+
+  it("uses the exact watched URL for notification clicks", () => {
+    expect(
+      createWatchNotification(
+        watch({
+          target: {
+            kind: "job",
+            owner: "getsentry",
+            repo: "sentry",
+            runId: "123",
+            jobId: "456",
+            url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+          },
+        }),
+        { status: "in_progress", conclusion: null },
+      ).url,
+    ).toBe("https://github.com/getsentry/sentry/actions/runs/123/job/456");
+  });
+
+  it("uses natural transition wording for queued checks", () => {
+    expect(createWatchNotification(watch(), { status: "queued", conclusion: null }).body).toContain("Previously queued");
   });
 });

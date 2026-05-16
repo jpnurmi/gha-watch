@@ -7,6 +7,7 @@ import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
+import type { WatchNotification } from "./app/watchNotification";
 import { parseGitHubActionsUrl } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
 import { fetchRepositoryIconUrl, fetchWatchState } from "./platform/gh";
@@ -41,11 +42,17 @@ const controller = createWatchController(
         }
       : fetchWatchState,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
-    notify: sendDesktopNotification,
+    notify: notifyStatusChange,
     save: saveWatches,
   },
   loadInitialWatches(),
 );
+
+function notifyStatusChange(notification: WatchNotification): Promise<void> {
+  return sendDesktopNotification(notification, undefined, (clickedNotification) => {
+    controller.markSeen(clickedNotification.watchId);
+  });
+}
 
 controller.subscribe(() => {
   render();

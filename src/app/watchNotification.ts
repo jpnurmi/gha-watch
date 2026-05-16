@@ -3,12 +3,13 @@ import type { WatchRecord } from "../domain/watches";
 import { createPopupViewModel } from "./viewModel";
 
 export type WatchNotification = {
+  watchId: string;
   title: string;
+  url: string;
   body: string;
   largeBody?: string;
   summary?: string;
   group?: string;
-  requireInteraction?: boolean;
 };
 
 export function createWatchNotification(
@@ -22,44 +23,44 @@ export function createWatchNotification(
     repoLabel,
     `${row.statusLabel} - ${row.description}`,
     row.timingText,
-    previousState ? `Was ${formatPreviousStatus(previousState)}` : undefined,
+    previousState ? `Previously ${formatPreviousStatus(previousState)}` : undefined,
   ].filter(isString);
   const body = lines.join("\n");
 
   return {
+    watchId: watch.id,
     title: row.label,
+    url: watch.target.url,
     body,
     largeBody: body,
     summary: repoLabel,
     group: repoLabel,
-    requireInteraction: true,
   };
 }
 
 function formatPreviousStatus(state: WatchState): string {
   if (state.status === "completed") {
     if (state.conclusion === "success") {
-      return "Successful";
+      return "successful";
     }
 
     if (state.conclusion === "cancelled") {
-      return "Cancelled";
+      return "cancelled";
     }
 
-    return "Failed";
+    return "failed";
   }
 
   if (state.status === "in_progress") {
-    return "In progress";
+    return "in progress";
   }
 
   if (state.status === "queued" || state.status === "pending" || state.status === "requested" || state.status === "waiting") {
-    return "Queued";
+    return "queued";
   }
 
   return state.status
     .split("_")
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
     .join(" ");
 }
 

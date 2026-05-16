@@ -123,7 +123,7 @@ describe("watchController", () => {
     await controller.pollNow();
 
     expect(notifications).toEqual([
-      "CI: tests: getsentry/sentry\nIn progress - This check has started...\nWas Queued",
+      "CI: tests: getsentry/sentry\nIn progress - This check has started...\nPreviously queued",
     ]);
   });
 
@@ -159,20 +159,21 @@ describe("watchController", () => {
 
     expect(notificationRecords).toEqual([
       {
+        watchId: "getsentry/sentry/run/123",
         title: "CI: tests",
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
         body:
           "getsentry/sentry\n" +
           "Successful - This check was successful.\n" +
           "Completed 1m ago · 7m\n" +
-          "Was In progress",
+          "Previously in progress",
         largeBody:
           "getsentry/sentry\n" +
           "Successful - This check was successful.\n" +
           "Completed 1m ago · 7m\n" +
-          "Was In progress",
+          "Previously in progress",
         summary: "getsentry/sentry",
         group: "getsentry/sentry",
-        requireInteraction: true,
       },
     ]);
   });

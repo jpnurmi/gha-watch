@@ -1,33 +1,61 @@
 import {
   isPermissionGranted,
   requestPermission,
-  sendNotification,
-  type Options as TauriNotificationOptions,
 } from "@tauri-apps/plugin-notification";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { WatchNotification } from "../app/watchNotification";
 
-type PersistentNotificationOptions = TauriNotificationOptions & {
-  requireInteraction?: boolean;
+type NativeNotificationOptions = NotificationOptions & {
+  largeBody?: string;
+  summary?: string;
+  group?: string;
 };
 
-export async function sendDesktopNotification(notification: WatchNotification): Promise<void> {
-  let permissionGranted = await isPermissionGranted();
+type NativeNotificationHandle = {
+  onclick: ((event: Event) => void) | null;
+  close(): void;
+};
+
+export type DesktopNotificationDeps = {
+  isPermissionGranted(): Promise<boolean>;
+  requestPermission(): Promise<NotificationPermission>;
+  createNotification(title: string, options: NativeNotificationOptions): NativeNotificationHandle;
+  openUrl(url: string): Promise<void>;
+};
+
+const desktopNotificationDeps: DesktopNotificationDeps = {
+  isPermissionGranted,
+  requestPermission,
+  createNotification(title, options) {
+    return new Notification(title, options);
+  },
+  openUrl,
+};
+
+export async function sendDesktopNotification(
+  notification: WatchNotification,
+  deps: DesktopNotificationDeps = desktopNotificationDeps,
+  onClick?: (notification: WatchNotification) => void,
+): Promise<void> {
+  let permissionGranted = await deps.isPermissionGranted();
 
   if (!permissionGranted) {
-    const permission = await requestPermission();
+    const permission = await deps.requestPermission();
     permissionGranted = permission === "granted";
   }
 
   if (permissionGranted) {
-    const options: PersistentNotificationOptions = {
-      title: notification.title,
+    const shownNotification = deps.createNotification(notification.title, {
       body: notification.body,
       largeBody: notification.largeBody,
       summary: notification.summary,
       group: notification.group,
-      requireInteraction: notification.requireInteraction,
-    };
+    });
 
-    sendNotification(options);
+    shownNotification.onclick = () => {
+      shownNotification.close();
+      onClick?.(notification);
+      void deps.openUrl(notification.url);
+    };
   }
 }
