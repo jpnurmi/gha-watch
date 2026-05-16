@@ -92,6 +92,32 @@ export async function fetchRepositoryIconUrl(
   }
 }
 
+export async function rerunFailedWatch(
+  target: ParsedWatchTarget,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<void> {
+  const runId = target.kind === "run" ? target.runId : target.runId;
+
+  if (!runId) {
+    throw new Error("This job link does not include a workflow run id.");
+  }
+
+  try {
+    assertSuccessfulGhResult(
+      await executor.execute("gh", [
+        "run",
+        "rerun",
+        runId,
+        "--failed",
+        "-R",
+        `${target.owner}/${target.repo}`,
+      ]),
+    );
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
 export function createTauriShellExecutor(): ShellExecutor {
   return {
     async execute(program, args) {

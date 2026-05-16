@@ -122,6 +122,7 @@ describe("createPopupViewModel", () => {
 
     expect(model.title).toBe("Some checks were not successful");
     expect(model.subtitle).toBe("1 failed check");
+    expect(model.rows[0].canRerun).toBe(true);
   });
 
   it("presents cancelled checks distinctly from failed checks", () => {

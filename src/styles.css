@@ -87,7 +87,7 @@ input {
 }
 
 .icon-button,
-.remove-button {
+.watch-action-button {
   display: inline-grid;
   width: 28px;
   height: 28px;
@@ -150,7 +150,7 @@ input {
   cursor: default;
 }
 
-.remove-button {
+.watch-action-button {
   color: #aeb6c1;
 }
 
@@ -159,7 +159,7 @@ input {
   color: #ffffff;
 }
 
-.remove-button:hover {
+.watch-action-button:hover {
   background: rgb(255 255 255 / 7%);
   color: rgb(238 241 245 / 82%);
 }
@@ -360,7 +360,7 @@ input {
 .watch {
   display: grid;
   min-height: 62px;
-  grid-template-columns: 18px minmax(0, 1fr) 28px;
+  grid-template-columns: 18px minmax(0, 1fr) 43px;
   align-items: start;
   gap: 10px;
   padding: 10px 16px;
@@ -476,9 +476,21 @@ input {
   white-space: nowrap;
 }
 
-.remove-button {
+.watch-actions {
+  display: flex;
+  width: 43px;
+  height: 20px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  justify-self: end;
+  margin-top: 2px;
+  padding-right: 5px;
+}
+
+.watch-action-button {
   position: relative;
-  justify-self: center;
   width: 18px;
   height: 18px;
   margin-top: 0;
@@ -487,8 +499,56 @@ input {
   opacity: 0.6;
 }
 
-.remove-button:hover {
+.watch-action-button:hover {
   opacity: 1;
+}
+
+.watch-action-button svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.rerun-button {
+  color: #d29922;
+}
+
+.remove-button {
+  color: #aeb6c1;
+}
+
+.confirm-button {
+  flex: 0 0 auto;
+  height: 20px;
+  min-width: 50px;
+  margin-top: -1px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.confirm-button-rerun {
+  background: rgb(210 153 34 / 15%);
+  color: #e3b341;
+}
+
+.confirm-button-rerun:hover {
+  background: rgb(210 153 34 / 24%);
+  color: #f0c674;
+}
+
+.confirm-button-remove {
+  background: rgb(248 81 73 / 15%);
+  color: #ff7b72;
+}
+
+.confirm-button-remove:hover {
+  background: rgb(248 81 73 / 24%);
+  color: #ffa198;
 }
 
 .remove-icon {

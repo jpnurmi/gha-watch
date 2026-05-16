@@ -1,16 +1,18 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
+import { isWatchActionConfirmation } from "./app/watchActionConfirmation";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
 import type { WatchNotification } from "./app/watchNotification";
 import { parseGitHubActionsUrl } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
-import { fetchRepositoryIconUrl, fetchWatchState } from "./platform/gh";
+import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch } from "./platform/gh";
 import { sendDesktopNotification } from "./platform/notifications";
 import { loadWatches, saveWatches } from "./platform/store";
 import { setTrayIndicator } from "./platform/tray";
@@ -33,6 +35,12 @@ let isPolling = false;
 let isClearMenuOpen = false;
 let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
+let pendingWatchAction: PendingWatchAction | undefined;
+
+type PendingWatchAction = {
+  id: string;
+  kind: "remove" | "rerun";
+};
 
 const controller = createWatchController(
   {
@@ -43,6 +51,7 @@ const controller = createWatchController(
       : fetchWatchState,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     notify: notifyStatusChange,
+    rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
     save: saveWatches,
   },
   loadInitialWatches(),
@@ -66,19 +75,40 @@ window.setInterval(() => {
   void poll();
 }, pollIntervalMs);
 void poll();
-document.addEventListener("click", (event) => {
-  if (!isClearMenuOpen) {
-    return;
-  }
+document.addEventListener(
+  "click",
+  (event) => {
+    if (!pendingWatchAction) {
+      return;
+    }
 
+    const target = event.target;
+    const actionTarget = target instanceof Element ? target.closest<HTMLElement>("[data-action]") : null;
+    const action = actionTarget?.dataset.action;
+
+    if (isWatchActionConfirmation(action)) {
+      return;
+    }
+
+    pendingWatchAction = undefined;
+    render();
+    event.preventDefault();
+    event.stopPropagation();
+  },
+  { capture: true },
+);
+document.addEventListener("click", (event) => {
   const target = event.target;
 
-  if (target instanceof Element && target.closest(".clear-menu")) {
-    return;
+  if (isClearMenuOpen) {
+    if (target instanceof Element && target.closest(".clear-menu")) {
+      return;
+    }
+
+    isClearMenuOpen = false;
+    render();
   }
 
-  isClearMenuOpen = false;
-  render();
 });
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
@@ -253,11 +283,41 @@ function renderWatch(row: WatchRowViewModel): string {
         <span class="watch-status">${escapeHtml(row.statusLabel)} - ${escapeHtml(row.description)}</span>
         ${row.timingText ? `<span class="watch-timing">${escapeHtml(row.timingText)}</span>` : ""}
       </button>
-      <button class="remove-button${row.unseenStatusChange ? " is-unseen" : ""}" type="button" data-action="remove" data-id="${escapeHtml(row.id)}" title="Remove watch" aria-label="Remove ${escapeHtml(row.label)}">
+      ${renderWatchActions(row)}
+    </li>
+  `;
+}
+
+function renderWatchActions(row: WatchRowViewModel): string {
+  if (pendingWatchAction?.id === row.id) {
+    const isRerun = pendingWatchAction.kind === "rerun";
+    const label = isRerun ? "Re-run" : "Remove";
+    const action = isRerun ? "confirm-rerun" : "confirm-remove";
+    const tone = isRerun ? "rerun" : "remove";
+
+    return `
+      <div class="watch-actions">
+        <button class="confirm-button confirm-button-${tone}" type="button" data-action="${action}" data-id="${escapeHtml(row.id)}">
+          ${label}
+        </button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="watch-actions">
+      ${
+        row.canRerun
+          ? `<button class="watch-action-button rerun-button" type="button" data-action="arm-rerun" data-id="${escapeHtml(row.id)}" title="Re-run" aria-label="Re-run ${escapeHtml(row.label)}">
+              ${getRerunActionIconSvg()}
+            </button>`
+          : ""
+      }
+      <button class="watch-action-button remove-button${row.unseenStatusChange ? " is-unseen" : ""}" type="button" data-action="arm-remove" data-id="${escapeHtml(row.id)}" title="Remove" aria-label="Remove ${escapeHtml(row.label)}">
         <span class="remove-icon" aria-hidden="true">&times;</span>
         ${row.unseenStatusChange ? `<span class="unseen-dot" aria-hidden="true"></span>` : ""}
       </button>
-    </li>
+    </div>
   `;
 }
 
@@ -333,9 +393,28 @@ function bindEvents(): void {
     },
   );
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="remove"]')) {
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-remove"]')) {
     button.addEventListener("click", () => {
+      armWatchAction(button.dataset.id || "", "remove");
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-rerun"]')) {
+    button.addEventListener("click", () => {
+      armWatchAction(button.dataset.id || "", "rerun");
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-remove"]')) {
+    button.addEventListener("click", () => {
+      pendingWatchAction = undefined;
       controller.remove(button.dataset.id || "");
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-rerun"]')) {
+    button.addEventListener("click", () => {
+      void confirmRerun(button.dataset.id || "");
     });
   }
 
@@ -350,6 +429,33 @@ function bindEvents(): void {
       }
     });
   }
+}
+
+function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
+  if (!id) {
+    return;
+  }
+
+  pendingWatchAction = { id, kind };
+  isClearMenuOpen = false;
+  render();
+}
+
+async function confirmRerun(id: string): Promise<void> {
+  if (!id) {
+    return;
+  }
+
+  pendingWatchAction = undefined;
+
+  try {
+    await controller.rerunFailed(id);
+  } catch (error) {
+    console.error("Could not re-run failed GitHub Actions jobs.", error);
+  }
+
+  render();
+  void updateTrayIndicator();
 }
 
 async function hideMainWindow(): Promise<void> {

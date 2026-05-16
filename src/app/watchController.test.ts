@@ -28,15 +28,18 @@ function createDeps(states: WatchSnapshot[]): {
     ? Notification[]
     : never;
   fetches: ParsedWatchTarget[];
+  reruns: ParsedWatchTarget[];
 } {
   const notifications: string[] = [];
   const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
   const fetches: ParsedWatchTarget[] = [];
+  const reruns: ParsedWatchTarget[] = [];
 
   return {
     notifications,
     notificationRecords,
     fetches,
+    reruns,
     deps: {
       async fetchState(target) {
         fetches.push(target);
@@ -51,6 +54,9 @@ function createDeps(states: WatchSnapshot[]): {
       async notify(notification) {
         notificationRecords.push(notification);
         notifications.push(`${notification.title}: ${notification.body}`);
+      },
+      async rerunFailed(target) {
+        reruns.push(target);
       },
       async save() {},
     },
@@ -417,5 +423,20 @@ describe("watchController", () => {
         repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
       },
     ]);
+  });
+
+  it("reruns failed jobs for an existing watch", async () => {
+    const { deps, reruns } = createDeps([]);
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        status: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+      },
+    ]);
+
+    await controller.rerunFailed("getsentry/sentry/run/123");
+
+    expect(reruns).toEqual([runTarget]);
   });
 });

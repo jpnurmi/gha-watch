@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchRepositoryIconUrl, fetchWatchState, type ShellExecutor } from "./gh";
+import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch, type ShellExecutor } from "./gh";
 
 function createExecutor(result: Awaited<ReturnType<ShellExecutor["execute"]>>): {
   executor: ShellExecutor;
@@ -221,5 +221,71 @@ describe("fetchRepositoryIconUrl", () => {
         args: ["api", "repos/getsentry/sentry-native"],
       },
     ]);
+  });
+});
+
+describe("rerunFailedWatch", () => {
+  it("reruns only failed jobs for a run watch", async () => {
+    const { executor, calls } = createExecutor({ code: 0, stdout: "", stderr: "" });
+
+    await rerunFailedWatch(
+      {
+        kind: "run",
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "123",
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
+      },
+      executor,
+    );
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["run", "rerun", "123", "--failed", "-R", "getsentry/sentry"],
+      },
+    ]);
+  });
+
+  it("reruns failed jobs for a job watch when the run id is known", async () => {
+    const { executor, calls } = createExecutor({ code: 0, stdout: "", stderr: "" });
+
+    await rerunFailedWatch(
+      {
+        kind: "job",
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "123",
+        jobId: "456",
+        url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+      },
+      executor,
+    );
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["run", "rerun", "123", "--failed", "-R", "getsentry/sentry"],
+      },
+    ]);
+  });
+
+  it("rejects job watches without a run id", async () => {
+    const { executor, calls } = createExecutor({ code: 0, stdout: "", stderr: "" });
+
+    await expect(
+      rerunFailedWatch(
+        {
+          kind: "job",
+          owner: "getsentry",
+          repo: "sentry",
+          jobId: "456",
+          url: "https://github.com/getsentry/sentry/runs/456",
+        },
+        executor,
+      ),
+    ).rejects.toThrow("This job link does not include a workflow run id.");
+
+    expect(calls).toEqual([]);
   });
 });

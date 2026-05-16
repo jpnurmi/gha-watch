@@ -17,6 +17,7 @@ export type WatchRowViewModel = {
   tone: RowTone;
   timingText?: string;
   unseenStatusChange: boolean;
+  canRerun: boolean;
   url: string;
 };
 
@@ -69,6 +70,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
       tone: "error",
       timingText: getTimingText(watch, "error", now),
       unseenStatusChange: hasUnseenStatusChange(watch),
+      canRerun: canRerun(watch),
       url: watch.target.url,
     };
   }
@@ -114,8 +116,15 @@ function createRow(
     tone,
     timingText: getTimingText(watch, tone, now),
     unseenStatusChange: hasUnseenStatusChange(watch),
+    canRerun: canRerun(watch),
     url: watch.target.url,
   };
+}
+
+function canRerun(watch: WatchRecord): boolean {
+  return watch.lastState?.status === "completed" &&
+    watch.lastState.conclusion !== "success" &&
+    watch.lastState.conclusion !== "cancelled";
 }
 
 function groupRowsByRepo(watches: WatchRecord[], rows: WatchRowViewModel[]): WatchGroupViewModel[] {

@@ -16,6 +16,7 @@ export type WatchControllerDeps = {
   fetchState(target: ParsedWatchTarget): Promise<WatchSnapshot>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   notify(notification: WatchNotification): Promise<void>;
+  rerunFailed?(target: ParsedWatchTarget): Promise<void>;
   now?(): Date;
   save(watches: WatchRecord[]): Promise<void>;
 };
@@ -28,6 +29,7 @@ export type WatchController = {
   clearAll(): void;
   clearFinished(): void;
   refreshRepositoryIcons(): Promise<void>;
+  rerunFailed(id: string): Promise<void>;
   pollNow(): Promise<void>;
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
@@ -140,6 +142,21 @@ export function createWatchController(
 
     async refreshRepositoryIcons() {
       await Promise.all(watches.map((watch) => refreshRepositoryIcon(watch.id, watch.target)));
+    },
+
+    async rerunFailed(id) {
+      const watch = watches.find((item) => item.id === id);
+
+      if (!watch || !deps.rerunFailed) {
+        return;
+      }
+
+      await deps.rerunFailed(watch.target);
+      updateWatch(id, (current) => ({
+        ...current,
+        active: true,
+        error: undefined,
+      }));
     },
 
     async pollNow() {
