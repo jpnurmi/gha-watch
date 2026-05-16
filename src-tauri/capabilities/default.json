@@ -26,6 +26,11 @@
           "name": "gh-usrlocal",
           "cmd": "/usr/local/bin/gh",
           "args": true
+        },
+        {
+          "name": "gh-usrbin",
+          "cmd": "/usr/bin/gh",
+          "args": true
         }
       ]
     }
