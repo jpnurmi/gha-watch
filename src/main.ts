@@ -12,7 +12,7 @@ import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel 
 import type { WatchNotification } from "./app/watchNotification";
 import { parseGitHubActionsUrl } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
-import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch } from "./platform/gh";
+import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch, resolvePrWatchTargets } from "./platform/gh";
 import { sendDesktopNotification } from "./platform/notifications";
 import { loadWatches, saveWatches } from "./platform/store";
 import { setTrayIndicator } from "./platform/tray";
@@ -51,6 +51,7 @@ const controller = createWatchController(
       : fetchWatchState,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     notify: notifyStatusChange,
+    resolvePrWatchTargets: isDemoMode ? async () => [] : resolvePrWatchTargets,
     rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
     save: saveWatches,
   },

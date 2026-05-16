@@ -1,4 +1,10 @@
-import type { ParsedWatchTarget } from "../domain/githubUrl";
+import type {
+  CheckWatchTarget,
+  JobWatchTarget,
+  ParsedWatchTarget,
+  PrWatchTarget,
+  RunWatchTarget,
+} from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
 import type { WatchTiming } from "../domain/watches";
 
@@ -52,8 +58,29 @@ type PullRequestReference = {
   number?: number | string;
 };
 
+type PrViewResponse = {
+  headRefName?: string;
+  headRefOid?: string;
+};
+
+type RunListResponse = {
+  databaseId?: number | string;
+  event?: string;
+  headSha?: string;
+  url?: string;
+};
+
+type JobsResponse = {
+  jobs?: JobReference[];
+};
+
+type JobReference = {
+  html_url?: string;
+  id?: number | string;
+};
+
 export async function fetchWatchState(
-  target: ParsedWatchTarget,
+  target: CheckWatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<WatchSnapshot> {
   try {
@@ -93,8 +120,120 @@ export async function fetchRepositoryIconUrl(
   }
 }
 
+export async function resolvePrWatchTargets(
+  target: PrWatchTarget,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<CheckWatchTarget[]> {
+  try {
+    const prResult = await executor.execute("gh", [
+      "pr",
+      "view",
+      target.prNumber,
+      "-R",
+      `${target.owner}/${target.repo}`,
+      "--json",
+      "headRefName,headRefOid",
+    ]);
+    assertSuccessfulGhResult(prResult);
+
+    const pr = parseJson<PrViewResponse>(prResult.stdout);
+    const headRefName = requiredString(pr.headRefName, "pull request head branch");
+    const headRefOid = requiredString(pr.headRefOid, "pull request head SHA");
+    const runsResult = await executor.execute("gh", [
+      "run",
+      "list",
+      "-R",
+      `${target.owner}/${target.repo}`,
+      "--event",
+      "pull_request",
+      "--branch",
+      headRefName,
+      "--limit",
+      "50",
+      "--json",
+      "databaseId,event,headSha,url",
+    ]);
+    assertSuccessfulGhResult(runsResult);
+
+    const runTargets = parseJson<RunListResponse[]>(runsResult.stdout)
+      .filter((run) => run.event === "pull_request" && run.headSha === headRefOid)
+      .map((run) => toPrRunTarget(target, run))
+      .filter((run): run is RunWatchTarget => Boolean(run));
+
+    const jobTargets = (
+      await Promise.all(runTargets.map((runTarget) => resolveRunJobTargets(runTarget, executor)))
+    ).flat();
+
+    return jobTargets.length > 0 ? jobTargets : runTargets;
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+async function resolveRunJobTargets(
+  runTarget: RunWatchTarget,
+  executor: ShellExecutor,
+): Promise<JobWatchTarget[]> {
+  const result = await executor.execute("gh", [
+    "api",
+    `repos/${runTarget.owner}/${runTarget.repo}/actions/runs/${runTarget.runId}/jobs`,
+  ]);
+  assertSuccessfulGhResult(result);
+
+  return (parseJson<JobsResponse>(result.stdout).jobs ?? [])
+    .map((job) => toPrJobTarget(runTarget, job))
+    .filter((job): job is JobWatchTarget => Boolean(job));
+}
+
+function toPrRunTarget(source: PrWatchTarget, run: RunListResponse): RunWatchTarget | undefined {
+  const runId = getRunDatabaseId(run.databaseId);
+
+  if (!runId) {
+    return undefined;
+  }
+
+  return {
+    kind: "run",
+    owner: source.owner,
+    repo: source.repo,
+    runId,
+    prNumber: source.prNumber,
+    url: run.url || `https://github.com/${source.owner}/${source.repo}/actions/runs/${runId}`,
+  };
+}
+
+function getRunDatabaseId(value: number | string | undefined): string | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return String(value);
+  }
+
+  if (typeof value === "string" && /^[1-9]\d*$/.test(value)) {
+    return value;
+  }
+
+  return undefined;
+}
+
+function toPrJobTarget(runTarget: RunWatchTarget, job: JobReference): JobWatchTarget | undefined {
+  const jobId = getRunDatabaseId(job.id);
+
+  if (!jobId) {
+    return undefined;
+  }
+
+  return {
+    kind: "job",
+    owner: runTarget.owner,
+    repo: runTarget.repo,
+    runId: runTarget.runId,
+    jobId,
+    prNumber: runTarget.prNumber,
+    url: job.html_url || `${runTarget.url}/job/${jobId}`,
+  };
+}
+
 export async function rerunFailedWatch(
-  target: ParsedWatchTarget,
+  target: CheckWatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<void> {
   const runId = target.kind === "run" ? target.runId : target.runId;

@@ -17,9 +17,18 @@ export type JobWatchTarget = {
   url: string;
 };
 
-export type ParsedWatchTarget = RunWatchTarget | JobWatchTarget;
+export type PrWatchTarget = {
+  kind: "pr";
+  owner: string;
+  repo: string;
+  prNumber: string;
+  url: string;
+};
 
-const unsupportedUrlMessage = "Paste a GitHub Actions run or job URL.";
+export type CheckWatchTarget = RunWatchTarget | JobWatchTarget;
+export type ParsedWatchTarget = CheckWatchTarget | PrWatchTarget;
+
+const unsupportedUrlMessage = "Paste a GitHub Actions run, job, or pull request URL.";
 
 export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
   let parsed: URL;
@@ -38,6 +47,16 @@ export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
   const [owner, repo, section, subSection, runId, jobSection, jobId] = parts;
   const prNumber = getPullRequestNumber(parsed.searchParams);
   const canonicalUrl = `${parsed.origin}${parsed.pathname}${prNumber ? `?pr=${prNumber}` : ""}`;
+
+  if (owner && repo && section === "pull" && isPositiveInteger(subSection)) {
+    return {
+      kind: "pr",
+      owner,
+      repo,
+      prNumber: subSection,
+      url: `${parsed.origin}/${owner}/${repo}/pull/${subSection}`,
+    };
+  }
 
   if (owner && repo && section === "actions" && subSection === "runs" && runId) {
     if (jobSection === "job" && jobId) {
@@ -80,7 +99,11 @@ export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
 
 function getPullRequestNumber(searchParams: URLSearchParams): string | undefined {
   const value = searchParams.get("pr")?.trim();
-  return value && /^[1-9]\d*$/.test(value) ? value : undefined;
+  return value && isPositiveInteger(value) ? value : undefined;
+}
+
+function isPositiveInteger(value: string | undefined): value is string {
+  return Boolean(value && /^[1-9]\d*$/.test(value));
 }
 
 function extractGitHubUrl(input: string): string {

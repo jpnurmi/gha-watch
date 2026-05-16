@@ -1,4 +1,4 @@
-import type { ParsedWatchTarget } from "./githubUrl";
+import type { CheckWatchTarget, PrWatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
 
 export type WatchTiming = {
@@ -9,7 +9,8 @@ export type WatchTiming = {
 
 export type WatchRecord = {
   id: string;
-  target: ParsedWatchTarget;
+  target: CheckWatchTarget;
+  source?: PrWatchTarget;
   label: string;
   repoIconUrl?: string;
   status: string;
@@ -20,7 +21,7 @@ export type WatchRecord = {
   error: string | undefined;
 };
 
-export function getWatchId(target: ParsedWatchTarget): string {
+export function getWatchId(target: CheckWatchTarget): string {
   if (target.kind === "run") {
     return `${target.owner}/${target.repo}/run/${target.runId}`;
   }
@@ -28,7 +29,7 @@ export function getWatchId(target: ParsedWatchTarget): string {
   return `${target.owner}/${target.repo}/job/${target.jobId}`;
 }
 
-export function getWatchLabel(target: ParsedWatchTarget): string {
+export function getWatchLabel(target: CheckWatchTarget): string {
   if (target.kind === "run") {
     return `${target.owner}/${target.repo}#${target.runId}`;
   }
@@ -36,7 +37,11 @@ export function getWatchLabel(target: ParsedWatchTarget): string {
   return `${target.owner}/${target.repo} job #${target.jobId}`;
 }
 
-export function addWatch(watches: WatchRecord[], target: ParsedWatchTarget): WatchRecord[] {
+export function addWatch(
+  watches: WatchRecord[],
+  target: CheckWatchTarget,
+  source?: PrWatchTarget,
+): WatchRecord[] {
   const id = getWatchId(target);
 
   if (watches.some((watch) => watch.id === id)) {
@@ -48,6 +53,7 @@ export function addWatch(watches: WatchRecord[], target: ParsedWatchTarget): Wat
     {
       id,
       target,
+      ...(source ? { source } : {}),
       label: getWatchLabel(target),
       status: "pending",
       lastSeenStatus: "pending",

@@ -1,4 +1,4 @@
-import type { ParsedWatchTarget } from "../domain/githubUrl";
+import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget } from "../domain/githubUrl";
 import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
 import {
   addWatch,
@@ -13,10 +13,11 @@ import type { WatchSnapshot } from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
 export type WatchControllerDeps = {
-  fetchState(target: ParsedWatchTarget): Promise<WatchSnapshot>;
+  fetchState(target: CheckWatchTarget): Promise<WatchSnapshot>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   notify(notification: WatchNotification): Promise<void>;
-  rerunFailed?(target: ParsedWatchTarget): Promise<void>;
+  resolvePrWatchTargets?(target: PrWatchTarget): Promise<CheckWatchTarget[]>;
+  rerunFailed?(target: CheckWatchTarget): Promise<void>;
   now?(): Date;
   save(watches: WatchRecord[]): Promise<void>;
 };
@@ -81,48 +82,120 @@ export function createWatchController(
     }
   }
 
+  async function loadBaselineState(id: string, target: CheckWatchTarget): Promise<void> {
+    try {
+      const snapshot = await deps.fetchState(target);
+      const status = formatWatchState(snapshot);
+      updateWatch(id, (watch) => ({
+        ...watch,
+        target: withSnapshotPrNumber(watch.target, snapshot.prNumber),
+        label: snapshot.title,
+        status,
+        lastSeenStatus: status,
+        lastState: {
+          status: snapshot.status,
+          conclusion: snapshot.conclusion,
+        },
+        timing: snapshot.timing,
+        active: !isTerminalStatus(snapshot),
+        error: undefined,
+      }));
+    } catch (error) {
+      updateWatch(id, (watch) => ({
+        ...watch,
+        status: "error",
+        lastSeenStatus: "error",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+
+  async function addCheckWatch(target: CheckWatchTarget, source?: PrWatchTarget): Promise<void> {
+    const previous = watches;
+    const next = addWatch(watches, target, source);
+
+    if (next === previous) {
+      return;
+    }
+
+    setWatches(next);
+
+    const id = getWatchId(target);
+    void refreshRepositoryIcon(id, target);
+    await loadBaselineState(id, target);
+  }
+
+  function reconcilePrWatchTargets(source: PrWatchTarget, targets: CheckWatchTarget[]): void {
+    const targetIds = new Set(targets.map(getWatchId));
+    let next = watches.filter((watch) => !isSamePrSource(watch.source, source) || targetIds.has(watch.id));
+
+    for (const target of targets) {
+      const id = getWatchId(target);
+      const existing = next.find((watch) => watch.id === id);
+
+      if (existing) {
+        next = next.map((watch) => (watch.id === id ? { ...watch, target, source } : watch));
+      } else {
+        next = addWatch(next, target, source);
+      }
+    }
+
+    setWatches(next);
+  }
+
+  async function resolvePrWatchTargets(source: PrWatchTarget): Promise<CheckWatchTarget[]> {
+    if (!deps.resolvePrWatchTargets) {
+      throw new Error("Live PR watches need GitHub PR resolution support.");
+    }
+
+    const targets = await deps.resolvePrWatchTargets(source);
+
+    if (targets.length === 0) {
+      throw new Error("No workflow runs were found for this pull request.");
+    }
+
+    return targets;
+  }
+
+  async function addPrWatch(source: PrWatchTarget): Promise<void> {
+    const targets = await resolvePrWatchTargets(source);
+    reconcilePrWatchTargets(source, targets);
+
+    for (const target of targets) {
+      void refreshRepositoryIcon(getWatchId(target), target);
+      await loadBaselineState(getWatchId(target), target);
+    }
+  }
+
+  async function refreshPrSourceWatches(): Promise<void> {
+    for (const source of getPrSources(watches)) {
+      try {
+        const targets = await resolvePrWatchTargets(source);
+        reconcilePrWatchTargets(source, targets);
+      } catch {
+        // Existing concrete run watches should keep polling even if PR resolution briefly fails.
+      }
+    }
+  }
+
   return {
     async add(target) {
-      const previous = watches;
-      const next = addWatch(watches, target);
-
-      if (next === previous) {
+      if (target.kind === "pr") {
+        await addPrWatch(target);
         return;
       }
 
-      setWatches(next);
-
-      const id = getWatchId(target);
-      void refreshRepositoryIcon(id, target);
-
-      try {
-        const snapshot = await deps.fetchState(target);
-        const status = formatWatchState(snapshot);
-        updateWatch(id, (watch) => ({
-          ...watch,
-          target: withSnapshotPrNumber(watch.target, snapshot.prNumber),
-          label: snapshot.title,
-          status,
-          lastSeenStatus: status,
-          lastState: {
-            status: snapshot.status,
-            conclusion: snapshot.conclusion,
-          },
-          timing: snapshot.timing,
-          active: !isTerminalStatus(snapshot),
-          error: undefined,
-        }));
-      } catch (error) {
-        updateWatch(id, (watch) => ({
-          ...watch,
-          status: "error",
-          lastSeenStatus: "error",
-          error: error instanceof Error ? error.message : String(error),
-        }));
-      }
+      await addCheckWatch(target);
     },
 
     remove(id) {
+      const watch = watches.find((item) => item.id === id);
+
+      if (watch?.source) {
+        setWatches(watches.filter((item) => !isSamePrSource(item.source, watch.source!)));
+        return;
+      }
+
       setWatches(removeWatch(watches, id));
     },
 
@@ -191,6 +264,7 @@ export function createWatchController(
     },
 
     async pollNow() {
+      await refreshPrSourceWatches();
       const activeWatches = watches.filter((watch) => watch.active);
 
       for (const watch of activeWatches) {
@@ -243,7 +317,7 @@ export function createWatchController(
   };
 }
 
-function withSnapshotPrNumber(target: ParsedWatchTarget, prNumber: string | undefined): ParsedWatchTarget {
+function withSnapshotPrNumber(target: CheckWatchTarget, prNumber: string | undefined): CheckWatchTarget {
   if (!prNumber || target.prNumber === prNumber) {
     return target;
   }
@@ -252,4 +326,24 @@ function withSnapshotPrNumber(target: ParsedWatchTarget, prNumber: string | unde
     ...target,
     prNumber,
   };
+}
+
+function getPrSources(watches: WatchRecord[]): PrWatchTarget[] {
+  const sources = new Map<string, PrWatchTarget>();
+
+  for (const watch of watches) {
+    if (watch.source) {
+      sources.set(getPrSourceKey(watch.source), watch.source);
+    }
+  }
+
+  return Array.from(sources.values());
+}
+
+function isSamePrSource(left: PrWatchTarget | undefined, right: PrWatchTarget): boolean {
+  return Boolean(left && getPrSourceKey(left) === getPrSourceKey(right));
+}
+
+function getPrSourceKey(source: PrWatchTarget): string {
+  return `${source.owner}/${source.repo}/pull/${source.prNumber}`;
 }

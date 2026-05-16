@@ -43,6 +43,35 @@ describe("watch operations", () => {
     expect(addWatch(first, first[0].target)).toBe(first);
   });
 
+  it("stores the source PR when adding a resolved PR run watch", () => {
+    const watches = addWatch(
+      [],
+      {
+        kind: "run",
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "123",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
+      },
+      {
+        kind: "pr",
+        owner: "getsentry",
+        repo: "sentry",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+    );
+
+    expect(watches[0].source).toEqual({
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry",
+      prNumber: "51",
+      url: "https://github.com/getsentry/sentry/pull/51",
+    });
+  });
+
   it("removes watches by id", () => {
     const watches = addWatch([], {
       kind: "run",

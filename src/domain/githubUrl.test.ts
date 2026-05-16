@@ -66,8 +66,18 @@ describe("parseGitHubActionsUrl", () => {
     });
   });
 
+  it("parses pull request URLs for live PR watches", () => {
+    expect(parseGitHubActionsUrl("https://github.com/getsentry/sentry/pull/51")).toEqual({
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry",
+      prNumber: "51",
+      url: "https://github.com/getsentry/sentry/pull/51",
+    });
+  });
+
   it("rejects unsupported URLs", () => {
     expect(() => parseGitHubActionsUrl("https://example.com/getsentry/sentry/actions/runs/1"))
-      .toThrow("Paste a GitHub Actions run or job URL.");
+      .toThrow("Paste a GitHub Actions run, job, or pull request URL.");
   });
 });

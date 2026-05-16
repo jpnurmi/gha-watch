@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch, type ShellExecutor } from "./gh";
+import {
+  fetchRepositoryIconUrl,
+  fetchWatchState,
+  rerunFailedWatch,
+  resolvePrWatchTargets,
+  type ShellExecutor,
+} from "./gh";
 
 function createExecutor(result: Awaited<ReturnType<ShellExecutor["execute"]>>): {
   executor: ShellExecutor;
@@ -12,6 +18,29 @@ function createExecutor(result: Awaited<ReturnType<ShellExecutor["execute"]>>): 
     executor: {
       async execute(program, args) {
         calls.push({ program, args });
+        return result;
+      },
+    },
+  };
+}
+
+function createSequenceExecutor(results: Array<Awaited<ReturnType<ShellExecutor["execute"]>>>): {
+  executor: ShellExecutor;
+  calls: Array<{ program: string; args: string[] }>;
+} {
+  const calls: Array<{ program: string; args: string[] }> = [];
+
+  return {
+    calls,
+    executor: {
+      async execute(program, args) {
+        calls.push({ program, args });
+        const result = results.shift();
+
+        if (!result) {
+          throw new Error("No fake result queued.");
+        }
+
         return result;
       },
     },
@@ -213,6 +242,141 @@ describe("fetchRepositoryIconUrl", () => {
       {
         program: "gh",
         args: ["api", "repos/getsentry/sentry-native"],
+      },
+    ]);
+  });
+});
+
+describe("resolvePrWatchTargets", () => {
+  it("resolves current pull request jobs by head SHA", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          headRefName: "ci/ios",
+          headRefOid: "abc123",
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          {
+            databaseId: 101,
+            event: "pull_request",
+            headSha: "abc123",
+            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
+          },
+          {
+            databaseId: 102,
+            event: "pull_request",
+            headSha: "abc123",
+            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102",
+          },
+          {
+            databaseId: 99,
+            event: "pull_request",
+            headSha: "old",
+            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/99",
+          },
+        ]),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              id: 201,
+              html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101/job/201",
+            },
+          ],
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              id: 202,
+              html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102/job/202",
+            },
+          ],
+        }),
+        stderr: "",
+      },
+    ]);
+
+    await expect(
+      resolvePrWatchTargets(
+        {
+          kind: "pr",
+          owner: "jpnurmi",
+          repo: "sentry-qml",
+          prNumber: "51",
+          url: "https://github.com/jpnurmi/sentry-qml/pull/51",
+        },
+        executor,
+      ),
+    ).resolves.toEqual([
+      {
+        kind: "job",
+        owner: "jpnurmi",
+        repo: "sentry-qml",
+        runId: "101",
+        jobId: "201",
+        prNumber: "51",
+        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101/job/201",
+      },
+      {
+        kind: "job",
+        owner: "jpnurmi",
+        repo: "sentry-qml",
+        runId: "102",
+        jobId: "202",
+        prNumber: "51",
+        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102/job/202",
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "pr",
+          "view",
+          "51",
+          "-R",
+          "jpnurmi/sentry-qml",
+          "--json",
+          "headRefName,headRefOid",
+        ],
+      },
+      {
+        program: "gh",
+        args: [
+          "run",
+          "list",
+          "-R",
+          "jpnurmi/sentry-qml",
+          "--event",
+          "pull_request",
+          "--branch",
+          "ci/ios",
+          "--limit",
+          "50",
+          "--json",
+          "databaseId,event,headSha,url",
+        ],
+      },
+      {
+        program: "gh",
+        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/101/jobs"],
+      },
+      {
+        program: "gh",
+        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/102/jobs"],
       },
     ]);
   });

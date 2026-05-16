@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
-import type { ParsedWatchTarget } from "../domain/githubUrl";
+import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
 import type { WatchRecord } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
 
-const runTarget: ParsedWatchTarget = {
+const runTarget: CheckWatchTarget = {
   kind: "run",
   owner: "getsentry",
   repo: "sentry",
@@ -12,7 +12,7 @@ const runTarget: ParsedWatchTarget = {
   url: "https://github.com/getsentry/sentry/actions/runs/123",
 };
 
-const jobTarget: ParsedWatchTarget = {
+const jobTarget: CheckWatchTarget = {
   kind: "job",
   owner: "getsentry",
   repo: "sentry",
@@ -21,25 +21,45 @@ const jobTarget: ParsedWatchTarget = {
   url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
 };
 
-function createDeps(states: WatchSnapshot[]): {
+const prTarget: PrWatchTarget = {
+  kind: "pr",
+  owner: "getsentry",
+  repo: "sentry",
+  prNumber: "51",
+  url: "https://github.com/getsentry/sentry/pull/51",
+};
+
+const prRunTarget: RunWatchTarget = {
+  kind: "run",
+  owner: "getsentry",
+  repo: "sentry",
+  runId: "789",
+  prNumber: "51",
+  url: "https://github.com/getsentry/sentry/actions/runs/789",
+};
+
+function createDeps(states: WatchSnapshot[], prResolutions: CheckWatchTarget[][] = []): {
   deps: WatchControllerDeps;
   notifications: string[];
   notificationRecords: WatchControllerDeps extends { notify(notification: infer Notification): Promise<void> }
     ? Notification[]
     : never;
-  fetches: ParsedWatchTarget[];
-  reruns: ParsedWatchTarget[];
+  fetches: CheckWatchTarget[];
+  reruns: CheckWatchTarget[];
+  prResolves: PrWatchTarget[];
 } {
   const notifications: string[] = [];
   const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
-  const fetches: ParsedWatchTarget[] = [];
-  const reruns: ParsedWatchTarget[] = [];
+  const fetches: CheckWatchTarget[] = [];
+  const reruns: CheckWatchTarget[] = [];
+  const prResolves: PrWatchTarget[] = [];
 
   return {
     notifications,
     notificationRecords,
     fetches,
     reruns,
+    prResolves,
     deps: {
       async fetchState(target) {
         fetches.push(target);
@@ -57,6 +77,16 @@ function createDeps(states: WatchSnapshot[]): {
       },
       async rerunFailed(target) {
         reruns.push(target);
+      },
+      async resolvePrWatchTargets(target) {
+        prResolves.push(target);
+        const targets = prResolutions.shift();
+
+        if (!targets) {
+          throw new Error("No fake PR resolution queued.");
+        }
+
+        return targets;
       },
       async save() {},
     },
@@ -125,6 +155,75 @@ describe("watchController", () => {
     expect(controller.getWatches()[0].target).toMatchObject({
       prNumber: "51",
     });
+  });
+
+  it("adds a live PR watch as the PR's current run watches", async () => {
+    const { deps, fetches, prResolves } = createDeps(
+      [
+        {
+          status: "queued",
+          conclusion: null,
+          title: "CI: tests",
+          prNumber: "51",
+          url: prRunTarget.url,
+        },
+      ],
+      [[prRunTarget]],
+    );
+    const controller = createWatchController(deps);
+
+    await controller.add(prTarget);
+
+    expect(prResolves).toEqual([prTarget]);
+    expect(fetches).toEqual([prRunTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/789",
+        target: prRunTarget,
+        source: prTarget,
+        label: "CI: tests",
+        status: "queued",
+        lastSeenStatus: "queued",
+      },
+    ]);
+  });
+
+  it("replaces old PR source watches when the PR head gets new runs", async () => {
+    const oldWatch: WatchRecord = {
+      id: "getsentry/sentry/run/123",
+      target: runTarget,
+      source: prTarget,
+      label: "CI: old",
+      status: "completed:cancelled",
+      lastSeenStatus: "completed:cancelled",
+      lastState: { status: "completed", conclusion: "cancelled" },
+      active: false,
+      error: undefined,
+    };
+    const { deps, notifications } = createDeps(
+      [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: tests",
+          prNumber: "51",
+          url: prRunTarget.url,
+        },
+      ],
+      [[prRunTarget]],
+    );
+    const controller = createWatchController(deps, [oldWatch]);
+
+    await controller.pollNow();
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/789",
+        source: prTarget,
+        status: "in_progress",
+      },
+    ]);
+    expect(notifications).toEqual([]);
   });
 
   it("refreshes missing pull request references for existing inactive watches", async () => {
@@ -245,6 +344,42 @@ describe("watchController", () => {
     await controller.pollNow();
 
     expect(fetches).toHaveLength(1);
+    expect(controller.getWatches()).toEqual([]);
+  });
+
+  it("removing a PR-sourced watch removes the whole live PR watch", async () => {
+    const secondPrRunTarget: RunWatchTarget = {
+      ...prRunTarget,
+      runId: "790",
+      url: "https://github.com/getsentry/sentry/actions/runs/790",
+    };
+    const controller = createWatchController(createDeps([]).deps, [
+      {
+        id: "getsentry/sentry/run/789",
+        target: prRunTarget,
+        source: prTarget,
+        label: "CI",
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+      {
+        id: "getsentry/sentry/run/790",
+        target: secondPrRunTarget,
+        source: prTarget,
+        label: "E2E",
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    controller.remove("getsentry/sentry/run/789");
+
     expect(controller.getWatches()).toEqual([]);
   });
 
