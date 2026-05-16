@@ -1,8 +1,8 @@
 # GHA Watch
 
-A minimal menu bar watcher for GitHub Actions checks.
+A minimal tray watcher for GitHub Actions checks.
 
-GHA Watch sits in the macOS menu bar, watches GitHub Actions workflow runs, jobs, or pull requests through the GitHub CLI, and sends native desktop notifications when status changes.
+GHA Watch sits in the macOS menu bar or Linux system tray, watches GitHub Actions workflow runs, jobs, or pull requests through the GitHub CLI, and sends native desktop notifications when status changes.
 
 ## Features
 
@@ -17,7 +17,7 @@ GHA Watch sits in the macOS menu bar, watches GitHub Actions workflow runs, jobs
 
 ## Requirements
 
-- macOS for the primary tray/menu bar experience.
+- macOS or Linux with a desktop environment that supports status notifier tray icons.
 - GitHub CLI installed as `gh`.
 - An authenticated GitHub CLI session:
 
@@ -25,7 +25,7 @@ GHA Watch sits in the macOS menu bar, watches GitHub Actions workflow runs, jobs
 gh auth login
 ```
 
-The app shell is built with Tauri, so Linux and Windows support should remain possible, but macOS is the primary target right now.
+On Linux, tray and notification behavior depends on the desktop environment, notification daemon, and status notifier support.
 
 ## Supported Links
 
@@ -71,6 +71,12 @@ The macOS app bundle is written to:
 
 ```text
 src-tauri/target/release/bundle/macos/GHA Watch.app
+```
+
+On Linux, the AppImage, Debian, and RPM packages are written under:
+
+```text
+src-tauri/target/release/bundle/
 ```
 
 ## License

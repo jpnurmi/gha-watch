@@ -134,6 +134,8 @@ fn show_main_window(app: &AppHandle, tray_rect: Option<Rect>) {
     if let Some(window) = app.get_webview_window("main") {
         if let Some(rect) = tray_rect {
             let _ = position_window_near_tray(&window, rect);
+        } else {
+            let _ = center_window_on_current_monitor(&window);
         }
         let _ = window.show();
         let _ = window.set_focus();
@@ -145,7 +147,9 @@ fn toggle_main_window(app: &AppHandle, tray_rect: Rect) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            let _ = position_window_near_tray(&window, tray_rect);
+            if position_window_near_tray(&window, tray_rect).is_err() {
+                let _ = center_window_on_current_monitor(&window);
+            }
             let _ = window.show();
             let _ = window.set_focus();
         }
@@ -190,6 +194,21 @@ fn position_window_near_tray(window: &tauri::WebviewWindow, tray_rect: Rect) -> 
     .clamp(min_y, max_y);
 
     window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))
+}
+
+fn center_window_on_current_monitor(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let window_size = window.outer_size()?;
+    let monitor = window.current_monitor()?.or(window.primary_monitor()?);
+    let Some(monitor) = monitor else {
+        return Ok(());
+    };
+    let work_area = monitor.work_area();
+    let x = work_area.position.x
+        + ((work_area.size.width.saturating_sub(window_size.width)) / 2) as i32;
+    let y = work_area.position.y
+        + ((work_area.size.height.saturating_sub(window_size.height)) / 2) as i32;
+
+    window.set_position(PhysicalPosition::new(x, y))
 }
 
 fn main() {
