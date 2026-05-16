@@ -140,8 +140,7 @@ fn show_main_window(app: &AppHandle, tray_rect: Option<Rect>) {
             let _ = position_window_near_top_right(&window);
         }
 
-        let _ = window.show();
-        let _ = window.set_focus();
+        show_and_focus_window(&window);
     }
 }
 
@@ -153,10 +152,20 @@ fn toggle_main_window(app: &AppHandle, tray_rect: Rect) {
             if position_window_near_tray(&window, tray_rect).is_err() {
                 let _ = position_window_near_top_right(&window);
             }
-            let _ = window.show();
-            let _ = window.set_focus();
+            show_and_focus_window(&window);
         }
     }
+}
+
+fn show_and_focus_window(window: &tauri::WebviewWindow) {
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(75));
+        let _ = window.set_focus();
+    });
 }
 
 fn position_window_near_tray(window: &tauri::WebviewWindow, tray_rect: Rect) -> Result<(), String> {
