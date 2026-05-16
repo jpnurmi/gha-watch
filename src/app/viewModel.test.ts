@@ -133,4 +133,26 @@ describe("createPopupViewModel", () => {
       ["In progress", "This check has started...", "in-progress"],
     ]);
   });
+
+  it("marks rows with unseen status changes", () => {
+    const model = createPopupViewModel([
+      watch({
+        status: "completed:success",
+        lastSeenStatus: "in_progress",
+        active: false,
+        lastState: { status: "completed", conclusion: "success" },
+      }),
+      watch({
+        id: "getsentry/sentry/run/456",
+        status: "queued",
+        lastSeenStatus: "queued",
+        lastState: { status: "queued", conclusion: null },
+      }),
+    ]);
+
+    expect(model.rows.map((row) => [row.id, row.unseenStatusChange])).toEqual([
+      ["getsentry/sentry/run/123", true],
+      ["getsentry/sentry/run/456", false],
+    ]);
+  });
 });

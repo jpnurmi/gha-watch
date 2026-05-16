@@ -23,6 +23,7 @@ describe("watch operations", () => {
         },
         label: "getsentry/sentry#123",
         status: "pending",
+        lastSeenStatus: "pending",
         lastState: undefined,
         active: true,
         error: undefined,

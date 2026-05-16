@@ -1,4 +1,4 @@
-import type { WatchRecord } from "../domain/watches";
+import { hasUnseenStatusChange, type WatchRecord } from "../domain/watches";
 
 export type RowTone =
   | "pending"
@@ -15,6 +15,7 @@ export type WatchRowViewModel = {
   statusLabel: string;
   description: string;
   tone: RowTone;
+  unseenStatusChange: boolean;
   url: string;
 };
 
@@ -64,6 +65,7 @@ function createWatchRowViewModel(watch: WatchRecord): WatchRowViewModel {
       statusLabel: "Errored",
       description: watch.error,
       tone: "error",
+      unseenStatusChange: hasUnseenStatusChange(watch),
       url: watch.target.url,
     };
   }
@@ -106,6 +108,7 @@ function createRow(
     statusLabel,
     description,
     tone,
+    unseenStatusChange: hasUnseenStatusChange(watch),
     url: watch.target.url,
   };
 }

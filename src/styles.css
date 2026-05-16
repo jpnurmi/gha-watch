@@ -409,6 +409,7 @@ input {
 }
 
 .remove-button {
+  position: relative;
   width: 22px;
   height: 22px;
   border-radius: 6px;
@@ -418,6 +419,37 @@ input {
 
 .remove-button:hover {
   opacity: 1;
+}
+
+.remove-icon {
+  line-height: 1;
+}
+
+.unseen-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #58a6ff;
+  box-shadow: 0 0 0 2px rgb(88 166 255 / 16%);
+}
+
+.remove-button.is-unseen {
+  opacity: 1;
+}
+
+.remove-button.is-unseen .remove-icon {
+  opacity: 0;
+}
+
+.remove-button.is-unseen:hover .remove-icon,
+.remove-button.is-unseen:focus-visible .remove-icon {
+  opacity: 1;
+}
+
+.remove-button.is-unseen:hover .unseen-dot,
+.remove-button.is-unseen:focus-visible .unseen-dot {
+  opacity: 0;
 }
 
 .empty {

@@ -6,12 +6,20 @@ use tauri::{
 };
 
 #[tauri::command]
-fn set_tray_indicator(app: AppHandle, status: String, tooltip: String) -> Result<(), String> {
+fn set_tray_indicator(
+    app: AppHandle,
+    status: String,
+    tooltip: String,
+    has_unseen_changes: bool,
+) -> Result<(), String> {
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_title(None::<&str>)
             .map_err(|error| error.to_string())?;
-        tray.set_icon_with_as_template(Some(tray_icon_for_status(&status)?), false)
-            .map_err(|error| error.to_string())?;
+        tray.set_icon_with_as_template(
+            Some(tray_icon_for_status(&status, has_unseen_changes)?),
+            false,
+        )
+        .map_err(|error| error.to_string())?;
         tray.set_tooltip(Some(&tooltip))
             .map_err(|error| error.to_string())?;
     }
@@ -19,12 +27,17 @@ fn set_tray_indicator(app: AppHandle, status: String, tooltip: String) -> Result
     Ok(())
 }
 
-fn tray_icon_for_status(status: &str) -> Result<Image<'static>, String> {
-    let bytes = match status {
-        "active" => include_bytes!("../icons/tray-active.png").as_slice(),
-        "cancelled" => include_bytes!("../icons/tray-cancelled.png").as_slice(),
-        "error" => include_bytes!("../icons/tray-error.png").as_slice(),
-        "success" => include_bytes!("../icons/tray-success.png").as_slice(),
+fn tray_icon_for_status(status: &str, has_unseen_changes: bool) -> Result<Image<'static>, String> {
+    let bytes = match (status, has_unseen_changes) {
+        ("active", true) => include_bytes!("../icons/tray-active-unseen.png").as_slice(),
+        ("cancelled", true) => include_bytes!("../icons/tray-cancelled-unseen.png").as_slice(),
+        ("error", true) => include_bytes!("../icons/tray-error-unseen.png").as_slice(),
+        ("success", true) => include_bytes!("../icons/tray-success-unseen.png").as_slice(),
+        (_, true) => include_bytes!("../icons/tray-idle-unseen.png").as_slice(),
+        ("active", false) => include_bytes!("../icons/tray-active.png").as_slice(),
+        ("cancelled", false) => include_bytes!("../icons/tray-cancelled.png").as_slice(),
+        ("error", false) => include_bytes!("../icons/tray-error.png").as_slice(),
+        ("success", false) => include_bytes!("../icons/tray-success.png").as_slice(),
         _ => include_bytes!("../icons/tray-idle.png").as_slice(),
     };
 
@@ -113,7 +126,7 @@ fn main() {
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
             TrayIconBuilder::with_id("main")
-                .icon(tray_icon_for_status("idle")?)
+                .icon(tray_icon_for_status("idle", false)?)
                 .icon_as_template(false)
                 .tooltip("GHA Watch")
                 .menu(&menu)

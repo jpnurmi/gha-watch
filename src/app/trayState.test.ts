@@ -25,6 +25,7 @@ describe("createTrayState", () => {
   it("uses an idle tray icon when there are no watches", () => {
     expect(createTrayState([])).toEqual({
       status: "idle",
+      hasUnseenChanges: false,
       label: "No watches",
       tooltip: "GHA Watch",
     });
@@ -33,6 +34,7 @@ describe("createTrayState", () => {
   it("uses an active tray icon when any watch is still running", () => {
     expect(createTrayState([watch({ active: true })])).toEqual({
       status: "active",
+      hasUnseenChanges: false,
       label: "1 active watch",
       tooltip: "GHA Watch: 1 active watch",
     });
@@ -49,6 +51,7 @@ describe("createTrayState", () => {
       ]),
     ).toEqual({
       status: "error",
+      hasUnseenChanges: false,
       label: "1 watch issue",
       tooltip: "GHA Watch has failed or errored watches",
     });
@@ -70,6 +73,7 @@ describe("createTrayState", () => {
       ]),
     ).toEqual({
       status: "cancelled",
+      hasUnseenChanges: false,
       label: "1 cancelled watch",
       tooltip: "GHA Watch has cancelled watches",
     });
@@ -86,6 +90,25 @@ describe("createTrayState", () => {
       ]),
     ).toEqual({
       status: "success",
+      hasUnseenChanges: false,
+      label: "All watches complete",
+      tooltip: "GHA Watch: all watches complete",
+    });
+  });
+
+  it("flags unseen status changes independently from current status", () => {
+    expect(
+      createTrayState([
+        watch({
+          active: false,
+          status: "completed:success",
+          lastSeenStatus: "in_progress",
+          lastState: { status: "completed", conclusion: "success" },
+        }),
+      ]),
+    ).toEqual({
+      status: "success",
+      hasUnseenChanges: true,
       label: "All watches complete",
       tooltip: "GHA Watch: all watches complete",
     });

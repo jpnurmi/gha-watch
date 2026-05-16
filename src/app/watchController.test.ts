@@ -68,6 +68,7 @@ describe("watchController", () => {
       {
         id: "getsentry/sentry/run/123",
         status: "queued",
+        lastSeenStatus: "queued",
         active: true,
         lastState: { status: "queued", conclusion: null },
       },
@@ -192,8 +193,106 @@ describe("watchController", () => {
     expect(controller.getWatches()).toMatchObject([
       {
         status: "completed:success",
+        lastSeenStatus: "in_progress",
         active: false,
         lastState: { status: "completed", conclusion: "success" },
+      },
+    ]);
+  });
+
+  it("marks a status change seen when requested", async () => {
+    const { deps } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.add(runTarget);
+    await controller.pollNow();
+    controller.markSeen("getsentry/sentry/run/123");
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+      },
+    ]);
+  });
+
+  it("marks all status changes seen when requested", async () => {
+    const { deps } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: job",
+        url: jobTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "failure",
+        title: "CI: job",
+        url: jobTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.add(runTarget);
+    await controller.add(jobTarget);
+    await controller.pollNow();
+    controller.markAllSeen();
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+      },
+      {
+        status: "completed:failure",
+        lastSeenStatus: "completed:failure",
+      },
+    ]);
+  });
+
+  it("normalizes existing watches without seen status as seen on startup", () => {
+    const { deps } = createDeps([]);
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry/run/123",
+        target: runTarget,
+        label: "CI: tests",
+        status: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
       },
     ]);
   });

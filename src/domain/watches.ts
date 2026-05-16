@@ -6,6 +6,7 @@ export type WatchRecord = {
   target: ParsedWatchTarget;
   label: string;
   status: string;
+  lastSeenStatus?: string;
   lastState: WatchState | undefined;
   active: boolean;
   error: string | undefined;
@@ -41,6 +42,7 @@ export function addWatch(watches: WatchRecord[], target: ParsedWatchTarget): Wat
       target,
       label: getWatchLabel(target),
       status: "pending",
+      lastSeenStatus: "pending",
       lastState: undefined,
       active: true,
       error: undefined,
@@ -50,4 +52,23 @@ export function addWatch(watches: WatchRecord[], target: ParsedWatchTarget): Wat
 
 export function removeWatch(watches: WatchRecord[], id: string): WatchRecord[] {
   return watches.filter((watch) => watch.id !== id);
+}
+
+export function markWatchSeen(watches: WatchRecord[], id: string): WatchRecord[] {
+  return watches.map((watch) => (watch.id === id ? { ...watch, lastSeenStatus: watch.status } : watch));
+}
+
+export function markAllWatchesSeen(watches: WatchRecord[]): WatchRecord[] {
+  return watches.map((watch) => ({ ...watch, lastSeenStatus: watch.status }));
+}
+
+export function normalizeWatchSeenStatus(watch: WatchRecord): WatchRecord {
+  return {
+    ...watch,
+    lastSeenStatus: watch.lastSeenStatus ?? watch.status,
+  };
+}
+
+export function hasUnseenStatusChange(watch: WatchRecord): boolean {
+  return Boolean(watch.lastSeenStatus && watch.status !== watch.lastSeenStatus);
 }

@@ -1,6 +1,14 @@
 import type { ParsedWatchTarget } from "../domain/githubUrl";
 import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
-import { addWatch, getWatchId, removeWatch, type WatchRecord } from "../domain/watches";
+import {
+  addWatch,
+  getWatchId,
+  markAllWatchesSeen,
+  markWatchSeen,
+  normalizeWatchSeenStatus,
+  removeWatch,
+  type WatchRecord,
+} from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
 
 export type WatchNotification = {
@@ -17,6 +25,8 @@ export type WatchControllerDeps = {
 export type WatchController = {
   add(target: ParsedWatchTarget): Promise<void>;
   remove(id: string): void;
+  markSeen(id: string): void;
+  markAllSeen(): void;
   clearAll(): void;
   clearFinished(): void;
   pollNow(): Promise<void>;
@@ -28,7 +38,7 @@ export function createWatchController(
   deps: WatchControllerDeps,
   initialWatches: WatchRecord[] = [],
 ): WatchController {
-  let watches: WatchRecord[] = initialWatches;
+  let watches: WatchRecord[] = initialWatches.map(normalizeWatchSeenStatus);
   const listeners = new Set<() => void>();
 
   function emitChange(): void {
@@ -62,10 +72,12 @@ export function createWatchController(
 
       try {
         const snapshot = await deps.fetchState(target);
+        const status = formatWatchState(snapshot);
         updateWatch(id, (watch) => ({
           ...watch,
           label: snapshot.title,
-          status: formatWatchState(snapshot),
+          status,
+          lastSeenStatus: status,
           lastState: {
             status: snapshot.status,
             conclusion: snapshot.conclusion,
@@ -77,6 +89,7 @@ export function createWatchController(
         updateWatch(id, (watch) => ({
           ...watch,
           status: "error",
+          lastSeenStatus: "error",
           error: error instanceof Error ? error.message : String(error),
         }));
       }
@@ -84,6 +97,14 @@ export function createWatchController(
 
     remove(id) {
       setWatches(removeWatch(watches, id));
+    },
+
+    markSeen(id) {
+      setWatches(markWatchSeen(watches, id));
+    },
+
+    markAllSeen() {
+      setWatches(markAllWatchesSeen(watches));
     },
 
     clearAll() {
@@ -103,12 +124,14 @@ export function createWatchController(
           status: snapshot.status,
           conclusion: snapshot.conclusion,
         };
+        const status = formatWatchState(nextState);
         const transition = getStatusTransition(watch.lastState, nextState);
 
         updateWatch(watch.id, (current) => ({
           ...current,
           label: snapshot.title,
-          status: formatWatchState(nextState),
+          status,
+          lastSeenStatus: current.lastSeenStatus ?? current.status,
           lastState: nextState,
           active: !isTerminalStatus(nextState),
           error: undefined,

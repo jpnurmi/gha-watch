@@ -74,6 +74,11 @@ window.addEventListener("keydown", (event) => {
     void hideMainWindow();
   }
 });
+void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+  if (!focused) {
+    markAllSeenStatusChanges();
+  }
+});
 
 function render(): void {
   const watches = controller.getWatches();
@@ -220,13 +225,16 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
 
 function renderWatch(row: WatchRowViewModel): string {
   return `
-    <li class="watch is-${row.tone}">
+    <li class="watch is-${row.tone}${row.unseenStatusChange ? " has-unseen-change" : ""}">
       ${renderStatusIcon(row)}
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
         <span class="watch-label">${escapeHtml(row.label)}</span>
         <span class="watch-status">${escapeHtml(row.statusLabel)} - ${escapeHtml(row.description)}</span>
       </button>
-      <button class="remove-button" type="button" data-action="remove" data-id="${escapeHtml(row.id)}" title="Remove watch" aria-label="Remove ${escapeHtml(row.label)}">&times;</button>
+      <button class="remove-button${row.unseenStatusChange ? " is-unseen" : ""}" type="button" data-action="remove" data-id="${escapeHtml(row.id)}" title="Remove watch" aria-label="Remove ${escapeHtml(row.label)}">
+        <span class="remove-icon" aria-hidden="true">&times;</span>
+        ${row.unseenStatusChange ? `<span class="unseen-dot" aria-hidden="true"></span>` : ""}
+      </button>
     </li>
   `;
 }
@@ -311,9 +319,11 @@ function bindEvents(): void {
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open"]')) {
     button.addEventListener("click", () => {
-      const watch = controller.getWatches().find((item) => item.id === button.dataset.id);
+      const id = button.dataset.id || "";
+      const watch = controller.getWatches().find((item) => item.id === id);
 
       if (watch) {
+        controller.markSeen(watch.id);
         void openUrl(watch.target.url);
       }
     });
@@ -322,10 +332,19 @@ function bindEvents(): void {
 
 async function hideMainWindow(): Promise<void> {
   try {
+    markAllSeenStatusChanges();
     await getCurrentWindow().hide();
   } catch (error) {
     console.error("Could not hide GHA Watch window.", error);
   }
+}
+
+function markAllSeenStatusChanges(): void {
+  if (!createTrayState(controller.getWatches()).hasUnseenChanges) {
+    return;
+  }
+
+  controller.markAllSeen();
 }
 
 async function addWatch(url: string): Promise<void> {
@@ -363,7 +382,7 @@ async function poll(): Promise<void> {
 
 async function updateTrayIndicator(): Promise<void> {
   const summary = createTrayState(controller.getWatches());
-  await setTrayIndicator(summary.status, summary.tooltip);
+  await setTrayIndicator(summary.status, summary.tooltip, summary.hasUnseenChanges);
 }
 
 function escapeHtml(value: string): string {
