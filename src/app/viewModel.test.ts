@@ -175,6 +175,23 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("exposes muted pull request references for watch titles", () => {
+    const model = createPopupViewModel([
+      watch({
+        target: {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "123",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/actions/runs/123?pr=51",
+        },
+      }),
+    ]);
+
+    expect(model.rows[0].prReference).toBe("#51");
+  });
+
   it("formats queued, running, and completed timing text", () => {
     const now = new Date("2026-05-16T12:10:00Z");
     const model = createPopupViewModel(

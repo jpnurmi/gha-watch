@@ -108,6 +108,45 @@ describe("watchController", () => {
     expect(notifications).toEqual([]);
   });
 
+  it("stores pull request references returned by GitHub", async () => {
+    const { deps } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "CI: tests",
+        prNumber: "51",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.add(runTarget);
+
+    expect(controller.getWatches()[0].target).toMatchObject({
+      prNumber: "51",
+    });
+  });
+
+  it("refreshes missing pull request references for existing inactive watches", async () => {
+    const { deps, notifications } = createDeps([
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        prNumber: "51",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [existingWatch()]);
+
+    await controller.refreshWatchMetadata();
+
+    expect(controller.getWatches()[0].target).toMatchObject({
+      prNumber: "51",
+    });
+    expect(notifications).toEqual([]);
+  });
+
   it("notifies only when a watched status changes", async () => {
     const { deps, notifications } = createDeps([
       {

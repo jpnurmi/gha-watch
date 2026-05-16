@@ -14,6 +14,19 @@ describe("parseGitHubActionsUrl", () => {
     });
   });
 
+  it("preserves pull request references from workflow run URLs", () => {
+    expect(
+      parseGitHubActionsUrl("https://github.com/getsentry/sentry/actions/runs/1234567890?pr=51"),
+    ).toEqual({
+      kind: "run",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "1234567890",
+      prNumber: "51",
+      url: "https://github.com/getsentry/sentry/actions/runs/1234567890?pr=51",
+    });
+  });
+
   it("parses markdown links containing workflow run URLs", () => {
     expect(
       parseGitHubActionsUrl(

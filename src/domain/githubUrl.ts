@@ -3,6 +3,7 @@ export type RunWatchTarget = {
   owner: string;
   repo: string;
   runId: string;
+  prNumber?: string;
   url: string;
 };
 
@@ -12,6 +13,7 @@ export type JobWatchTarget = {
   repo: string;
   jobId: string;
   runId?: string;
+  prNumber?: string;
   url: string;
 };
 
@@ -34,7 +36,8 @@ export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
 
   const parts = parsed.pathname.split("/").filter(Boolean);
   const [owner, repo, section, subSection, runId, jobSection, jobId] = parts;
-  const canonicalUrl = `${parsed.origin}${parsed.pathname}`;
+  const prNumber = getPullRequestNumber(parsed.searchParams);
+  const canonicalUrl = `${parsed.origin}${parsed.pathname}${prNumber ? `?pr=${prNumber}` : ""}`;
 
   if (owner && repo && section === "actions" && subSection === "runs" && runId) {
     if (jobSection === "job" && jobId) {
@@ -44,6 +47,7 @@ export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
         repo,
         runId,
         jobId,
+        ...(prNumber ? { prNumber } : {}),
         url: canonicalUrl,
       };
     }
@@ -54,6 +58,7 @@ export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
         owner,
         repo,
         runId,
+        ...(prNumber ? { prNumber } : {}),
         url: canonicalUrl,
       };
     }
@@ -65,11 +70,17 @@ export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
       owner,
       repo,
       jobId: subSection,
+      ...(prNumber ? { prNumber } : {}),
       url: canonicalUrl,
     };
   }
 
   throw new Error(unsupportedUrlMessage);
+}
+
+function getPullRequestNumber(searchParams: URLSearchParams): string | undefined {
+  const value = searchParams.get("pr")?.trim();
+  return value && /^[1-9]\d*$/.test(value) ? value : undefined;
 }
 
 function extractGitHubUrl(input: string): string {

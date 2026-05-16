@@ -441,7 +441,11 @@ input {
 }
 
 .watch-label {
+  display: flex;
   min-width: 0;
+  max-width: 100%;
+  align-items: baseline;
+  gap: 6px;
   flex: 0 1 auto;
   overflow: hidden;
   color: #eef1f5;
@@ -450,6 +454,19 @@ input {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.watch-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watch-pr-reference {
+  flex: 0 0 auto;
+  color: rgb(238 241 245 / 48%);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .watch-status {

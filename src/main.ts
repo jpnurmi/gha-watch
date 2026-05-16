@@ -71,6 +71,7 @@ controller.subscribe(() => {
 render();
 void updateTrayIndicator();
 void controller.refreshRepositoryIcons();
+void controller.refreshWatchMetadata();
 window.setInterval(() => {
   void poll();
 }, pollIntervalMs);
@@ -279,7 +280,10 @@ function renderWatch(row: WatchRowViewModel): string {
     <li class="watch is-${row.tone}${row.unseenStatusChange ? " has-unseen-change" : ""}">
       ${renderStatusIcon(row)}
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
-        <span class="watch-label">${escapeHtml(row.label)}</span>
+        <span class="watch-label">
+          <span class="watch-title-text">${escapeHtml(row.label)}</span>
+          ${row.prReference ? `<span class="watch-pr-reference">${escapeHtml(row.prReference)}</span>` : ""}
+        </span>
         <span class="watch-status">${escapeHtml(row.statusLabel)} - ${escapeHtml(row.description)}</span>
         ${row.timingText ? `<span class="watch-timing">${escapeHtml(row.timingText)}</span>` : ""}
       </button>

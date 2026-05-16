@@ -14,6 +14,7 @@ export type ShellExecutor = {
 
 export type WatchSnapshot = WatchState & {
   title: string;
+  prNumber?: string;
   timing?: WatchTiming;
   url: string;
 };
@@ -21,12 +22,13 @@ export type WatchSnapshot = WatchState & {
 type RunViewResponse = {
   status?: string;
   conclusion?: string | null;
-  createdAt?: string;
-  displayTitle?: string;
-  startedAt?: string;
-  updatedAt?: string;
-  workflowName?: string;
-  url?: string;
+  created_at?: string;
+  display_title?: string;
+  html_url?: string;
+  name?: string;
+  pull_requests?: PullRequestReference[];
+  run_started_at?: string;
+  updated_at?: string;
 };
 
 type JobViewResponse = {
@@ -46,6 +48,10 @@ type RepositoryViewResponse = {
   };
 };
 
+type PullRequestReference = {
+  number?: number | string;
+};
+
 export async function fetchWatchState(
   target: ParsedWatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
@@ -53,13 +59,8 @@ export async function fetchWatchState(
   try {
     if (target.kind === "run") {
       const result = await executor.execute("gh", [
-        "run",
-        "view",
-        target.runId,
-        "-R",
-        `${target.owner}/${target.repo}`,
-        "--json",
-        "status,conclusion,url,workflowName,displayTitle,createdAt,startedAt,updatedAt",
+        "api",
+        `repos/${target.owner}/${target.repo}/actions/runs/${target.runId}`,
       ]);
 
       assertSuccessfulGhResult(result);
@@ -151,17 +152,19 @@ export function createTauriShellExecutor(): ShellExecutor {
 function toRunSnapshot(fallbackUrl: string, response: RunViewResponse): WatchSnapshot {
   const status = requiredString(response.status, "run status");
   const timing = compactTiming({
-    queuedAt: response.createdAt,
-    startedAt: response.startedAt,
-    completedAt: status === "completed" ? response.updatedAt : undefined,
+    queuedAt: response.created_at,
+    startedAt: response.run_started_at,
+    completedAt: status === "completed" ? response.updated_at : undefined,
   });
+  const prNumber = getPullRequestNumber(response.pull_requests);
 
   return {
     status,
     conclusion: normalizeConclusion(response.conclusion),
-    title: joinTitle(response.workflowName, response.displayTitle),
+    title: joinTitle(response.name, response.display_title),
+    ...(prNumber ? { prNumber } : {}),
     ...(timing ? { timing } : {}),
-    url: response.url || fallbackUrl,
+    url: response.html_url || fallbackUrl,
   };
 }
 
@@ -203,6 +206,20 @@ function joinTitle(prefix: string | undefined, title: string | undefined): strin
   }
 
   return cleanTitle || cleanPrefix || "GitHub Actions";
+}
+
+function getPullRequestNumber(pullRequests: PullRequestReference[] | undefined): string | undefined {
+  const number = pullRequests?.[0]?.number;
+
+  if (typeof number === "number" && Number.isInteger(number) && number > 0) {
+    return String(number);
+  }
+
+  if (typeof number === "string" && /^[1-9]\d*$/.test(number)) {
+    return number;
+  }
+
+  return undefined;
 }
 
 function normalizeConclusion(conclusion: string | null | undefined): string | null {

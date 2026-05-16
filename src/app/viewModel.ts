@@ -12,6 +12,7 @@ export type RowTone =
 export type WatchRowViewModel = {
   id: string;
   label: string;
+  prReference?: string;
   statusLabel: string;
   description: string;
   tone: RowTone;
@@ -65,6 +66,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
     return {
       id: watch.id,
       label: watch.label,
+      prReference: getPullRequestReference(watch),
       statusLabel: "Errored",
       description: watch.error,
       tone: "error",
@@ -111,6 +113,7 @@ function createRow(
   return {
     id: watch.id,
     label: watch.label,
+    prReference: getPullRequestReference(watch),
     statusLabel,
     description,
     tone,
@@ -119,6 +122,10 @@ function createRow(
     canRerun: canRerun(watch),
     url: watch.target.url,
   };
+}
+
+function getPullRequestReference(watch: WatchRecord): string | undefined {
+  return watch.target.prNumber ? `#${watch.target.prNumber}` : undefined;
 }
 
 function canRerun(watch: WatchRecord): boolean {

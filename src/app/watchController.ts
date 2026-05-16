@@ -29,6 +29,7 @@ export type WatchController = {
   clearAll(): void;
   clearFinished(): void;
   refreshRepositoryIcons(): Promise<void>;
+  refreshWatchMetadata(): Promise<void>;
   rerunFailed(id: string): Promise<void>;
   pollNow(): Promise<void>;
   getWatches(): WatchRecord[];
@@ -99,6 +100,7 @@ export function createWatchController(
         const status = formatWatchState(snapshot);
         updateWatch(id, (watch) => ({
           ...watch,
+          target: withSnapshotPrNumber(watch.target, snapshot.prNumber),
           label: snapshot.title,
           status,
           lastSeenStatus: status,
@@ -144,6 +146,35 @@ export function createWatchController(
       await Promise.all(watches.map((watch) => refreshRepositoryIcon(watch.id, watch.target)));
     },
 
+    async refreshWatchMetadata() {
+      const watchesMissingMetadata = watches.filter((watch) => !watch.target.prNumber);
+
+      for (const watch of watchesMissingMetadata) {
+        try {
+          const snapshot = await deps.fetchState(watch.target);
+          const nextState = {
+            status: snapshot.status,
+            conclusion: snapshot.conclusion,
+          };
+          const status = formatWatchState(nextState);
+
+          updateWatch(watch.id, (current) => ({
+            ...current,
+            target: withSnapshotPrNumber(current.target, snapshot.prNumber),
+            label: snapshot.title,
+            status,
+            lastSeenStatus: current.lastSeenStatus ?? current.status,
+            lastState: nextState,
+            timing: snapshot.timing,
+            active: !isTerminalStatus(nextState),
+            error: undefined,
+          }));
+        } catch {
+          // Metadata refresh should not turn existing watches into error rows.
+        }
+      }
+    },
+
     async rerunFailed(id) {
       const watch = watches.find((item) => item.id === id);
 
@@ -175,6 +206,7 @@ export function createWatchController(
         updateWatch(watch.id, (current) => {
           const nextWatch = {
             ...current,
+            target: withSnapshotPrNumber(current.target, snapshot.prNumber),
             label: snapshot.title,
             status,
             lastSeenStatus: current.lastSeenStatus ?? current.status,
@@ -208,5 +240,16 @@ export function createWatchController(
         listeners.delete(listener);
       };
     },
+  };
+}
+
+function withSnapshotPrNumber(target: ParsedWatchTarget, prNumber: string | undefined): ParsedWatchTarget {
+  if (!prNumber || target.prNumber === prNumber) {
+    return target;
+  }
+
+  return {
+    ...target,
+    prNumber,
   };
 }

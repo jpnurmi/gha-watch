@@ -19,18 +19,19 @@ function createExecutor(result: Awaited<ReturnType<ShellExecutor["execute"]>>): 
 }
 
 describe("fetchWatchState", () => {
-  it("fetches run state via gh run view", async () => {
+  it("fetches run state and pull request references via gh api", async () => {
     const { executor, calls } = createExecutor({
       code: 0,
       stdout: JSON.stringify({
         status: "in_progress",
         conclusion: "",
-        displayTitle: "Run tests",
-        workflowName: "CI",
-        createdAt: "2026-05-16T12:00:00Z",
-        startedAt: "2026-05-16T12:02:00Z",
-        updatedAt: "2026-05-16T12:03:00Z",
-        url: "https://github.com/getsentry/sentry/actions/runs/123",
+        display_title: "Run tests",
+        name: "CI",
+        created_at: "2026-05-16T12:00:00Z",
+        run_started_at: "2026-05-16T12:02:00Z",
+        updated_at: "2026-05-16T12:03:00Z",
+        html_url: "https://github.com/getsentry/sentry/actions/runs/123",
+        pull_requests: [{ number: 51 }],
       }),
       stderr: "",
     });
@@ -50,6 +51,7 @@ describe("fetchWatchState", () => {
       status: "in_progress",
       conclusion: null,
       title: "CI: Run tests",
+      prNumber: "51",
       timing: {
         queuedAt: "2026-05-16T12:00:00Z",
         startedAt: "2026-05-16T12:02:00Z",
@@ -60,15 +62,7 @@ describe("fetchWatchState", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: [
-          "run",
-          "view",
-          "123",
-          "-R",
-          "getsentry/sentry",
-          "--json",
-          "status,conclusion,url,workflowName,displayTitle,createdAt,startedAt,updatedAt",
-        ],
+        args: ["api", "repos/getsentry/sentry/actions/runs/123"],
       },
     ]);
   });
@@ -127,9 +121,9 @@ describe("fetchWatchState", () => {
       stdout: JSON.stringify({
         status: "in_progress",
         conclusion: "",
-        displayTitle: "CI",
-        workflowName: "CI",
-        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/123",
+        display_title: "CI",
+        name: "CI",
+        html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/123",
       }),
       stderr: "",
     });
