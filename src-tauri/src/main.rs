@@ -1,8 +1,10 @@
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, PhysicalPosition, Rect, WindowEvent,
+    AppHandle, Manager, PhysicalPosition, Rect, WindowEvent,
 };
 #[cfg(not(target_os = "macos"))]
 use tauri_plugin_notification::NotificationExt;
