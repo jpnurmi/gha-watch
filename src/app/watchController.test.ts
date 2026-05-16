@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
 import type { ParsedWatchTarget } from "../domain/githubUrl";
+import type { WatchRecord } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
 
 const runTarget: ParsedWatchTarget = {
@@ -23,13 +24,18 @@ const jobTarget: ParsedWatchTarget = {
 function createDeps(states: WatchSnapshot[]): {
   deps: WatchControllerDeps;
   notifications: string[];
+  notificationRecords: WatchControllerDeps extends { notify(notification: infer Notification): Promise<void> }
+    ? Notification[]
+    : never;
   fetches: ParsedWatchTarget[];
 } {
   const notifications: string[] = [];
+  const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
   const fetches: ParsedWatchTarget[] = [];
 
   return {
     notifications,
+    notificationRecords,
     fetches,
     deps: {
       async fetchState(target) {
@@ -43,10 +49,24 @@ function createDeps(states: WatchSnapshot[]): {
         return state;
       },
       async notify(notification) {
+        notificationRecords.push(notification);
         notifications.push(`${notification.title}: ${notification.body}`);
       },
       async save() {},
     },
+  };
+}
+
+function existingWatch(): WatchRecord {
+  return {
+    id: "getsentry/sentry/run/123",
+    target: runTarget,
+    label: "CI: tests",
+    status: "completed:success",
+    lastSeenStatus: "completed:success",
+    lastState: { status: "completed", conclusion: "success" },
+    active: false,
+    error: undefined,
   };
 }
 
@@ -57,6 +77,9 @@ describe("watchController", () => {
         status: "queued",
         conclusion: null,
         title: "CI: tests",
+        timing: {
+          queuedAt: "2026-05-16T12:00:00Z",
+        },
         url: runTarget.url,
       },
     ]);
@@ -69,6 +92,9 @@ describe("watchController", () => {
         id: "getsentry/sentry/run/123",
         status: "queued",
         lastSeenStatus: "queued",
+        timing: {
+          queuedAt: "2026-05-16T12:00:00Z",
+        },
         active: true,
         lastState: { status: "queued", conclusion: null },
       },
@@ -96,7 +122,59 @@ describe("watchController", () => {
     await controller.add(runTarget);
     await controller.pollNow();
 
-    expect(notifications).toEqual(["CI: tests: queued -> in_progress"]);
+    expect(notifications).toEqual([
+      "CI: tests: getsentry/sentry\nIn progress - This check has started...\nWas Queued",
+    ]);
+  });
+
+  it("includes repo, status, and timing details in status change notifications", async () => {
+    const { deps, notificationRecords } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        timing: {
+          startedAt: "2026-05-16T12:02:00Z",
+        },
+        url: runTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        timing: {
+          startedAt: "2026-05-16T12:02:00Z",
+          completedAt: "2026-05-16T12:09:00Z",
+        },
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController({
+      ...deps,
+      now: () => new Date("2026-05-16T12:10:00Z"),
+    });
+
+    await controller.add(runTarget);
+    await controller.pollNow();
+
+    expect(notificationRecords).toEqual([
+      {
+        title: "CI: tests",
+        body:
+          "getsentry/sentry\n" +
+          "Successful - This check was successful.\n" +
+          "Completed 1m ago · 7m\n" +
+          "Was In progress",
+        largeBody:
+          "getsentry/sentry\n" +
+          "Successful - This check was successful.\n" +
+          "Completed 1m ago · 7m\n" +
+          "Was In progress",
+        summary: "getsentry/sentry",
+        group: "getsentry/sentry",
+        requireInteraction: true,
+      },
+    ]);
   });
 
   it("removing a watch stops future polls", async () => {
@@ -314,6 +392,28 @@ describe("watchController", () => {
       {
         id: "getsentry/sentry/job/456",
         label: "CI: test (macos)",
+      },
+    ]);
+  });
+
+  it("refreshes missing repository icons for saved watches", async () => {
+    const { deps } = createDeps([]);
+    const controller = createWatchController(
+      {
+        ...deps,
+        async fetchRepositoryIconUrl(target) {
+          expect(target).toBe(runTarget);
+          return "https://avatars.githubusercontent.com/u/1396951?v=4";
+        },
+      },
+      [existingWatch()],
+    );
+
+    await controller.refreshRepositoryIcons();
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
       },
     ]);
   });

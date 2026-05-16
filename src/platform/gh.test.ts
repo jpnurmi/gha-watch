@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchWatchState, type ShellExecutor } from "./gh";
+import { fetchRepositoryIconUrl, fetchWatchState, type ShellExecutor } from "./gh";
 
 function createExecutor(result: Awaited<ReturnType<ShellExecutor["execute"]>>): {
   executor: ShellExecutor;
@@ -27,6 +27,9 @@ describe("fetchWatchState", () => {
         conclusion: "",
         displayTitle: "Run tests",
         workflowName: "CI",
+        createdAt: "2026-05-16T12:00:00Z",
+        startedAt: "2026-05-16T12:02:00Z",
+        updatedAt: "2026-05-16T12:03:00Z",
         url: "https://github.com/getsentry/sentry/actions/runs/123",
       }),
       stderr: "",
@@ -47,6 +50,10 @@ describe("fetchWatchState", () => {
       status: "in_progress",
       conclusion: null,
       title: "CI: Run tests",
+      timing: {
+        queuedAt: "2026-05-16T12:00:00Z",
+        startedAt: "2026-05-16T12:02:00Z",
+      },
       url: "https://github.com/getsentry/sentry/actions/runs/123",
     });
 
@@ -60,7 +67,7 @@ describe("fetchWatchState", () => {
           "-R",
           "getsentry/sentry",
           "--json",
-          "status,conclusion,url,workflowName,displayTitle",
+          "status,conclusion,url,workflowName,displayTitle,createdAt,startedAt,updatedAt",
         ],
       },
     ]);
@@ -74,6 +81,9 @@ describe("fetchWatchState", () => {
         conclusion: "failure",
         name: "test (macos)",
         workflow_name: "CI",
+        created_at: "2026-05-16T12:00:00Z",
+        started_at: "2026-05-16T12:02:00Z",
+        completed_at: "2026-05-16T12:09:00Z",
         html_url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
       }),
       stderr: "",
@@ -95,6 +105,11 @@ describe("fetchWatchState", () => {
       status: "completed",
       conclusion: "failure",
       title: "CI: test (macos)",
+      timing: {
+        queuedAt: "2026-05-16T12:00:00Z",
+        startedAt: "2026-05-16T12:02:00Z",
+        completedAt: "2026-05-16T12:09:00Z",
+      },
       url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
     });
 
@@ -175,5 +190,36 @@ describe("fetchWatchState", () => {
         executor,
       ),
     ).rejects.toThrow("gh is not authenticated. Run `gh auth login` and try again.");
+  });
+});
+
+describe("fetchRepositoryIconUrl", () => {
+  it("fetches the repository owner avatar URL via gh api", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        owner: {
+          avatar_url: "https://avatars.githubusercontent.com/u/1396951?v=4",
+        },
+      }),
+      stderr: "",
+    });
+
+    await expect(
+      fetchRepositoryIconUrl(
+        {
+          owner: "getsentry",
+          repo: "sentry-native",
+        },
+        executor,
+      ),
+    ).resolves.toBe("https://avatars.githubusercontent.com/u/1396951?v=4");
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry-native"],
+      },
+    ]);
   });
 });

@@ -1,5 +1,6 @@
 import type { ParsedWatchTarget } from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
+import type { WatchTiming } from "../domain/watches";
 
 export type ShellResult = {
   code: number;
@@ -13,13 +14,17 @@ export type ShellExecutor = {
 
 export type WatchSnapshot = WatchState & {
   title: string;
+  timing?: WatchTiming;
   url: string;
 };
 
 type RunViewResponse = {
   status?: string;
   conclusion?: string | null;
+  createdAt?: string;
   displayTitle?: string;
+  startedAt?: string;
+  updatedAt?: string;
   workflowName?: string;
   url?: string;
 };
@@ -27,9 +32,18 @@ type RunViewResponse = {
 type JobViewResponse = {
   status?: string;
   conclusion?: string | null;
+  completed_at?: string | null;
+  created_at?: string;
   name?: string;
+  started_at?: string | null;
   workflow_name?: string;
   html_url?: string;
+};
+
+type RepositoryViewResponse = {
+  owner?: {
+    avatar_url?: string;
+  };
 };
 
 export async function fetchWatchState(
@@ -45,7 +59,7 @@ export async function fetchWatchState(
         "-R",
         `${target.owner}/${target.repo}`,
         "--json",
-        "status,conclusion,url,workflowName,displayTitle",
+        "status,conclusion,url,workflowName,displayTitle,createdAt,startedAt,updatedAt",
       ]);
 
       assertSuccessfulGhResult(result);
@@ -59,6 +73,20 @@ export async function fetchWatchState(
 
     assertSuccessfulGhResult(result);
     return toJobSnapshot(target.url, parseJson<JobViewResponse>(result.stdout));
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function fetchRepositoryIconUrl(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<string | undefined> {
+  try {
+    const result = await executor.execute("gh", ["api", `repos/${target.owner}/${target.repo}`]);
+
+    assertSuccessfulGhResult(result);
+    return parseJson<RepositoryViewResponse>(result.stdout).owner?.avatar_url;
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -95,21 +123,45 @@ export function createTauriShellExecutor(): ShellExecutor {
 }
 
 function toRunSnapshot(fallbackUrl: string, response: RunViewResponse): WatchSnapshot {
+  const status = requiredString(response.status, "run status");
+  const timing = compactTiming({
+    queuedAt: response.createdAt,
+    startedAt: response.startedAt,
+    completedAt: status === "completed" ? response.updatedAt : undefined,
+  });
+
   return {
-    status: requiredString(response.status, "run status"),
+    status,
     conclusion: normalizeConclusion(response.conclusion),
     title: joinTitle(response.workflowName, response.displayTitle),
+    ...(timing ? { timing } : {}),
     url: response.url || fallbackUrl,
   };
 }
 
 function toJobSnapshot(fallbackUrl: string, response: JobViewResponse): WatchSnapshot {
+  const timing = compactTiming({
+    queuedAt: response.created_at,
+    startedAt: response.started_at ?? undefined,
+    completedAt: response.completed_at ?? undefined,
+  });
+
   return {
     status: requiredString(response.status, "job status"),
     conclusion: normalizeConclusion(response.conclusion),
     title: joinTitle(response.workflow_name, response.name),
+    ...(timing ? { timing } : {}),
     url: response.html_url || fallbackUrl,
   };
+}
+
+function compactTiming(timing: WatchTiming): WatchTiming | undefined {
+  const entries = Object.entries(timing).filter((entry): entry is [keyof WatchTiming, string] => {
+    const value = entry[1];
+    return typeof value === "string" && value.length > 0;
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function joinTitle(prefix: string | undefined, title: string | undefined): string {

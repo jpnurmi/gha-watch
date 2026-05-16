@@ -19,6 +19,11 @@ body {
   background: transparent;
 }
 
+#app {
+  height: 100vh;
+  min-width: 0;
+}
+
 button,
 input {
   font: inherit;
@@ -26,7 +31,8 @@ input {
 
 .shell {
   display: flex;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
   overflow: hidden;
   background: transparent;
@@ -148,10 +154,14 @@ input {
   color: #aeb6c1;
 }
 
-.icon-button:hover,
-.remove-button:hover {
+.icon-button:hover {
   background: #303945;
   color: #ffffff;
+}
+
+.remove-button:hover {
+  background: rgb(255 255 255 / 7%);
+  color: rgb(238 241 245 / 82%);
 }
 
 .add-form {
@@ -247,52 +257,79 @@ input {
 .watch-group-toggle {
   display: grid;
   width: 100%;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   border: 0;
-  padding: 9px 16px 6px;
-  background: transparent;
+  padding: 4px 16px;
+  background: rgb(255 255 255 / 3%);
   color: rgb(238 241 245 / 48%);
   cursor: pointer;
   text-align: left;
 }
 
 .watch-group-toggle:hover {
-  background: rgb(255 255 255 / 4%);
+  background: rgb(255 255 255 / 5%);
   color: rgb(238 241 245 / 70%);
 }
 
-.watch-group-chevron {
-  width: 12px;
-  height: 12px;
-  transition: transform 120ms ease;
+.watch-group-icon {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  justify-self: center;
 }
 
-.watch-group-toggle[aria-expanded="true"] .watch-group-chevron {
-  transform: rotate(90deg);
+.watch-group-icon svg,
+.watch-group-avatar {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.watch-group-avatar {
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+.watch-group-action {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  place-items: center;
+  justify-self: center;
+  border-radius: 5px;
+  background: rgb(255 255 255 / 7%);
+  color: rgb(238 241 245 / 62%);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.watch-group-action:hover {
+  background: rgb(255 255 255 / 11%);
+  color: rgb(238 241 245 / 82%);
+}
+
+.watch-group-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 .watch-group-title {
   min-width: 0;
   overflow: hidden;
+  flex: 0 1 auto;
   font-size: 11px;
   font-weight: 650;
-  line-height: 1.25;
+  line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.watch-group-count {
-  color: rgb(238 241 245 / 38%);
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.25;
-  white-space: nowrap;
-}
-
-.watch-group.is-collapsed .watch-group-toggle {
-  padding-bottom: 9px;
 }
 
 .watch-group-list {
@@ -305,14 +342,13 @@ input {
   display: grid;
   min-height: 62px;
   grid-template-columns: 18px minmax(0, 1fr) 28px;
-  align-items: center;
+  align-items: start;
   gap: 10px;
-  padding: 0 16px 10px;
+  padding: 10px 16px;
 }
 
 .watch-group-list .watch + .watch {
   border-top: 1px solid rgb(255 255 255 / 8%);
-  padding-top: 10px;
 }
 
 .watch:hover {
@@ -323,6 +359,7 @@ input {
   display: inline-grid;
   width: 16px;
   height: 16px;
+  margin-top: 3px;
   place-items: center;
   justify-self: center;
 }
@@ -377,6 +414,7 @@ input {
   flex-direction: column;
   gap: 1px;
   border: 0;
+  padding: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -408,12 +446,25 @@ input {
   white-space: nowrap;
 }
 
+.watch-timing {
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(238 241 245 / 48%);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .remove-button {
   position: relative;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  font-size: 15px;
+  justify-self: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 0;
+  border-radius: 5px;
+  font-size: 13px;
   opacity: 0.6;
 }
 
@@ -427,8 +478,8 @@ input {
 
 .unseen-dot {
   position: absolute;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
   background: #58a6ff;
   box-shadow: 0 0 0 2px rgb(88 166 255 / 16%);

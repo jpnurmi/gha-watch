@@ -93,6 +93,24 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("exposes a repository icon URL for grouped rows", () => {
+    const model = createPopupViewModel([
+      watch({
+        repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
+        status: "completed:success",
+        active: false,
+        lastState: { status: "completed", conclusion: "success" },
+      }),
+    ]);
+
+    expect(model.groups).toMatchObject([
+      {
+        repoLabel: "getsentry/sentry",
+        repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
+      },
+    ]);
+  });
+
   it("prioritizes failed checks in the header", () => {
     const model = createPopupViewModel([
       watch({
@@ -153,6 +171,46 @@ describe("createPopupViewModel", () => {
     expect(model.rows.map((row) => [row.id, row.unseenStatusChange])).toEqual([
       ["getsentry/sentry/run/123", true],
       ["getsentry/sentry/run/456", false],
+    ]);
+  });
+
+  it("formats queued, running, and completed timing text", () => {
+    const now = new Date("2026-05-16T12:10:00Z");
+    const model = createPopupViewModel(
+      [
+        watch({
+          status: "queued",
+          lastState: { status: "queued", conclusion: null },
+          timing: {
+            queuedAt: "2026-05-16T12:06:00Z",
+          },
+        }),
+        watch({
+          id: "getsentry/sentry/run/456",
+          status: "in_progress",
+          lastState: { status: "in_progress", conclusion: null },
+          timing: {
+            startedAt: "2026-05-16T12:08:00Z",
+          },
+        }),
+        watch({
+          id: "getsentry/sentry/run/789",
+          status: "completed:success",
+          active: false,
+          lastState: { status: "completed", conclusion: "success" },
+          timing: {
+            startedAt: "2026-05-16T12:02:00Z",
+            completedAt: "2026-05-16T12:09:00Z",
+          },
+        }),
+      ],
+      now,
+    );
+
+    expect(model.rows.map((row) => row.timingText)).toEqual([
+      "Queued 4m ago",
+      "Started 2m ago · 2m elapsed",
+      "Completed 1m ago · 7m",
     ]);
   });
 });

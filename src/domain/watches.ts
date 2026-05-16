@@ -1,13 +1,21 @@
 import type { ParsedWatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
 
+export type WatchTiming = {
+  queuedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+};
+
 export type WatchRecord = {
   id: string;
   target: ParsedWatchTarget;
   label: string;
+  repoIconUrl?: string;
   status: string;
   lastSeenStatus?: string;
   lastState: WatchState | undefined;
+  timing?: WatchTiming;
   active: boolean;
   error: string | undefined;
 };

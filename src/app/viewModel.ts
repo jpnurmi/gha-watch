@@ -15,6 +15,7 @@ export type WatchRowViewModel = {
   statusLabel: string;
   description: string;
   tone: RowTone;
+  timingText?: string;
   unseenStatusChange: boolean;
   url: string;
 };
@@ -23,6 +24,7 @@ export type HeaderTone = "pending" | "success" | "warning";
 
 export type WatchGroupViewModel = {
   repoLabel: string;
+  repoIconUrl?: string;
   rows: WatchRowViewModel[];
 };
 
@@ -44,8 +46,8 @@ type Counts = {
   errored: number;
 };
 
-export function createPopupViewModel(watches: WatchRecord[]): PopupViewModel {
-  const rows = watches.map(createWatchRowViewModel);
+export function createPopupViewModel(watches: WatchRecord[], now = new Date()): PopupViewModel {
+  const rows = watches.map((watch) => createWatchRowViewModel(watch, now));
   const counts = countRows(rows);
 
   return {
@@ -57,7 +59,7 @@ export function createPopupViewModel(watches: WatchRecord[]): PopupViewModel {
   };
 }
 
-function createWatchRowViewModel(watch: WatchRecord): WatchRowViewModel {
+function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewModel {
   if (watch.error) {
     return {
       id: watch.id,
@@ -65,6 +67,7 @@ function createWatchRowViewModel(watch: WatchRecord): WatchRowViewModel {
       statusLabel: "Errored",
       description: watch.error,
       tone: "error",
+      timingText: getTimingText(watch, "error", now),
       unseenStatusChange: hasUnseenStatusChange(watch),
       url: watch.target.url,
     };
@@ -75,25 +78,25 @@ function createWatchRowViewModel(watch: WatchRecord): WatchRowViewModel {
 
   if (status === "completed") {
     if (conclusion === "success") {
-      return createRow(watch, "Successful", "This check was successful.", "success");
+      return createRow(watch, "Successful", "This check was successful.", "success", now);
     }
 
     if (conclusion === "cancelled") {
-      return createRow(watch, "Cancelled", "This check was cancelled.", "cancelled");
+      return createRow(watch, "Cancelled", "This check was cancelled.", "cancelled", now);
     }
 
-    return createRow(watch, "Failed", "This check was not successful.", "failure");
+    return createRow(watch, "Failed", "This check was not successful.", "failure", now);
   }
 
   if (status === "queued" || status === "pending" || status === "requested" || status === "waiting") {
-    return createRow(watch, "Queued", "Waiting to run this check...", "queued");
+    return createRow(watch, "Queued", "Waiting to run this check...", "queued", now);
   }
 
   if (status === "in_progress") {
-    return createRow(watch, "In progress", "This check has started...", "in-progress");
+    return createRow(watch, "In progress", "This check has started...", "in-progress", now);
   }
 
-  return createRow(watch, titleCase(status), "Waiting for the next status update...", "pending");
+  return createRow(watch, titleCase(status), "Waiting for the next status update...", "pending", now);
 }
 
 function createRow(
@@ -101,6 +104,7 @@ function createRow(
   statusLabel: string,
   description: string,
   tone: RowTone,
+  now: Date,
 ): WatchRowViewModel {
   return {
     id: watch.id,
@@ -108,6 +112,7 @@ function createRow(
     statusLabel,
     description,
     tone,
+    timingText: getTimingText(watch, tone, now),
     unseenStatusChange: hasUnseenStatusChange(watch),
     url: watch.target.url,
   };
@@ -122,9 +127,11 @@ function groupRowsByRepo(watches: WatchRecord[], rows: WatchRowViewModel[]): Wat
     let group = groupByRepo.get(repoLabel);
 
     if (!group) {
-      group = { repoLabel, rows: [] };
+      group = { repoLabel, repoIconUrl: watches[index].repoIconUrl, rows: [] };
       groupByRepo.set(repoLabel, group);
       groups.push(group);
+    } else if (!group.repoIconUrl && watches[index].repoIconUrl) {
+      group.repoIconUrl = watches[index].repoIconUrl;
     }
 
     group.rows.push(row);
@@ -135,6 +142,72 @@ function groupRowsByRepo(watches: WatchRecord[], rows: WatchRowViewModel[]): Wat
 
 function getRepoLabel(watch: WatchRecord): string {
   return `${watch.target.owner}/${watch.target.repo}`;
+}
+
+function getTimingText(watch: WatchRecord, tone: RowTone, now: Date): string | undefined {
+  const nowMs = now.getTime();
+  const queuedAt = parseTimestamp(watch.timing?.queuedAt);
+  const startedAt = parseTimestamp(watch.timing?.startedAt);
+  const completedAt = parseTimestamp(watch.timing?.completedAt);
+
+  if (tone === "queued" && queuedAt !== undefined) {
+    return `Queued ${formatRelativeTime(queuedAt, nowMs)}`;
+  }
+
+  if (tone === "in-progress" && startedAt !== undefined) {
+    return `Started ${formatRelativeTime(startedAt, nowMs)} · ${formatDuration(nowMs - startedAt)} elapsed`;
+  }
+
+  if (
+    (tone === "success" || tone === "failure" || tone === "cancelled") &&
+    completedAt !== undefined
+  ) {
+    const completedText = `Completed ${formatRelativeTime(completedAt, nowMs)}`;
+
+    if (startedAt === undefined) {
+      return completedText;
+    }
+
+    return `${completedText} · ${formatDuration(completedAt - startedAt)}`;
+  }
+
+  return undefined;
+}
+
+function parseTimestamp(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function formatRelativeTime(timestamp: number, now: number): string {
+  return `${formatDuration(now - timestamp)} ago`;
+}
+
+function formatDuration(durationMs: number): string {
+  const totalMinutes = Math.max(0, Math.floor(durationMs / 60_000));
+
+  if (totalMinutes < 1) {
+    return "<1m";
+  }
+
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours < 24) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
 function countRows(rows: WatchRowViewModel[]): Counts {

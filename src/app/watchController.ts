@@ -10,15 +10,13 @@ import {
   type WatchRecord,
 } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
-
-export type WatchNotification = {
-  title: string;
-  body: string;
-};
+import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
 export type WatchControllerDeps = {
   fetchState(target: ParsedWatchTarget): Promise<WatchSnapshot>;
+  fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   notify(notification: WatchNotification): Promise<void>;
+  now?(): Date;
   save(watches: WatchRecord[]): Promise<void>;
 };
 
@@ -29,6 +27,7 @@ export type WatchController = {
   markAllSeen(): void;
   clearAll(): void;
   clearFinished(): void;
+  refreshRepositoryIcons(): Promise<void>;
   pollNow(): Promise<void>;
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
@@ -57,6 +56,28 @@ export function createWatchController(
     setWatches(watches.map((watch) => (watch.id === id ? update(watch) : watch)));
   }
 
+  async function refreshRepositoryIcon(id: string, target: ParsedWatchTarget): Promise<void> {
+    if (!deps.fetchRepositoryIconUrl) {
+      return;
+    }
+
+    const current = watches.find((watch) => watch.id === id);
+
+    if (!current || current.repoIconUrl) {
+      return;
+    }
+
+    try {
+      const repoIconUrl = await deps.fetchRepositoryIconUrl(target);
+
+      if (repoIconUrl) {
+        updateWatch(id, (watch) => ({ ...watch, repoIconUrl }));
+      }
+    } catch {
+      // Missing avatars should not interfere with status watching.
+    }
+  }
+
   return {
     async add(target) {
       const previous = watches;
@@ -69,6 +90,7 @@ export function createWatchController(
       setWatches(next);
 
       const id = getWatchId(target);
+      void refreshRepositoryIcon(id, target);
 
       try {
         const snapshot = await deps.fetchState(target);
@@ -82,6 +104,7 @@ export function createWatchController(
             status: snapshot.status,
             conclusion: snapshot.conclusion,
           },
+          timing: snapshot.timing,
           active: !isTerminalStatus(snapshot),
           error: undefined,
         }));
@@ -115,6 +138,10 @@ export function createWatchController(
       setWatches(watches.filter((watch) => watch.active));
     },
 
+    async refreshRepositoryIcons() {
+      await Promise.all(watches.map((watch) => refreshRepositoryIcon(watch.id, watch.target)));
+    },
+
     async pollNow() {
       const activeWatches = watches.filter((watch) => watch.active);
 
@@ -126,22 +153,29 @@ export function createWatchController(
         };
         const status = formatWatchState(nextState);
         const transition = getStatusTransition(watch.lastState, nextState);
+        let notification: WatchNotification | undefined;
 
-        updateWatch(watch.id, (current) => ({
-          ...current,
-          label: snapshot.title,
-          status,
-          lastSeenStatus: current.lastSeenStatus ?? current.status,
-          lastState: nextState,
-          active: !isTerminalStatus(nextState),
-          error: undefined,
-        }));
+        updateWatch(watch.id, (current) => {
+          const nextWatch = {
+            ...current,
+            label: snapshot.title,
+            status,
+            lastSeenStatus: current.lastSeenStatus ?? current.status,
+            lastState: nextState,
+            timing: snapshot.timing,
+            active: !isTerminalStatus(nextState),
+            error: undefined,
+          };
 
-        if (transition.notify) {
-          await deps.notify({
-            title: snapshot.title,
-            body: transition.message,
-          });
+          if (transition.notify) {
+            notification = createWatchNotification(nextWatch, watch.lastState, deps.now?.() ?? new Date());
+          }
+
+          return nextWatch;
+        });
+
+        if (notification) {
+          await deps.notify(notification);
         }
       }
     },

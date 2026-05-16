@@ -1,14 +1,15 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import { getAddFormActions, getPopupBodySections, type AddFormAction, type PopupBodySection } from "./app/popupLayout";
+import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
 import { parseGitHubActionsUrl } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
-import { fetchWatchState } from "./platform/gh";
+import { fetchRepositoryIconUrl, fetchWatchState } from "./platform/gh";
 import { sendDesktopNotification } from "./platform/notifications";
 import { loadWatches, saveWatches } from "./platform/store";
 import { setTrayIndicator } from "./platform/tray";
@@ -29,6 +30,7 @@ let isAdding = false;
 let addError: string | undefined;
 let isPolling = false;
 let isClearMenuOpen = false;
+let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
 
 const controller = createWatchController(
@@ -38,6 +40,7 @@ const controller = createWatchController(
           throw new Error("Demo mode does not poll GitHub.");
         }
       : fetchWatchState,
+    fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     notify: sendDesktopNotification,
     save: saveWatches,
   },
@@ -51,6 +54,7 @@ controller.subscribe(() => {
 
 render();
 void updateTrayIndicator();
+void controller.refreshRepositoryIcons();
 window.setInterval(() => {
   void poll();
 }, pollIntervalMs);
@@ -134,6 +138,7 @@ function render(): void {
   `;
 
   bindEvents();
+  void resizePopupToContent();
 }
 
 function renderPopupBodySection(
@@ -206,11 +211,13 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
         data-repo="${escapeHtml(group.repoLabel)}"
         aria-expanded="${isCollapsed ? "false" : "true"}"
       >
-        <svg class="watch-group-chevron" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="m6.25 3.75 4.5 4.25-4.5 4.25" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-        </svg>
-        <span class="watch-group-title">${escapeHtml(group.repoLabel)}</span>
-        <span class="watch-group-count">${group.rows.length} ${group.rows.length === 1 ? "check" : "checks"}</span>
+        <span class="watch-group-icon" aria-hidden="true">
+          ${renderRepoIcon(group)}
+        </span>
+        <span class="watch-group-meta">
+          <span class="watch-group-title">${escapeHtml(group.repoLabel)}</span>
+        </span>
+        <span class="watch-group-action watch-group-badge" aria-hidden="true">${group.rows.length}</span>
       </button>
       ${
         isCollapsed
@@ -223,6 +230,18 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
   `;
 }
 
+function renderRepoIcon(group: WatchGroupViewModel): string {
+  if (group.repoIconUrl) {
+    return `<img class="watch-group-avatar" src="${escapeHtml(group.repoIconUrl)}" alt="" />`;
+  }
+
+  return `
+    <svg viewBox="0 0 24 24">
+      <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C16.3 4.6 17.3 5 17.3 5c.7 1.7.3 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z" fill="currentColor"/>
+    </svg>
+  `;
+}
+
 function renderWatch(row: WatchRowViewModel): string {
   return `
     <li class="watch is-${row.tone}${row.unseenStatusChange ? " has-unseen-change" : ""}">
@@ -230,6 +249,7 @@ function renderWatch(row: WatchRowViewModel): string {
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
         <span class="watch-label">${escapeHtml(row.label)}</span>
         <span class="watch-status">${escapeHtml(row.statusLabel)} - ${escapeHtml(row.description)}</span>
+        ${row.timingText ? `<span class="watch-timing">${escapeHtml(row.timingText)}</span>` : ""}
       </button>
       <button class="remove-button${row.unseenStatusChange ? " is-unseen" : ""}" type="button" data-action="remove" data-id="${escapeHtml(row.id)}" title="Remove watch" aria-label="Remove ${escapeHtml(row.label)}">
         <span class="remove-icon" aria-hidden="true">&times;</span>
@@ -383,6 +403,35 @@ async function poll(): Promise<void> {
 async function updateTrayIndicator(): Promise<void> {
   const summary = createTrayState(controller.getWatches());
   await setTrayIndicator(summary.status, summary.tooltip, summary.hasUnseenChanges);
+}
+
+async function resizePopupToContent(): Promise<void> {
+  const nextHeight = calculatePopupHeight(measurePopupContentHeight());
+
+  if (nextHeight === popupHeight) {
+    return;
+  }
+
+  popupHeight = nextHeight;
+
+  try {
+    await getCurrentWindow().setSize(new LogicalSize(popupWidth, nextHeight));
+  } catch (error) {
+    console.warn("Unable to resize GHA Watch window", error);
+  }
+}
+
+function measurePopupContentHeight(): number {
+  const header = app.querySelector<HTMLElement>(".header");
+  const addForm = app.querySelector<HTMLElement>(".add-form");
+  const watchList = app.querySelector<HTMLElement>(".watch-list");
+  const watchListContentHeight = watchList?.querySelector(".empty")
+    ? 0
+    : Array.from(watchList?.children ?? []).reduce((height, child) => {
+        return height + (child instanceof HTMLElement ? child.offsetHeight : 0);
+      }, 0);
+
+  return (header?.offsetHeight ?? 0) + (addForm?.offsetHeight ?? 0) + watchListContentHeight;
 }
 
 function escapeHtml(value: string): string {
