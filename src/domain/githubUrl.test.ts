@@ -1,0 +1,46 @@
+import { describe, expect, it } from "vitest";
+import { parseGitHubActionsUrl } from "./githubUrl";
+
+describe("parseGitHubActionsUrl", () => {
+  it("parses workflow run URLs", () => {
+    expect(
+      parseGitHubActionsUrl("https://github.com/getsentry/sentry/actions/runs/1234567890"),
+    ).toEqual({
+      kind: "run",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "1234567890",
+      url: "https://github.com/getsentry/sentry/actions/runs/1234567890",
+    });
+  });
+
+  it("parses job URLs with an explicit job segment", () => {
+    expect(
+      parseGitHubActionsUrl(
+        "https://github.com/getsentry/sentry/actions/runs/1234567890/job/9876543210",
+      ),
+    ).toEqual({
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "1234567890",
+      jobId: "9876543210",
+      url: "https://github.com/getsentry/sentry/actions/runs/1234567890/job/9876543210",
+    });
+  });
+
+  it("parses GitHub job URLs that use the runs path for the job id", () => {
+    expect(parseGitHubActionsUrl("https://github.com/getsentry/sentry/runs/9876543210")).toEqual({
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      jobId: "9876543210",
+      url: "https://github.com/getsentry/sentry/runs/9876543210",
+    });
+  });
+
+  it("rejects unsupported URLs", () => {
+    expect(() => parseGitHubActionsUrl("https://example.com/getsentry/sentry/actions/runs/1"))
+      .toThrow("Paste a GitHub Actions run or job URL.");
+  });
+});

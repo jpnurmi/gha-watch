@@ -1,0 +1,15 @@
+[package]
+name = "gha-watch"
+version = "0.1.0"
+description = "A minimal GitHub Actions tray watcher"
+authors = ["jpnurmi"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.1", features = ["tray-icon"] }
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-opener = "2.5.4"
+tauri-plugin-shell = "2.3.5"
