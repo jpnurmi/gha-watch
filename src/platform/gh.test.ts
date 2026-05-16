@@ -248,7 +248,7 @@ describe("fetchRepositoryIconUrl", () => {
 });
 
 describe("resolvePrWatchTargets", () => {
-  it("resolves current pull request jobs by head SHA", async () => {
+  it("resolves current pull request runs by head SHA", async () => {
     const { executor, calls } = createSequenceExecutor([
       {
         code: 0,
@@ -282,30 +282,6 @@ describe("resolvePrWatchTargets", () => {
         ]),
         stderr: "",
       },
-      {
-        code: 0,
-        stdout: JSON.stringify({
-          jobs: [
-            {
-              id: 201,
-              html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101/job/201",
-            },
-          ],
-        }),
-        stderr: "",
-      },
-      {
-        code: 0,
-        stdout: JSON.stringify({
-          jobs: [
-            {
-              id: 202,
-              html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102/job/202",
-            },
-          ],
-        }),
-        stderr: "",
-      },
     ]);
 
     await expect(
@@ -321,22 +297,20 @@ describe("resolvePrWatchTargets", () => {
       ),
     ).resolves.toEqual([
       {
-        kind: "job",
+        kind: "run",
         owner: "jpnurmi",
         repo: "sentry-qml",
         runId: "101",
-        jobId: "201",
         prNumber: "51",
-        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101/job/201",
+        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
       },
       {
-        kind: "job",
+        kind: "run",
         owner: "jpnurmi",
         repo: "sentry-qml",
         runId: "102",
-        jobId: "202",
         prNumber: "51",
-        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102/job/202",
+        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102",
       },
     ]);
 
@@ -369,14 +343,6 @@ describe("resolvePrWatchTargets", () => {
           "--json",
           "databaseId,event,headSha,url",
         ],
-      },
-      {
-        program: "gh",
-        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/101/jobs"],
-      },
-      {
-        program: "gh",
-        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/102/jobs"],
       },
     ]);
   });

@@ -1,10 +1,4 @@
-import type {
-  CheckWatchTarget,
-  JobWatchTarget,
-  ParsedWatchTarget,
-  PrWatchTarget,
-  RunWatchTarget,
-} from "../domain/githubUrl";
+import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
 import type { WatchTiming } from "../domain/watches";
 
@@ -68,15 +62,6 @@ type RunListResponse = {
   event?: string;
   headSha?: string;
   url?: string;
-};
-
-type JobsResponse = {
-  jobs?: JobReference[];
-};
-
-type JobReference = {
-  html_url?: string;
-  id?: number | string;
 };
 
 export async function fetchWatchState(
@@ -155,34 +140,13 @@ export async function resolvePrWatchTargets(
     ]);
     assertSuccessfulGhResult(runsResult);
 
-    const runTargets = parseJson<RunListResponse[]>(runsResult.stdout)
+    return parseJson<RunListResponse[]>(runsResult.stdout)
       .filter((run) => run.event === "pull_request" && run.headSha === headRefOid)
       .map((run) => toPrRunTarget(target, run))
       .filter((run): run is RunWatchTarget => Boolean(run));
-
-    const jobTargets = (
-      await Promise.all(runTargets.map((runTarget) => resolveRunJobTargets(runTarget, executor)))
-    ).flat();
-
-    return jobTargets.length > 0 ? jobTargets : runTargets;
   } catch (error) {
     throw normalizeGhError(error);
   }
-}
-
-async function resolveRunJobTargets(
-  runTarget: RunWatchTarget,
-  executor: ShellExecutor,
-): Promise<JobWatchTarget[]> {
-  const result = await executor.execute("gh", [
-    "api",
-    `repos/${runTarget.owner}/${runTarget.repo}/actions/runs/${runTarget.runId}/jobs`,
-  ]);
-  assertSuccessfulGhResult(result);
-
-  return (parseJson<JobsResponse>(result.stdout).jobs ?? [])
-    .map((job) => toPrJobTarget(runTarget, job))
-    .filter((job): job is JobWatchTarget => Boolean(job));
 }
 
 function toPrRunTarget(source: PrWatchTarget, run: RunListResponse): RunWatchTarget | undefined {
@@ -212,24 +176,6 @@ function getRunDatabaseId(value: number | string | undefined): string | undefine
   }
 
   return undefined;
-}
-
-function toPrJobTarget(runTarget: RunWatchTarget, job: JobReference): JobWatchTarget | undefined {
-  const jobId = getRunDatabaseId(job.id);
-
-  if (!jobId) {
-    return undefined;
-  }
-
-  return {
-    kind: "job",
-    owner: runTarget.owner,
-    repo: runTarget.repo,
-    runId: runTarget.runId,
-    jobId,
-    prNumber: runTarget.prNumber,
-    url: job.html_url || `${runTarget.url}/job/${jobId}`,
-  };
 }
 
 export async function rerunFailedWatch(
