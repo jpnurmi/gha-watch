@@ -231,14 +231,20 @@ fn position_window_near_top_right(window: &tauri::WebviewWindow) -> Result<(), S
     let monitor = window
         .current_monitor()
         .map_err(|error| error.to_string())?
-        .or(window.primary_monitor().map_err(|error| error.to_string())?);
+        .or(window
+            .primary_monitor()
+            .map_err(|error| error.to_string())?);
     let Some(monitor) = monitor else {
         return Ok(());
     };
     let work_area = monitor.work_area();
     let margin = 8_u32;
     let x = work_area.position.x
-        + work_area.size.width.saturating_sub(window_size.width).saturating_sub(margin) as i32;
+        + work_area
+            .size
+            .width
+            .saturating_sub(window_size.width)
+            .saturating_sub(margin) as i32;
     let y = work_area.position.y + margin as i32;
 
     window
