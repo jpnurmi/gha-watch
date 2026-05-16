@@ -2,8 +2,33 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, PhysicalPosition, Rect, WindowEvent,
+    AppHandle, Emitter, Manager, PhysicalPosition, Rect, WindowEvent,
 };
+#[cfg(not(target_os = "macos"))]
+use tauri_plugin_notification::NotificationExt;
+
+#[cfg(target_os = "macos")]
+const DESKTOP_NOTIFICATION_CLICKED_EVENT: &str = "desktop-notification-clicked";
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopNotification {
+    #[cfg(target_os = "macos")]
+    watch_id: String,
+    title: String,
+    body: String,
+    #[cfg(target_os = "macos")]
+    url: String,
+    persistent: bool,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopNotificationClick {
+    watch_id: String,
+    url: String,
+}
 
 #[tauri::command]
 fn set_tray_indicator(
@@ -25,6 +50,65 @@ fn set_tray_indicator(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn show_desktop_notification(
+    app: AppHandle,
+    notification: DesktopNotification,
+) -> Result<(), String> {
+    show_clickable_notification(app, notification)
+}
+
+#[cfg(target_os = "macos")]
+fn show_clickable_notification(
+    app: AppHandle,
+    notification: DesktopNotification,
+) -> Result<(), String> {
+    let bundle_identifier = app.config().identifier.clone();
+
+    std::thread::spawn(move || {
+        let _ = mac_notification_sys::set_application(&bundle_identifier);
+        let _ = notification.persistent;
+        let response = mac_notification_sys::Notification::new()
+            .title(&notification.title)
+            .message(&notification.body)
+            .wait_for_click(true)
+            .send();
+
+        match response {
+            Ok(mac_notification_sys::NotificationResponse::Click)
+            | Ok(mac_notification_sys::NotificationResponse::ActionButton(_)) => {
+                let _ = app.emit(
+                    DESKTOP_NOTIFICATION_CLICKED_EVENT,
+                    DesktopNotificationClick {
+                        watch_id: notification.watch_id,
+                        url: notification.url,
+                    },
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("Could not show GHA Watch notification: {error}");
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_clickable_notification(
+    app: AppHandle,
+    notification: DesktopNotification,
+) -> Result<(), String> {
+    let _ = notification.persistent;
+    app.notification()
+        .builder()
+        .title(notification.title)
+        .body(notification.body)
+        .show()
+        .map_err(|error| error.to_string())
 }
 
 fn tray_icon_for_status(status: &str, has_unseen_changes: bool) -> Result<Image<'static>, String> {
@@ -111,7 +195,10 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![set_tray_indicator])
+        .invoke_handler(tauri::generate_handler![
+            set_tray_indicator,
+            show_desktop_notification
+        ])
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(false) = event {
                 let _ = window.hide();

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WatchNotification } from "../app/watchNotification";
-import { clearDesktopNotifications, sendDesktopNotification, type DesktopNotificationDeps } from "./notifications";
+import {
+  clearDesktopNotifications,
+  listenForDesktopNotificationClicks,
+  sendDesktopNotification,
+  type DesktopNotificationClick,
+  type DesktopNotificationDeps,
+} from "./notifications";
 
 function notification(overrides: Partial<WatchNotification> = {}): WatchNotification {
   return {
@@ -17,9 +23,8 @@ function notification(overrides: Partial<WatchNotification> = {}): WatchNotifica
 }
 
 describe("sendDesktopNotification", () => {
-  it("opens the watched GitHub URL when the notification is clicked", async () => {
-    const openedUrls: string[] = [];
-    let click: (() => void) | undefined;
+  it("uses the native clickable notification bridge", async () => {
+    const shownNotifications: WatchNotification[] = [];
     const deps: DesktopNotificationDeps = {
       async isPermissionGranted() {
         return true;
@@ -27,62 +32,81 @@ describe("sendDesktopNotification", () => {
       async requestPermission() {
         return "denied";
       },
-      createNotification(_title, _options) {
-        return {
-          set onclick(handler: ((event: Event) => void) | null) {
-            click = typeof handler === "function" ? () => handler(new Event("click")) : undefined;
-          },
-          close: vi.fn(),
-        };
-      },
-      async openUrl(url) {
-        openedUrls.push(url);
+      async showNotification(shownNotification) {
+        shownNotifications.push(shownNotification);
       },
     };
 
     await sendDesktopNotification(notification(), deps);
-    click?.();
 
-    expect(openedUrls).toEqual(["https://github.com/jpnurmi/gha/actions/runs/123/job/456"]);
+    expect(shownNotifications).toEqual([notification()]);
   });
 
-  it("runs a click callback with the clicked watch before opening GitHub", async () => {
-    const clickedWatchIds: string[] = [];
-    const openedUrls: string[] = [];
-    let click: (() => void) | undefined;
+  it("listens for native notification click events", async () => {
+    const clicks: DesktopNotificationClick[] = [];
+    let emitClick: ((payload: unknown) => void) | undefined;
+    const unlisten = vi.fn();
     const deps: DesktopNotificationDeps = {
       async isPermissionGranted() {
-        return true;
+        return false;
       },
       async requestPermission() {
         return "denied";
       },
-      createNotification(_title, _options) {
-        return {
-          set onclick(handler: ((event: Event) => void) | null) {
-            click = typeof handler === "function" ? () => handler(new Event("click")) : undefined;
-          },
-          close: vi.fn(),
-        };
-      },
-      async openUrl(url) {
-        openedUrls.push(url);
+      async showNotification() {},
+      async listenToNotificationClicks(listener) {
+        emitClick = listener;
+        return unlisten;
       },
     };
 
-    await sendDesktopNotification(notification(), deps, (clickedNotification) => {
-      clickedWatchIds.push(clickedNotification.watchId);
+    const stopListening = await listenForDesktopNotificationClicks((click) => {
+      clicks.push(click);
+    }, deps);
+
+    emitClick?.({
+      watchId: "jpnurmi/gha/job/456",
+      url: "https://github.com/jpnurmi/gha/actions/runs/123/job/456",
     });
-    click?.();
+    stopListening();
 
-    expect(clickedWatchIds).toEqual(["jpnurmi/gha/job/456"]);
-    expect(openedUrls).toEqual(["https://github.com/jpnurmi/gha/actions/runs/123/job/456"]);
+    expect(clicks).toEqual([
+      {
+        watchId: "jpnurmi/gha/job/456",
+        url: "https://github.com/jpnurmi/gha/actions/runs/123/job/456",
+      },
+    ]);
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
-  it("auto-closes transient native notifications", async () => {
-    let scheduledDelay = 0;
-    let scheduledClose: (() => void) | undefined;
-    const close = vi.fn();
+  it("ignores malformed native notification click events", async () => {
+    const clicks: DesktopNotificationClick[] = [];
+    let emitClick: ((payload: unknown) => void) | undefined;
+    const unlisten = () => {};
+    const deps: DesktopNotificationDeps = {
+      async isPermissionGranted() {
+        return false;
+      },
+      async requestPermission() {
+        return "denied";
+      },
+      async showNotification() {},
+      async listenToNotificationClicks(listener) {
+        emitClick = listener;
+        return unlisten;
+      },
+    };
+
+    await listenForDesktopNotificationClicks((click) => {
+      clicks.push(click);
+    }, deps);
+    emitClick?.({ watchId: "jpnurmi/gha/job/456" });
+
+    expect(clicks).toEqual([]);
+  });
+
+  it("passes transient notifications through the native bridge", async () => {
+    const shownNotifications: WatchNotification[] = [];
     const deps: DesktopNotificationDeps = {
       async isPermissionGranted() {
         return true;
@@ -90,33 +114,20 @@ describe("sendDesktopNotification", () => {
       async requestPermission() {
         return "denied";
       },
-      createNotification() {
-        return {
-          onclick: null,
-          close,
-        };
-      },
-      async openUrl() {},
-      setNotificationTimeout(callback, delay) {
-        scheduledDelay = delay;
-        scheduledClose = callback;
-        return 1;
+      async showNotification(shownNotification) {
+        shownNotifications.push(shownNotification);
       },
     };
 
-    await sendDesktopNotification(notification({ persistent: false }), deps);
-    scheduledClose?.();
+    const transientNotification = notification({ persistent: false });
+    await sendDesktopNotification(transientNotification, deps);
 
-    expect(scheduledDelay).toBe(5_000);
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(shownNotifications).toEqual([transientNotification]);
   });
 
-  it("clears visible and delivered native notifications", async () => {
-    const firstClose = vi.fn();
-    const secondClose = vi.fn();
+  it("clears delivered native notifications", async () => {
     const cancelAllNotifications = vi.fn(async () => {});
     const removeAllActiveNotifications = vi.fn(async () => {});
-    let createdNotifications = 0;
     const deps: DesktopNotificationDeps = {
       async isPermissionGranted() {
         return true;
@@ -124,14 +135,7 @@ describe("sendDesktopNotification", () => {
       async requestPermission() {
         return "denied";
       },
-      createNotification() {
-        createdNotifications += 1;
-        return {
-          onclick: null,
-          close: createdNotifications === 1 ? firstClose : secondClose,
-        };
-      },
-      async openUrl() {},
+      async showNotification() {},
       cancelAllNotifications,
       removeAllActiveNotifications,
     };
@@ -140,8 +144,6 @@ describe("sendDesktopNotification", () => {
     await sendDesktopNotification(notification({ watchId: "jpnurmi/gha/job/789" }), deps);
     await clearDesktopNotifications(deps);
 
-    expect(firstClose).toHaveBeenCalledTimes(1);
-    expect(secondClose).toHaveBeenCalledTimes(1);
     expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
     expect(removeAllActiveNotifications).toHaveBeenCalledTimes(1);
   });
