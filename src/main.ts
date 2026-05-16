@@ -13,7 +13,7 @@ import type { WatchNotification } from "./app/watchNotification";
 import { parseGitHubActionsUrl } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
 import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch, resolvePrWatchTargets } from "./platform/gh";
-import { clearDesktopNotifications, sendDesktopNotification } from "./platform/notifications";
+import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
 import { loadWatches, saveWatches } from "./platform/store";
 import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
@@ -59,9 +59,7 @@ const controller = createWatchController(
 );
 
 function notifyStatusChange(notification: WatchNotification): Promise<void> {
-  return sendDesktopNotification(notification, undefined, (clickedNotification) => {
-    controller.markSeen(clickedNotification.watchId);
-  });
+  return sendDesktopNotification(notification);
 }
 
 controller.subscribe(() => {
@@ -73,6 +71,10 @@ render();
 void updateTrayIndicator();
 void controller.refreshRepositoryIcons();
 void controller.refreshWatchMetadata();
+void listenForDesktopNotificationClicks((click) => {
+  controller.markSeen(click.watchId);
+  void openUrl(click.url);
+});
 window.setInterval(() => {
   void poll();
 }, pollIntervalMs);

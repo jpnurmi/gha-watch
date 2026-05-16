@@ -10,7 +10,11 @@ edition = "2021"
 tauri-build = { version = "2.6.1", features = [] }
 
 [dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
 tauri = { version = "2.11.2", features = ["image-png", "macos-private-api", "tray-icon"] }
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-shell = "2.3.5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "0.6.12"

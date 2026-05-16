@@ -1,59 +1,47 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   cancelAll,
   isPermissionGranted,
   removeAllActive,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type { WatchNotification } from "../app/watchNotification";
 
-type NativeNotificationOptions = NotificationOptions & {
-  largeBody?: string;
-  summary?: string;
-  group?: string;
-};
-
-type NativeNotificationHandle = {
-  onclick: ((event: Event) => void) | null;
-  close(): void;
+export type DesktopNotificationClick = {
+  watchId: string;
+  url: string;
 };
 
 export type DesktopNotificationDeps = {
   isPermissionGranted(): Promise<boolean>;
   requestPermission(): Promise<NotificationPermission>;
-  createNotification(title: string, options: NativeNotificationOptions): NativeNotificationHandle;
-  openUrl(url: string): Promise<void>;
-  setNotificationTimeout?(callback: () => void, delay: number): unknown;
+  showNotification(notification: WatchNotification): Promise<void>;
+  listenToNotificationClicks?(listener: (payload: unknown) => void): Promise<() => void>;
   cancelAllNotifications?(): Promise<void>;
   removeAllActiveNotifications?(): Promise<void>;
 };
 
-const transientNotificationDurationMs = 5_000;
-const activeNotifications = new Set<NativeNotificationHandle>();
+const notificationClickEvent = "desktop-notification-clicked";
 
 const desktopNotificationDeps: DesktopNotificationDeps = {
   isPermissionGranted,
   requestPermission,
-  createNotification(title, options) {
-    return new Notification(title, options);
+  async showNotification(notification) {
+    await invoke("show_desktop_notification", { notification });
   },
-  openUrl,
-  setNotificationTimeout(callback, delay) {
-    return window.setTimeout(callback, delay);
+  async listenToNotificationClicks(listener) {
+    return listen<unknown>(notificationClickEvent, (event) => {
+      listener(event.payload);
+    });
   },
   cancelAllNotifications: cancelAll,
   removeAllActiveNotifications: removeAllActive,
 };
 
-function closeNotification(notification: NativeNotificationHandle): void {
-  activeNotifications.delete(notification);
-  notification.close();
-}
-
 export async function sendDesktopNotification(
   notification: WatchNotification,
   deps: DesktopNotificationDeps = desktopNotificationDeps,
-  onClick?: (notification: WatchNotification) => void,
 ): Promise<void> {
   let permissionGranted = await deps.isPermissionGranted();
 
@@ -63,38 +51,38 @@ export async function sendDesktopNotification(
   }
 
   if (permissionGranted) {
-    const shownNotification = deps.createNotification(notification.title, {
-      body: notification.body,
-      largeBody: notification.largeBody,
-      summary: notification.summary,
-      group: notification.group,
-    });
-
-    activeNotifications.add(shownNotification);
-
-    shownNotification.onclick = () => {
-      closeNotification(shownNotification);
-      onClick?.(notification);
-      void deps.openUrl(notification.url);
-    };
-
-    if (!notification.persistent) {
-      deps.setNotificationTimeout?.(() => {
-        closeNotification(shownNotification);
-      }, transientNotificationDurationMs);
-    }
+    await deps.showNotification(notification);
   }
 }
 
 export async function clearDesktopNotifications(
   deps: DesktopNotificationDeps = desktopNotificationDeps,
 ): Promise<void> {
-  for (const notification of Array.from(activeNotifications)) {
-    closeNotification(notification);
-  }
-
   await Promise.allSettled([
     deps.cancelAllNotifications?.(),
     deps.removeAllActiveNotifications?.(),
   ]);
+}
+
+export async function listenForDesktopNotificationClicks(
+  onClick: (click: DesktopNotificationClick) => void,
+  deps: DesktopNotificationDeps = desktopNotificationDeps,
+): Promise<() => void> {
+  return (
+    deps.listenToNotificationClicks?.((payload) => {
+      if (isDesktopNotificationClick(payload)) {
+        onClick(payload);
+      }
+    }) ?? Promise.resolve(() => {})
+  );
+}
+
+function isDesktopNotificationClick(payload: unknown): payload is DesktopNotificationClick {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const click = payload as Record<string, unknown>;
+
+  return typeof click.watchId === "string" && click.watchId.length > 0 && typeof click.url === "string";
 }
