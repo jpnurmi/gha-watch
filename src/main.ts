@@ -1,7 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { createCollapsedGroups } from "./app/collapsedGroups";
-import { getAddFormActions, getPopupBodySections, type AddFormAction, type PopupBodySection } from "./app/popupLayout";
+import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
@@ -171,32 +171,27 @@ function renderWatchList(viewModel: ReturnType<typeof createPopupViewModel>): st
 function renderAddForm(): string {
   return `
     <form class="add-form" data-role="add-form">
-      <input
-        name="url"
-        type="url"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="https://github.com/OWNER/REPO/actions/runs/..."
-        aria-label="GitHub Actions URL"
-      />
-      ${getAddFormActions().map(renderAddFormAction).join("")}
+      <div class="add-field">
+        <button class="add-form-dismiss" type="button" data-action="close-add" title="Cancel" aria-label="Cancel adding watch">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+          </svg>
+        </button>
+        <input
+          name="url"
+          type="url"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="https://github.com/OWNER/REPO/actions/runs/..."
+          aria-label="GitHub Actions URL"
+        />
+        <div class="add-field-actions">
+          <button class="add-form-submit" type="submit">Watch</button>
+        </div>
+      </div>
       ${addError ? `<p class="form-error">${escapeHtml(addError)}</p>` : ""}
     </form>
   `;
-}
-
-function renderAddFormAction(action: AddFormAction): string {
-  if (action === "dismiss") {
-    return `
-      <button class="add-form-dismiss" type="button" data-action="close-add" title="Cancel" aria-label="Cancel adding watch">
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
-        </svg>
-      </button>
-    `;
-  }
-
-  return `<button class="add-form-submit" type="submit">Watch</button>`;
 }
 
 function renderWatchGroup(group: WatchGroupViewModel): string {
