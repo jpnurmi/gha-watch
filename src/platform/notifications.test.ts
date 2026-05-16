@@ -11,6 +11,7 @@ function notification(overrides: Partial<WatchNotification> = {}): WatchNotifica
     largeBody: "jpnurmi/gha\nSuccessful - This check was successful.",
     summary: "jpnurmi/gha",
     group: "jpnurmi/gha",
+    persistent: true,
     ...overrides,
   };
 }
@@ -76,5 +77,37 @@ describe("sendDesktopNotification", () => {
 
     expect(clickedWatchIds).toEqual(["jpnurmi/gha/job/456"]);
     expect(openedUrls).toEqual(["https://github.com/jpnurmi/gha/actions/runs/123/job/456"]);
+  });
+
+  it("auto-closes transient native notifications", async () => {
+    let scheduledDelay = 0;
+    let scheduledClose: (() => void) | undefined;
+    const close = vi.fn();
+    const deps: DesktopNotificationDeps = {
+      async isPermissionGranted() {
+        return true;
+      },
+      async requestPermission() {
+        return "denied";
+      },
+      createNotification() {
+        return {
+          onclick: null,
+          close,
+        };
+      },
+      async openUrl() {},
+      setNotificationTimeout(callback, delay) {
+        scheduledDelay = delay;
+        scheduledClose = callback;
+        return 1;
+      },
+    };
+
+    await sendDesktopNotification(notification({ persistent: false }), deps);
+    scheduledClose?.();
+
+    expect(scheduledDelay).toBe(5_000);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });

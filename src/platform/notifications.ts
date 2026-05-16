@@ -21,7 +21,10 @@ export type DesktopNotificationDeps = {
   requestPermission(): Promise<NotificationPermission>;
   createNotification(title: string, options: NativeNotificationOptions): NativeNotificationHandle;
   openUrl(url: string): Promise<void>;
+  setNotificationTimeout?(callback: () => void, delay: number): unknown;
 };
+
+const transientNotificationDurationMs = 5_000;
 
 const desktopNotificationDeps: DesktopNotificationDeps = {
   isPermissionGranted,
@@ -30,6 +33,9 @@ const desktopNotificationDeps: DesktopNotificationDeps = {
     return new Notification(title, options);
   },
   openUrl,
+  setNotificationTimeout(callback, delay) {
+    return window.setTimeout(callback, delay);
+  },
 };
 
 export async function sendDesktopNotification(
@@ -57,5 +63,11 @@ export async function sendDesktopNotification(
       onClick?.(notification);
       void deps.openUrl(notification.url);
     };
+
+    if (!notification.persistent) {
+      deps.setNotificationTimeout?.(() => {
+        shownNotification.close();
+      }, transientNotificationDurationMs);
+    }
   }
 }

@@ -50,7 +50,46 @@ describe("createWatchNotification", () => {
         "Previously in progress",
       summary: "getsentry/sentry",
       group: "getsentry/sentry",
+      persistent: true,
     });
+  });
+
+  it("mentions pull request references next to the repository", () => {
+    expect(
+      createWatchNotification(
+        watch({
+          target: {
+            kind: "run",
+            owner: "getsentry",
+            repo: "sentry",
+            runId: "123",
+            prNumber: "51",
+            url: "https://github.com/getsentry/sentry/actions/runs/123",
+          },
+        }),
+        { status: "in_progress", conclusion: null },
+      ),
+    ).toMatchObject({
+      body: expect.stringContaining("getsentry/sentry #51"),
+      summary: "getsentry/sentry #51",
+      group: "getsentry/sentry #51",
+    });
+  });
+
+  it("marks non-terminal status changes as transient", () => {
+    expect(
+      createWatchNotification(
+        watch({
+          status: "in_progress",
+          active: true,
+          lastState: { status: "in_progress", conclusion: null },
+          timing: {
+            startedAt: "2026-05-16T12:02:00Z",
+          },
+        }),
+        { status: "queued", conclusion: null },
+      ).persistent,
+    ).toBe(false);
   });
 
   it("uses the exact watched URL for notification clicks", () => {

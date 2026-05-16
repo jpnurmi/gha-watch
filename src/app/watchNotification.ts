@@ -8,6 +8,7 @@ export type WatchNotification = {
   url: string;
   body: string;
   largeBody?: string;
+  persistent: boolean;
   summary?: string;
   group?: string;
 };
@@ -18,7 +19,7 @@ export function createWatchNotification(
   now = new Date(),
 ): WatchNotification {
   const row = createPopupViewModel([watch], now).rows[0];
-  const repoLabel = `${watch.target.owner}/${watch.target.repo}`;
+  const repoLabel = getNotificationRepoLabel(watch);
   const lines = [
     repoLabel,
     `${row.statusLabel} - ${row.description}`,
@@ -33,9 +34,19 @@ export function createWatchNotification(
     url: watch.target.url,
     body,
     largeBody: body,
+    persistent: isPersistentNotification(row.tone),
     summary: repoLabel,
     group: repoLabel,
   };
+}
+
+function getNotificationRepoLabel(watch: WatchRecord): string {
+  const repoLabel = `${watch.target.owner}/${watch.target.repo}`;
+  return watch.target.prNumber ? `${repoLabel} #${watch.target.prNumber}` : repoLabel;
+}
+
+function isPersistentNotification(tone: string): boolean {
+  return tone === "success" || tone === "failure" || tone === "cancelled" || tone === "error";
 }
 
 function formatPreviousStatus(state: WatchState): string {

@@ -316,6 +316,7 @@ describe("watchController", () => {
           "Successful - This check was successful.\n" +
           "Completed 1m ago · 7m\n" +
           "Previously in progress",
+        persistent: true,
         summary: "getsentry/sentry",
         group: "getsentry/sentry",
       },
