@@ -106,6 +106,35 @@ describe("fetchWatchState", () => {
     ]);
   });
 
+  it("does not duplicate matching workflow and run titles", async () => {
+    const { executor } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        status: "in_progress",
+        conclusion: "",
+        displayTitle: "CI",
+        workflowName: "CI",
+        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/123",
+      }),
+      stderr: "",
+    });
+
+    await expect(
+      fetchWatchState(
+        {
+          kind: "run",
+          owner: "jpnurmi",
+          repo: "sentry-qml",
+          runId: "123",
+          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/123",
+        },
+        executor,
+      ),
+    ).resolves.toMatchObject({
+      title: "CI",
+    });
+  });
+
   it("maps missing gh failures to a dependency error", async () => {
     const executor: ShellExecutor = {
       async execute() {

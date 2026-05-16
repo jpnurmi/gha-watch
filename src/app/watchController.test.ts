@@ -11,6 +11,15 @@ const runTarget: ParsedWatchTarget = {
   url: "https://github.com/getsentry/sentry/actions/runs/123",
 };
 
+const jobTarget: ParsedWatchTarget = {
+  kind: "job",
+  owner: "getsentry",
+  repo: "sentry",
+  runId: "123",
+  jobId: "456",
+  url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+};
+
 function createDeps(states: WatchSnapshot[]): {
   deps: WatchControllerDeps;
   notifications: string[];
@@ -114,6 +123,52 @@ describe("watchController", () => {
     expect(controller.getWatches()).toEqual([]);
   });
 
+  it("clears all watches", async () => {
+    const { deps } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.add(runTarget);
+    controller.clearAll();
+
+    expect(controller.getWatches()).toEqual([]);
+  });
+
+  it("clears only inactive watches when clearing finished watches", async () => {
+    const { deps } = createDeps([
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "queued",
+        conclusion: null,
+        title: "CI: job",
+        url: jobTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.add(runTarget);
+    await controller.add(jobTarget);
+    controller.clearFinished();
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/job/456",
+        active: true,
+      },
+    ]);
+  });
+
   it("marks completed watches inactive after polling", async () => {
     const { deps } = createDeps([
       {
@@ -139,6 +194,27 @@ describe("watchController", () => {
         status: "completed:success",
         active: false,
         lastState: { status: "completed", conclusion: "success" },
+      },
+    ]);
+  });
+
+  it("uses the fetched job name as the watch label", async () => {
+    const { deps } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: test (macos)",
+        url: jobTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.add(jobTarget);
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/job/456",
+        label: "CI: test (macos)",
       },
     ]);
   });

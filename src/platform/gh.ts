@@ -68,13 +68,28 @@ export function createTauriShellExecutor(): ShellExecutor {
   return {
     async execute(program, args) {
       const { Command } = await import("@tauri-apps/plugin-shell");
-      const output = await Command.create(program, args).execute();
+      const commands = program === "gh" ? ["gh", "gh-homebrew", "gh-usrlocal"] : [program];
+      let lastError: unknown;
 
-      return {
-        code: output.code ?? 1,
-        stdout: output.stdout,
-        stderr: output.stderr,
-      };
+      for (const command of commands) {
+        try {
+          const output = await Command.create(command, args).execute();
+
+          return {
+            code: output.code ?? 1,
+            stdout: output.stdout,
+            stderr: output.stderr,
+          };
+        } catch (error) {
+          lastError = error;
+
+          if (!isMissingProgramError(error)) {
+            throw error;
+          }
+        }
+      }
+
+      throw lastError;
     },
   };
 }
@@ -98,11 +113,18 @@ function toJobSnapshot(fallbackUrl: string, response: JobViewResponse): WatchSna
 }
 
 function joinTitle(prefix: string | undefined, title: string | undefined): string {
-  if (prefix && title) {
-    return `${prefix}: ${title}`;
+  const cleanPrefix = prefix?.trim();
+  const cleanTitle = title?.trim();
+
+  if (cleanPrefix && cleanTitle) {
+    if (cleanPrefix.toLocaleLowerCase() === cleanTitle.toLocaleLowerCase()) {
+      return cleanTitle;
+    }
+
+    return `${cleanPrefix}: ${cleanTitle}`;
   }
 
-  return title || prefix || "GitHub Actions";
+  return cleanTitle || cleanPrefix || "GitHub Actions";
 }
 
 function normalizeConclusion(conclusion: string | null | undefined): string | null {
@@ -155,4 +177,15 @@ function normalizeGhError(error: unknown): Error {
   }
 
   return error instanceof Error ? error : new Error(message);
+}
+
+function isMissingProgramError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const lowerMessage = message.toLowerCase();
+  return (
+    lowerMessage.includes("program not found") ||
+    lowerMessage.includes("not found") ||
+    lowerMessage.includes("no such file") ||
+    lowerMessage.includes("enoent")
+  );
 }

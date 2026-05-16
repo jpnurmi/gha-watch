@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-hide",
     "notification:default",
     "opener:default",
     {
@@ -13,6 +14,16 @@
         {
           "name": "gh",
           "cmd": "gh",
+          "args": true
+        },
+        {
+          "name": "gh-homebrew",
+          "cmd": "/opt/homebrew/bin/gh",
+          "args": true
+        },
+        {
+          "name": "gh-usrlocal",
+          "cmd": "/usr/local/bin/gh",
           "args": true
         }
       ]

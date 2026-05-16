@@ -23,7 +23,7 @@ export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
   let parsed: URL;
 
   try {
-    parsed = new URL(input.trim());
+    parsed = new URL(extractGitHubUrl(input));
   } catch {
     throw new Error(unsupportedUrlMessage);
   }
@@ -70,4 +70,15 @@ export function parseGitHubActionsUrl(input: string): ParsedWatchTarget {
   }
 
   throw new Error(unsupportedUrlMessage);
+}
+
+function extractGitHubUrl(input: string): string {
+  const trimmed = input.trim();
+  const markdownLink = trimmed.match(/\]\((https:\/\/github\.com\/[^)\s]+)\)/);
+  if (markdownLink) {
+    return markdownLink[1];
+  }
+
+  const bareUrl = trimmed.match(/https:\/\/github\.com\/\S+/);
+  return bareUrl ? bareUrl[0].replace(/[),.;]+$/, "") : trimmed;
 }

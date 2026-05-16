@@ -17,6 +17,8 @@ export type WatchControllerDeps = {
 export type WatchController = {
   add(target: ParsedWatchTarget): Promise<void>;
   remove(id: string): void;
+  clearAll(): void;
+  clearFinished(): void;
   pollNow(): Promise<void>;
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
@@ -62,6 +64,7 @@ export function createWatchController(
         const snapshot = await deps.fetchState(target);
         updateWatch(id, (watch) => ({
           ...watch,
+          label: snapshot.title,
           status: formatWatchState(snapshot),
           lastState: {
             status: snapshot.status,
@@ -83,6 +86,14 @@ export function createWatchController(
       setWatches(removeWatch(watches, id));
     },
 
+    clearAll() {
+      setWatches([]);
+    },
+
+    clearFinished() {
+      setWatches(watches.filter((watch) => watch.active));
+    },
+
     async pollNow() {
       const activeWatches = watches.filter((watch) => watch.active);
 
@@ -96,6 +107,7 @@ export function createWatchController(
 
         updateWatch(watch.id, (current) => ({
           ...current,
+          label: snapshot.title,
           status: formatWatchState(nextState),
           lastState: nextState,
           active: !isTerminalStatus(nextState),

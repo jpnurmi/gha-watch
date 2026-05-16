@@ -1,6 +1,13 @@
 import type { WatchRecord } from "../domain/watches";
 
-export type RowTone = "pending" | "queued" | "in-progress" | "success" | "failure" | "error";
+export type RowTone =
+  | "pending"
+  | "queued"
+  | "in-progress"
+  | "success"
+  | "failure"
+  | "cancelled"
+  | "error";
 
 export type WatchRowViewModel = {
   id: string;
@@ -11,9 +18,18 @@ export type WatchRowViewModel = {
   url: string;
 };
 
+export type HeaderTone = "pending" | "success" | "warning";
+
+export type WatchGroupViewModel = {
+  repoLabel: string;
+  rows: WatchRowViewModel[];
+};
+
 export type PopupViewModel = {
   title: string;
   subtitle: string;
+  headerTone: HeaderTone;
+  groups: WatchGroupViewModel[];
   rows: WatchRowViewModel[];
 };
 
@@ -23,6 +39,7 @@ type Counts = {
   inProgress: number;
   successful: number;
   failed: number;
+  cancelled: number;
   errored: number;
 };
 
@@ -33,6 +50,8 @@ export function createPopupViewModel(watches: WatchRecord[]): PopupViewModel {
   return {
     title: getTitle(counts, rows.length),
     subtitle: getSubtitle(counts, rows.length),
+    headerTone: getHeaderTone(counts, rows.length),
+    groups: groupRowsByRepo(watches, rows),
     rows,
   };
 }
@@ -55,6 +74,10 @@ function createWatchRowViewModel(watch: WatchRecord): WatchRowViewModel {
   if (status === "completed") {
     if (conclusion === "success") {
       return createRow(watch, "Successful", "This check was successful.", "success");
+    }
+
+    if (conclusion === "cancelled") {
+      return createRow(watch, "Cancelled", "This check was cancelled.", "cancelled");
     }
 
     return createRow(watch, "Failed", "This check was not successful.", "failure");
@@ -87,6 +110,30 @@ function createRow(
   };
 }
 
+function groupRowsByRepo(watches: WatchRecord[], rows: WatchRowViewModel[]): WatchGroupViewModel[] {
+  const groups: WatchGroupViewModel[] = [];
+  const groupByRepo = new Map<string, WatchGroupViewModel>();
+
+  rows.forEach((row, index) => {
+    const repoLabel = getRepoLabel(watches[index]);
+    let group = groupByRepo.get(repoLabel);
+
+    if (!group) {
+      group = { repoLabel, rows: [] };
+      groupByRepo.set(repoLabel, group);
+      groups.push(group);
+    }
+
+    group.rows.push(row);
+  });
+
+  return groups;
+}
+
+function getRepoLabel(watch: WatchRecord): string {
+  return `${watch.target.owner}/${watch.target.repo}`;
+}
+
 function countRows(rows: WatchRowViewModel[]): Counts {
   return rows.reduce<Counts>(
     (counts, row) => {
@@ -100,6 +147,8 @@ function countRows(rows: WatchRowViewModel[]): Counts {
         counts.successful += 1;
       } else if (row.tone === "failure") {
         counts.failed += 1;
+      } else if (row.tone === "cancelled") {
+        counts.cancelled += 1;
       } else if (row.tone === "error") {
         counts.errored += 1;
       }
@@ -112,6 +161,7 @@ function countRows(rows: WatchRowViewModel[]): Counts {
       inProgress: 0,
       successful: 0,
       failed: 0,
+      cancelled: 0,
       errored: 0,
     },
   );
@@ -126,11 +176,34 @@ function getTitle(counts: Counts, total: number): string {
     return "Some checks were not successful";
   }
 
+  if (counts.cancelled > 0) {
+    return "Some checks were cancelled";
+  }
+
   if (counts.pending > 0 || counts.queued > 0 || counts.inProgress > 0) {
     return "Some checks haven't completed yet";
   }
 
   return "All checks have passed";
+}
+
+function getHeaderTone(counts: Counts, total: number): HeaderTone {
+  if (total === 0) {
+    return "pending";
+  }
+
+  if (
+    counts.failed > 0 ||
+    counts.cancelled > 0 ||
+    counts.errored > 0 ||
+    counts.pending > 0 ||
+    counts.queued > 0 ||
+    counts.inProgress > 0
+  ) {
+    return "warning";
+  }
+
+  return "success";
 }
 
 function getSubtitle(counts: Counts, total: number): string {
@@ -142,6 +215,7 @@ function getSubtitle(counts: Counts, total: number): string {
     countLabel(counts.inProgress, "in progress"),
     countLabel(counts.successful, "successful"),
     countLabel(counts.failed, "failed"),
+    countLabel(counts.cancelled, "cancelled"),
     countLabel(counts.errored, "errored"),
     countLabel(counts.queued + counts.pending, "queued"),
   ].filter(isString);

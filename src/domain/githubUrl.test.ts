@@ -14,6 +14,20 @@ describe("parseGitHubActionsUrl", () => {
     });
   });
 
+  it("parses markdown links containing workflow run URLs", () => {
+    expect(
+      parseGitHubActionsUrl(
+        "[getsentry/sentry](https://github.com/getsentry/sentry/actions/runs/1234567890)",
+      ),
+    ).toEqual({
+      kind: "run",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "1234567890",
+      url: "https://github.com/getsentry/sentry/actions/runs/1234567890",
+    });
+  });
+
   it("parses job URLs with an explicit job segment", () => {
     expect(
       parseGitHubActionsUrl(

@@ -1,7 +1,11 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { createCollapsedGroups } from "./app/collapsedGroups";
+import { getAddFormActions, getPopupBodySections, type AddFormAction, type PopupBodySection } from "./app/popupLayout";
+import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
-import { createPopupViewModel, type WatchRowViewModel } from "./app/viewModel";
+import { createTrayState } from "./app/trayState";
+import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
 import { parseGitHubActionsUrl } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
 import { fetchWatchState } from "./platform/gh";
@@ -24,6 +28,8 @@ const isDemoMode =
 let isAdding = false;
 let addError: string | undefined;
 let isPolling = false;
+let isClearMenuOpen = false;
+const collapsedGroups = createCollapsedGroups();
 
 const controller = createWatchController(
   {
@@ -49,38 +55,107 @@ window.setInterval(() => {
   void poll();
 }, pollIntervalMs);
 void poll();
+document.addEventListener("click", (event) => {
+  if (!isClearMenuOpen) {
+    return;
+  }
+
+  const target = event.target;
+
+  if (target instanceof Element && target.closest(".clear-menu")) {
+    return;
+  }
+
+  isClearMenuOpen = false;
+  render();
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    void hideMainWindow();
+  }
+});
 
 function render(): void {
   const watches = controller.getWatches();
-  const summary = getSummary(watches);
   const viewModel = createPopupViewModel(watches);
+  const hasWatches = watches.length > 0;
+  const hasFinishedWatches = watches.some((watch) => !watch.active);
 
   app.innerHTML = `
     <section class="shell">
       <header class="header">
         <div>
-          <h1>${escapeHtml(viewModel.title)}</h1>
+          <h1 class="header-title is-${viewModel.headerTone}">${escapeHtml(viewModel.title)}</h1>
           <p>${escapeHtml(viewModel.subtitle)}</p>
         </div>
         <div class="header-actions">
-          <button class="icon-button" type="button" data-action="toggle-add" title="Add watch" aria-label="Add watch">+</button>
-          <button class="plain-button" type="button" data-action="close" title="Close" aria-label="Close">x</button>
+          <button class="icon-button" type="button" data-action="toggle-add" title="Add watch" aria-label="Add watch">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 3.25v9.5M3.25 8h9.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+            </svg>
+          </button>
+          <div class="clear-menu">
+            <button
+              class="icon-button menu-button"
+              type="button"
+              data-action="toggle-clear-menu"
+              title="Clear watches"
+              aria-label="Clear watches"
+              aria-haspopup="menu"
+              aria-expanded="${isClearMenuOpen ? "true" : "false"}"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="3.75" r="1.25" fill="currentColor"/>
+                <circle cx="8" cy="8" r="1.25" fill="currentColor"/>
+                <circle cx="8" cy="12.25" r="1.25" fill="currentColor"/>
+              </svg>
+            </button>
+            ${
+              isClearMenuOpen
+                ? `<div class="clear-menu-popover" role="menu">
+                    <button type="button" role="menuitem" data-action="clear-all" ${hasWatches ? "" : "disabled"}>Clear all</button>
+                    <button type="button" role="menuitem" data-action="clear-finished" ${hasFinishedWatches ? "" : "disabled"}>Clear finished</button>
+                  </div>`
+                : ""
+            }
+          </div>
         </div>
       </header>
 
-      ${isAdding ? renderAddForm() : ""}
-
-      <ul class="watch-list">
-        ${
-          viewModel.rows.length === 0
-            ? `<li class="empty">No watches yet.</li>`
-            : viewModel.rows.map(renderWatch).join("")
-        }
-      </ul>
+      ${getPopupBodySections(isAdding)
+        .map((section) => renderPopupBodySection(section, viewModel))
+        .join("")}
     </section>
   `;
 
   bindEvents();
+}
+
+function renderPopupBodySection(
+  section: PopupBodySection,
+  viewModel: ReturnType<typeof createPopupViewModel>,
+): string {
+  if (section === "add-form") {
+    return renderAddForm();
+  }
+
+  return renderWatchList(viewModel);
+}
+
+function renderWatchList(viewModel: ReturnType<typeof createPopupViewModel>): string {
+  return `
+    <ul class="watch-list">
+      ${
+        viewModel.rows.length === 0
+          ? `<li class="empty">
+              <div class="empty-content">
+                <button class="empty-action" type="button" data-action="toggle-add">Add watch</button>
+              </div>
+            </li>`
+          : viewModel.groups.map(renderWatchGroup).join("")
+      }
+    </ul>
+  `;
 }
 
 function renderAddForm(): string {
@@ -94,41 +169,83 @@ function renderAddForm(): string {
         placeholder="https://github.com/OWNER/REPO/actions/runs/..."
         aria-label="GitHub Actions URL"
       />
-      <button type="submit">Watch</button>
+      ${getAddFormActions().map(renderAddFormAction).join("")}
       ${addError ? `<p class="form-error">${escapeHtml(addError)}</p>` : ""}
     </form>
+  `;
+}
+
+function renderAddFormAction(action: AddFormAction): string {
+  if (action === "dismiss") {
+    return `
+      <button class="add-form-dismiss" type="button" data-action="close-add" title="Cancel" aria-label="Cancel adding watch">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+        </svg>
+      </button>
+    `;
+  }
+
+  return `<button class="add-form-submit" type="submit">Watch</button>`;
+}
+
+function renderWatchGroup(group: WatchGroupViewModel): string {
+  const isCollapsed = collapsedGroups.has(group.repoLabel);
+
+  return `
+    <li class="watch-group${isCollapsed ? " is-collapsed" : ""}">
+      <button
+        class="watch-group-toggle"
+        type="button"
+        data-action="toggle-group"
+        data-repo="${escapeHtml(group.repoLabel)}"
+        aria-expanded="${isCollapsed ? "false" : "true"}"
+      >
+        <svg class="watch-group-chevron" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m6.25 3.75 4.5 4.25-4.5 4.25" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+        </svg>
+        <span class="watch-group-title">${escapeHtml(group.repoLabel)}</span>
+        <span class="watch-group-count">${group.rows.length} ${group.rows.length === 1 ? "check" : "checks"}</span>
+      </button>
+      ${
+        isCollapsed
+          ? ""
+          : `<ul class="watch-group-list">
+              ${group.rows.map(renderWatch).join("")}
+            </ul>`
+      }
+    </li>
   `;
 }
 
 function renderWatch(row: WatchRowViewModel): string {
   return `
     <li class="watch is-${row.tone}">
-      <span class="status-glyph" aria-hidden="true"></span>
-      <span class="provider-mark" aria-hidden="true">GH</span>
+      ${renderStatusIcon(row)}
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
         <span class="watch-label">${escapeHtml(row.label)}</span>
         <span class="watch-status">${escapeHtml(row.statusLabel)} - ${escapeHtml(row.description)}</span>
       </button>
-      <button class="details-button" type="button" data-action="open" data-id="${escapeHtml(row.id)}">Details</button>
-      <button class="remove-button" type="button" data-action="remove" data-id="${escapeHtml(row.id)}" title="Remove watch" aria-label="Remove ${escapeHtml(row.label)}">x</button>
+      <button class="remove-button" type="button" data-action="remove" data-id="${escapeHtml(row.id)}" title="Remove watch" aria-label="Remove ${escapeHtml(row.label)}">&times;</button>
     </li>
   `;
 }
 
+function renderStatusIcon(row: WatchRowViewModel): string {
+  const icon = getStatusIconSvg(row.tone, row.id);
+  return `<span class="status-icon status-icon-${row.tone}" aria-hidden="true">${icon}</span>`;
+}
+
 function bindEvents(): void {
-  app.querySelector<HTMLButtonElement>('[data-action="toggle-add"]')?.addEventListener(
-    "click",
-    () => {
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-add"]')) {
+    button.addEventListener("click", () => {
       isAdding = !isAdding;
+      isClearMenuOpen = false;
       addError = undefined;
       render();
       app.querySelector<HTMLInputElement>('input[name="url"]')?.focus();
-    },
-  );
-
-  app.querySelector<HTMLButtonElement>('[data-action="close"]')?.addEventListener("click", () => {
-    void getCurrentWindow().hide();
-  });
+    });
+  }
 
   app.querySelector<HTMLFormElement>('[data-role="add-form"]')?.addEventListener(
     "submit",
@@ -138,6 +255,51 @@ function bindEvents(): void {
       const formData = new FormData(form);
       const url = String(formData.get("url") || "");
       void addWatch(url);
+    },
+  );
+
+  app.querySelector<HTMLButtonElement>('[data-action="close-add"]')?.addEventListener(
+    "click",
+    () => {
+      isAdding = false;
+      addError = undefined;
+      render();
+    },
+  );
+
+  app.querySelector<HTMLButtonElement>('[data-action="toggle-clear-menu"]')?.addEventListener(
+    "click",
+    () => {
+      isClearMenuOpen = !isClearMenuOpen;
+      render();
+    },
+  );
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-group"]')) {
+    button.addEventListener("click", () => {
+      const repoLabel = button.dataset.repo;
+
+      if (repoLabel) {
+        collapsedGroups.toggle(repoLabel);
+        isClearMenuOpen = false;
+        render();
+      }
+    });
+  }
+
+  app.querySelector<HTMLButtonElement>('[data-action="clear-finished"]')?.addEventListener(
+    "click",
+    () => {
+      isClearMenuOpen = false;
+      controller.clearFinished();
+    },
+  );
+
+  app.querySelector<HTMLButtonElement>('[data-action="clear-all"]')?.addEventListener(
+    "click",
+    () => {
+      isClearMenuOpen = false;
+      controller.clearAll();
     },
   );
 
@@ -158,11 +320,20 @@ function bindEvents(): void {
   }
 }
 
+async function hideMainWindow(): Promise<void> {
+  try {
+    await getCurrentWindow().hide();
+  } catch (error) {
+    console.error("Could not hide GHA Watch window.", error);
+  }
+}
+
 async function addWatch(url: string): Promise<void> {
   try {
     const target = parseGitHubActionsUrl(url);
     await controller.add(target);
     isAdding = false;
+    isClearMenuOpen = false;
     addError = undefined;
   } catch (error) {
     addError = error instanceof Error ? error.message : String(error);
@@ -191,42 +362,8 @@ async function poll(): Promise<void> {
 }
 
 async function updateTrayIndicator(): Promise<void> {
-  const summary = getSummary(controller.getWatches());
-  await setTrayIndicator(summary.indicator, summary.tooltip);
-}
-
-function getSummary(watches: WatchRecord[]): {
-  indicator: string;
-  label: string;
-  tooltip: string;
-} {
-  const active = watches.filter((watch) => watch.active);
-  const errors = watches.filter((watch) => Boolean(watch.error));
-  const failures = watches.filter(
-    (watch) => watch.lastState?.status === "completed" && watch.lastState.conclusion !== "success",
-  );
-
-  if (errors.length > 0 || failures.length > 0) {
-    return {
-      indicator: "GHA !",
-      label: `${errors.length + failures.length} watch issue`,
-      tooltip: "GHA Watch has failed or errored watches",
-    };
-  }
-
-  if (active.length > 0) {
-    return {
-      indicator: "GHA ...",
-      label: `${active.length} active watch${active.length === 1 ? "" : "es"}`,
-      tooltip: `GHA Watch: ${active.length} active watch${active.length === 1 ? "" : "es"}`,
-    };
-  }
-
-  return {
-    indicator: "GHA",
-    label: watches.length === 0 ? "No watches" : "All watches complete",
-    tooltip: "GHA Watch",
-  };
+  const summary = createTrayState(controller.getWatches());
+  await setTrayIndicator(summary.status, summary.tooltip);
 }
 
 function escapeHtml(value: string): string {
