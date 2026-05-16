@@ -13,7 +13,7 @@ import type { WatchNotification } from "./app/watchNotification";
 import { parseGitHubActionsUrl } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
 import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch, resolvePrWatchTargets } from "./platform/gh";
-import { sendDesktopNotification } from "./platform/notifications";
+import { clearDesktopNotifications, sendDesktopNotification } from "./platform/notifications";
 import { loadWatches, saveWatches } from "./platform/store";
 import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
@@ -119,7 +119,7 @@ window.addEventListener("keydown", (event) => {
 });
 void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   if (!focused) {
-    markAllSeenStatusChanges();
+    void acknowledgePopupDismissal();
   }
 });
 
@@ -465,19 +465,23 @@ async function confirmRerun(id: string): Promise<void> {
 
 async function hideMainWindow(): Promise<void> {
   try {
-    markAllSeenStatusChanges();
+    await acknowledgePopupDismissal();
     await getCurrentWindow().hide();
   } catch (error) {
     console.error("Could not hide GHA Watch window.", error);
   }
 }
 
-function markAllSeenStatusChanges(): void {
-  if (!createTrayState(controller.getWatches()).hasUnseenChanges) {
-    return;
+async function acknowledgePopupDismissal(): Promise<void> {
+  if (createTrayState(controller.getWatches()).hasUnseenChanges) {
+    controller.markAllSeen();
   }
 
-  controller.markAllSeen();
+  try {
+    await clearDesktopNotifications();
+  } catch (error) {
+    console.warn("Could not clear desktop notifications.", error);
+  }
 }
 
 async function addWatch(url: string): Promise<void> {

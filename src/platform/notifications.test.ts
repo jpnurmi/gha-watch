@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WatchNotification } from "../app/watchNotification";
-import { sendDesktopNotification, type DesktopNotificationDeps } from "./notifications";
+import { clearDesktopNotifications, sendDesktopNotification, type DesktopNotificationDeps } from "./notifications";
 
 function notification(overrides: Partial<WatchNotification> = {}): WatchNotification {
   return {
@@ -109,5 +109,40 @@ describe("sendDesktopNotification", () => {
 
     expect(scheduledDelay).toBe(5_000);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears visible and delivered native notifications", async () => {
+    const firstClose = vi.fn();
+    const secondClose = vi.fn();
+    const cancelAllNotifications = vi.fn(async () => {});
+    const removeAllActiveNotifications = vi.fn(async () => {});
+    let createdNotifications = 0;
+    const deps: DesktopNotificationDeps = {
+      async isPermissionGranted() {
+        return true;
+      },
+      async requestPermission() {
+        return "denied";
+      },
+      createNotification() {
+        createdNotifications += 1;
+        return {
+          onclick: null,
+          close: createdNotifications === 1 ? firstClose : secondClose,
+        };
+      },
+      async openUrl() {},
+      cancelAllNotifications,
+      removeAllActiveNotifications,
+    };
+
+    await sendDesktopNotification(notification(), deps);
+    await sendDesktopNotification(notification({ watchId: "jpnurmi/gha/job/789" }), deps);
+    await clearDesktopNotifications(deps);
+
+    expect(firstClose).toHaveBeenCalledTimes(1);
+    expect(secondClose).toHaveBeenCalledTimes(1);
+    expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+    expect(removeAllActiveNotifications).toHaveBeenCalledTimes(1);
   });
 });

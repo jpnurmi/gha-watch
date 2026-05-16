@@ -1,5 +1,7 @@
 import {
+  cancelAll,
   isPermissionGranted,
+  removeAllActive,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -22,9 +24,12 @@ export type DesktopNotificationDeps = {
   createNotification(title: string, options: NativeNotificationOptions): NativeNotificationHandle;
   openUrl(url: string): Promise<void>;
   setNotificationTimeout?(callback: () => void, delay: number): unknown;
+  cancelAllNotifications?(): Promise<void>;
+  removeAllActiveNotifications?(): Promise<void>;
 };
 
 const transientNotificationDurationMs = 5_000;
+const activeNotifications = new Set<NativeNotificationHandle>();
 
 const desktopNotificationDeps: DesktopNotificationDeps = {
   isPermissionGranted,
@@ -36,7 +41,14 @@ const desktopNotificationDeps: DesktopNotificationDeps = {
   setNotificationTimeout(callback, delay) {
     return window.setTimeout(callback, delay);
   },
+  cancelAllNotifications: cancelAll,
+  removeAllActiveNotifications: removeAllActive,
 };
+
+function closeNotification(notification: NativeNotificationHandle): void {
+  activeNotifications.delete(notification);
+  notification.close();
+}
 
 export async function sendDesktopNotification(
   notification: WatchNotification,
@@ -58,16 +70,31 @@ export async function sendDesktopNotification(
       group: notification.group,
     });
 
+    activeNotifications.add(shownNotification);
+
     shownNotification.onclick = () => {
-      shownNotification.close();
+      closeNotification(shownNotification);
       onClick?.(notification);
       void deps.openUrl(notification.url);
     };
 
     if (!notification.persistent) {
       deps.setNotificationTimeout?.(() => {
-        shownNotification.close();
+        closeNotification(shownNotification);
       }, transientNotificationDurationMs);
     }
   }
+}
+
+export async function clearDesktopNotifications(
+  deps: DesktopNotificationDeps = desktopNotificationDeps,
+): Promise<void> {
+  for (const notification of Array.from(activeNotifications)) {
+    closeNotification(notification);
+  }
+
+  await Promise.allSettled([
+    deps.cancelAllNotifications?.(),
+    deps.removeAllActiveNotifications?.(),
+  ]);
 }
