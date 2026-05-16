@@ -97,9 +97,7 @@ jobs:
     name: Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    needs:
-      - lint
-      - test
+    needs: test
     strategy:
       fail-fast: false
       matrix:
