@@ -26,6 +26,7 @@ export type WatchControllerDeps = {
   fetchActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   fetchOpenPullRequests?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
+  notificationsPaused?(): boolean;
   notify(notification: WatchNotification): Promise<void>;
   resolvePrWatchTargets?(target: PrWatchTarget): Promise<PrWatchResolution>;
   rerunFailed?(target: CheckWatchTarget): Promise<void>;
@@ -381,7 +382,7 @@ export function createWatchController(
           return nextWatch;
         });
 
-        if (notification) {
+        if (notification && !deps.notificationsPaused?.()) {
           await deps.notify(notification);
         }
       }
