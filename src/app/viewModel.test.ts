@@ -153,6 +153,45 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("keeps workflow status separate from pull request source state", () => {
+    const model = createPopupViewModel([
+      watch({
+        sourceState: "draft",
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+      }),
+      watch({
+        id: "getsentry/sentry/run/456",
+        sourceState: "ready",
+        status: "queued",
+        lastState: { status: "queued", conclusion: null },
+      }),
+      watch({
+        id: "getsentry/sentry/run/789",
+        sourceState: "merged",
+        status: "completed:success",
+        active: false,
+        lastState: { status: "completed", conclusion: "success" },
+      }),
+      watch({
+        id: "getsentry/sentry/run/790",
+        sourceState: "closed",
+        status: "completed:failure",
+        active: false,
+        lastState: { status: "completed", conclusion: "failure" },
+      }),
+    ]);
+
+    expect(
+      model.rows.map((row) => [row.statusLabel, row.tone, row.prState?.label, row.prState?.tone]),
+    ).toEqual([
+      ["In progress", "in-progress", "Draft", "draft"],
+      ["Queued", "queued", "Ready", "ready"],
+      ["Successful", "success", "Merged", "merged"],
+      ["Failed", "failure", "Closed", "closed"],
+    ]);
+  });
+
   it("marks rows with unseen status changes", () => {
     const model = createPopupViewModel([
       watch({

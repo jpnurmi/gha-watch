@@ -1,6 +1,13 @@
 import type { CheckWatchTarget, PrWatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
 
+export type PrSourceState = "draft" | "ready" | "merged" | "closed";
+
+export type PrWatchResolution = {
+  targets: CheckWatchTarget[];
+  sourceState: PrSourceState;
+};
+
 export type WatchTiming = {
   queuedAt?: string;
   startedAt?: string;
@@ -11,6 +18,7 @@ export type WatchRecord = {
   id: string;
   target: CheckWatchTarget;
   source?: PrWatchTarget;
+  sourceState?: PrSourceState;
   label: string;
   repoIconUrl?: string;
   status: string;
@@ -41,6 +49,7 @@ export function addWatch(
   watches: WatchRecord[],
   target: CheckWatchTarget,
   source?: PrWatchTarget,
+  sourceState?: PrSourceState,
 ): WatchRecord[] {
   const id = getWatchId(target);
 
@@ -54,6 +63,7 @@ export function addWatch(
       id,
       target,
       ...(source ? { source } : {}),
+      ...(sourceState ? { sourceState } : {}),
       label: getWatchLabel(target),
       status: "pending",
       lastSeenStatus: "pending",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
-import type { WatchRecord } from "../domain/watches";
+import type { PrWatchResolution, WatchRecord } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
 
 const runTarget: CheckWatchTarget = {
@@ -38,7 +38,9 @@ const prRunTarget: RunWatchTarget = {
   url: "https://github.com/getsentry/sentry/actions/runs/789",
 };
 
-function createDeps(states: WatchSnapshot[], prResolutions: CheckWatchTarget[][] = []): {
+type TestPrWatchResolution = CheckWatchTarget[] | PrWatchResolution;
+
+function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolution[] = []): {
   deps: WatchControllerDeps;
   notifications: string[];
   notificationRecords: WatchControllerDeps extends { notify(notification: infer Notification): Promise<void> }
@@ -86,7 +88,7 @@ function createDeps(states: WatchSnapshot[], prResolutions: CheckWatchTarget[][]
           throw new Error("No fake PR resolution queued.");
         }
 
-        return targets;
+        return Array.isArray(targets) ? { targets, sourceState: "ready" } : targets;
       },
       async save() {},
     },
@@ -181,6 +183,7 @@ describe("watchController", () => {
         id: "getsentry/sentry/run/789",
         target: prRunTarget,
         source: prTarget,
+        sourceState: "ready",
         label: "CI: tests",
         status: "queued",
         lastSeenStatus: "queued",
@@ -220,11 +223,94 @@ describe("watchController", () => {
       {
         id: "getsentry/sentry/run/789",
         source: prTarget,
+        sourceState: "ready",
         status: "in_progress",
       },
     ]);
     expect(notifications).toEqual([]);
   });
+
+  it("updates PR source state without replacing current run watches", async () => {
+    const oldWatch: WatchRecord = {
+      id: "getsentry/sentry/run/789",
+      target: prRunTarget,
+      source: prTarget,
+      sourceState: "draft",
+      label: "CI",
+      status: "queued",
+      lastSeenStatus: "queued",
+      lastState: { status: "queued", conclusion: null },
+      active: true,
+      error: undefined,
+    };
+    const { deps } = createDeps(
+      [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI",
+          prNumber: "51",
+          url: prRunTarget.url,
+        },
+      ],
+      [{ targets: [prRunTarget], sourceState: "ready" }],
+    );
+    const controller = createWatchController(deps, [oldWatch]);
+
+    await controller.pollNow();
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/789",
+        source: prTarget,
+        sourceState: "ready",
+        status: "in_progress",
+      },
+    ]);
+  });
+
+  it.each(["merged", "closed"] as const)(
+    "keeps polling workflow runs while marking the source PR as %s",
+    async (sourceState) => {
+      const sourceWatch: WatchRecord = {
+        id: "getsentry/sentry/run/789",
+        target: prRunTarget,
+        source: prTarget,
+        label: "CI",
+        status: "queued",
+        lastSeenStatus: "queued",
+        lastState: { status: "queued", conclusion: null },
+        active: true,
+        error: undefined,
+      };
+      const { deps, fetches } = createDeps(
+        [
+          {
+            status: "in_progress",
+            conclusion: null,
+            title: "CI",
+            prNumber: "51",
+            url: prRunTarget.url,
+          },
+        ],
+        [{ targets: [], sourceState }],
+      );
+      const controller = createWatchController(deps, [sourceWatch]);
+
+      await controller.pollNow();
+
+      expect(fetches).toEqual([prRunTarget]);
+      expect(controller.getWatches()).toMatchObject([
+        {
+          id: "getsentry/sentry/run/789",
+          source: prTarget,
+          sourceState,
+          status: "in_progress",
+          active: true,
+        },
+      ]);
+    },
+  );
 
   it("refreshes missing pull request references for existing inactive watches", async () => {
     const { deps, notifications } = createDeps([

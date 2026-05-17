@@ -1,6 +1,6 @@
 import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
-import type { WatchTiming } from "../domain/watches";
+import type { PrSourceState, PrWatchResolution, WatchTiming } from "../domain/watches";
 
 export type ShellResult = {
   code: number;
@@ -59,6 +59,9 @@ type PullRequestReference = {
 type PrViewResponse = {
   headRefName?: string;
   headRefOid?: string;
+  isDraft?: boolean;
+  mergedAt?: string | null;
+  state?: string;
 };
 
 type RunListResponse = {
@@ -125,7 +128,7 @@ export async function fetchAuthenticatedUserLogin(
 export async function resolvePrWatchTargets(
   target: PrWatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
-): Promise<CheckWatchTarget[]> {
+): Promise<PrWatchResolution> {
   try {
     const prResult = await executor.execute("gh", [
       "pr",
@@ -134,11 +137,17 @@ export async function resolvePrWatchTargets(
       "-R",
       `${target.owner}/${target.repo}`,
       "--json",
-      "headRefName,headRefOid",
+      "headRefName,headRefOid,isDraft,mergedAt,state",
     ]);
     assertSuccessfulGhResult(prResult);
 
     const pr = parseJson<PrViewResponse>(prResult.stdout);
+    const sourceState = getPrSourceState(pr);
+
+    if (sourceState === "merged" || sourceState === "closed") {
+      return { targets: [], sourceState };
+    }
+
     const headRefName = requiredString(pr.headRefName, "pull request head branch");
     const headRefOid = requiredString(pr.headRefOid, "pull request head SHA");
     const runsResult = await executor.execute("gh", [
@@ -157,13 +166,29 @@ export async function resolvePrWatchTargets(
     ]);
     assertSuccessfulGhResult(runsResult);
 
-    return parseJson<RunListResponse[]>(runsResult.stdout)
+    const targets = parseJson<RunListResponse[]>(runsResult.stdout)
       .filter((run) => run.event === "pull_request" && run.headSha === headRefOid)
       .map((run) => toPrRunTarget(target, run))
       .filter((run): run is RunWatchTarget => Boolean(run));
+
+    return { targets, sourceState };
   } catch (error) {
     throw normalizeGhError(error);
   }
+}
+
+function getPrSourceState(pr: PrViewResponse): PrSourceState {
+  const state = pr.state?.toUpperCase();
+
+  if (pr.mergedAt || state === "MERGED") {
+    return "merged";
+  }
+
+  if (state === "CLOSED") {
+    return "closed";
+  }
+
+  return pr.isDraft ? "draft" : "ready";
 }
 
 function toPrRunTarget(source: PrWatchTarget, run: RunListResponse): RunWatchTarget | undefined {

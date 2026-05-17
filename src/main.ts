@@ -6,6 +6,7 @@ import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu"
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
+import { getPrStateIconSvg } from "./app/prStateIcon";
 import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
 import { isWatchActionConfirmation } from "./app/watchActionConfirmation";
@@ -63,7 +64,7 @@ const controller = createWatchController(
       : fetchWatchState,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     notify: notifyStatusChange,
-    resolvePrWatchTargets: isDemoMode ? async () => [] : resolvePrWatchTargets,
+    resolvePrWatchTargets: isDemoMode ? async () => ({ targets: [], sourceState: "ready" }) : resolvePrWatchTargets,
     rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
     save: saveWatches,
   },
@@ -298,12 +299,24 @@ function renderWatch(row: WatchRowViewModel): string {
         <span class="watch-label">
           <span class="watch-title-text">${escapeHtml(row.label)}</span>
           ${row.prReference ? `<span class="watch-pr-reference">${escapeHtml(row.prReference)}</span>` : ""}
+          ${row.prState ? renderPrState(row.prState) : ""}
         </span>
         <span class="watch-status">${escapeHtml(row.statusLabel)} - ${escapeHtml(row.description)}</span>
         ${row.timingText ? `<span class="watch-timing">${escapeHtml(row.timingText)}</span>` : ""}
       </button>
       ${renderWatchActions(row)}
     </li>
+  `;
+}
+
+function renderPrState(prState: NonNullable<WatchRowViewModel["prState"]>): string {
+  const label = escapeHtml(prState.label);
+
+  return `
+    <span class="watch-pr-state watch-pr-state-${prState.tone}" title="Pull request ${label}" aria-label="Pull request ${label}">
+      ${getPrStateIconSvg(prState.tone)}
+      <span>${label}</span>
+    </span>
   `;
 }
 
@@ -681,10 +694,22 @@ function escapeHtml(value: string): string {
 function loadInitialWatches(): WatchRecord[] {
   if (isDemoMode) {
     return [
-      createDemoWatch("1", "CI / Android (Qt LTS, API 28) (push)", "in_progress", null, true),
-      createDemoWatch("2", "E2E / Android (Qt LTS, API 35) (push)", "in_progress", null, true),
-      createDemoWatch("3", "CI / Cocoa (Qt latest, macOS-26) (push)", "queued", null, true),
-      createDemoWatch("4", "CI / Crashpad (Qt LTS, ubuntu-24.04) (push)", "completed", "success", false),
+      createDemoWatch("1", "CI / Android (Qt LTS, API 28) (push)", "in_progress", null, true, {
+        prNumber: "50",
+        sourceState: "draft",
+      }),
+      createDemoWatch("2", "E2E / Android (Qt LTS, API 35) (push)", "in_progress", null, true, {
+        prNumber: "51",
+        sourceState: "ready",
+      }),
+      createDemoWatch("3", "CI / Cocoa (Qt latest, macOS-26) (push)", "queued", null, true, {
+        prNumber: "52",
+        sourceState: "merged",
+      }),
+      createDemoWatch("4", "CI / Crashpad (Qt LTS, ubuntu-24.04) (push)", "completed", "success", false, {
+        prNumber: "53",
+        sourceState: "closed",
+      }),
     ];
   }
 
@@ -697,6 +722,7 @@ function createDemoWatch(
   status: string,
   conclusion: string | null,
   active: boolean,
+  options: { prNumber?: string; sourceState?: WatchRecord["sourceState"] } = {},
 ): WatchRecord {
   return {
     id: `getsentry/sentry/run/${runId}`,
@@ -705,8 +731,21 @@ function createDemoWatch(
       owner: "getsentry",
       repo: "sentry",
       runId,
+      ...(options.prNumber ? { prNumber: options.prNumber } : {}),
       url: `https://github.com/getsentry/sentry/actions/runs/${runId}`,
     },
+    ...(options.prNumber
+      ? {
+          source: {
+            kind: "pr",
+            owner: "getsentry",
+            repo: "sentry",
+            prNumber: options.prNumber,
+            url: `https://github.com/getsentry/sentry/pull/${options.prNumber}`,
+          },
+        }
+      : {}),
+    ...(options.sourceState ? { sourceState: options.sourceState } : {}),
     label,
     status: conclusion ? `${status}:${conclusion}` : status,
     lastState: { status, conclusion },

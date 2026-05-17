@@ -7,6 +7,7 @@ import {
   markWatchSeen,
   normalizeWatchSeenStatus,
   removeWatch,
+  type PrWatchResolution,
   type WatchRecord,
 } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
@@ -16,7 +17,7 @@ export type WatchControllerDeps = {
   fetchState(target: CheckWatchTarget): Promise<WatchSnapshot>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   notify(notification: WatchNotification): Promise<void>;
-  resolvePrWatchTargets?(target: PrWatchTarget): Promise<CheckWatchTarget[]>;
+  resolvePrWatchTargets?(target: PrWatchTarget): Promise<PrWatchResolution>;
   rerunFailed?(target: CheckWatchTarget): Promise<void>;
   now?(): Date;
   save(watches: WatchRecord[]): Promise<void>;
@@ -110,9 +111,13 @@ export function createWatchController(
     }
   }
 
-  async function addCheckWatch(target: CheckWatchTarget, source?: PrWatchTarget): Promise<void> {
+  async function addCheckWatch(
+    target: CheckWatchTarget,
+    source?: PrWatchTarget,
+    sourceState?: PrWatchResolution["sourceState"],
+  ): Promise<void> {
     const previous = watches;
-    const next = addWatch(watches, target, source);
+    const next = addWatch(watches, target, source, sourceState);
 
     if (next === previous) {
       return;
@@ -125,7 +130,14 @@ export function createWatchController(
     await loadBaselineState(id, target);
   }
 
-  function reconcilePrWatchTargets(source: PrWatchTarget, targets: CheckWatchTarget[]): void {
+  function reconcilePrWatchTargets(source: PrWatchTarget, resolution: PrWatchResolution): void {
+    const { targets, sourceState } = resolution;
+
+    if (targets.length === 0) {
+      updatePrSourceState(source, sourceState);
+      return;
+    }
+
     const targetIds = new Set(targets.map(getWatchId));
     let next = watches.filter((watch) => !isSamePrSource(watch.source, source) || targetIds.has(watch.id));
 
@@ -134,34 +146,52 @@ export function createWatchController(
       const existing = next.find((watch) => watch.id === id);
 
       if (existing) {
-        next = next.map((watch) => (watch.id === id ? { ...watch, target, source } : watch));
+        next = next.map((watch) => (watch.id === id ? { ...watch, target, source, sourceState } : watch));
       } else {
-        next = addWatch(next, target, source);
+        next = addWatch(next, target, source, sourceState);
       }
     }
 
     setWatches(next);
   }
 
-  async function resolvePrWatchTargets(source: PrWatchTarget): Promise<CheckWatchTarget[]> {
+  function updatePrSourceState(source: PrWatchTarget, sourceState: PrWatchResolution["sourceState"]): void {
+    let changed = false;
+    const next = watches.map((watch) => {
+      if (!isSamePrSource(watch.source, source) || watch.sourceState === sourceState) {
+        return watch;
+      }
+
+      changed = true;
+      return { ...watch, sourceState };
+    });
+
+    if (changed) {
+      setWatches(next);
+    }
+  }
+
+  async function getPrWatchResolution(source: PrWatchTarget): Promise<PrWatchResolution> {
     if (!deps.resolvePrWatchTargets) {
       throw new Error("Live PR watches need GitHub PR resolution support.");
     }
 
-    const targets = await deps.resolvePrWatchTargets(source);
+    return deps.resolvePrWatchTargets(source);
+  }
 
-    if (targets.length === 0) {
+  function assertPrWatchHasTargets(resolution: PrWatchResolution): void {
+    if (resolution.targets.length === 0) {
       throw new Error("No workflow runs were found for this pull request.");
     }
-
-    return targets;
   }
 
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
-    const targets = await resolvePrWatchTargets(source);
-    reconcilePrWatchTargets(source, targets);
+    const resolution = await getPrWatchResolution(source);
 
-    for (const target of targets) {
+    assertPrWatchHasTargets(resolution);
+    reconcilePrWatchTargets(source, resolution);
+
+    for (const target of resolution.targets) {
       void refreshRepositoryIcon(getWatchId(target), target);
       await loadBaselineState(getWatchId(target), target);
     }
@@ -170,8 +200,8 @@ export function createWatchController(
   async function refreshPrSourceWatches(): Promise<void> {
     for (const source of getPrSources(watches)) {
       try {
-        const targets = await resolvePrWatchTargets(source);
-        reconcilePrWatchTargets(source, targets);
+        const resolution = await getPrWatchResolution(source);
+        reconcilePrWatchTargets(source, resolution);
       } catch {
         // Existing concrete run watches should keep polling even if PR resolution briefly fails.
       }

@@ -277,6 +277,9 @@ describe("resolvePrWatchTargets", () => {
         stdout: JSON.stringify({
           headRefName: "ci/ios",
           headRefOid: "abc123",
+          isDraft: false,
+          mergedAt: null,
+          state: "OPEN",
         }),
         stderr: "",
       },
@@ -317,24 +320,27 @@ describe("resolvePrWatchTargets", () => {
         },
         executor,
       ),
-    ).resolves.toEqual([
-      {
-        kind: "run",
-        owner: "jpnurmi",
-        repo: "sentry-qml",
-        runId: "101",
-        prNumber: "51",
-        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
-      },
-      {
-        kind: "run",
-        owner: "jpnurmi",
-        repo: "sentry-qml",
-        runId: "102",
-        prNumber: "51",
-        url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102",
-      },
-    ]);
+    ).resolves.toEqual({
+      sourceState: "ready",
+      targets: [
+        {
+          kind: "run",
+          owner: "jpnurmi",
+          repo: "sentry-qml",
+          runId: "101",
+          prNumber: "51",
+          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
+        },
+        {
+          kind: "run",
+          owner: "jpnurmi",
+          repo: "sentry-qml",
+          runId: "102",
+          prNumber: "51",
+          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102",
+        },
+      ],
+    });
 
     expect(calls).toEqual([
       {
@@ -346,7 +352,7 @@ describe("resolvePrWatchTargets", () => {
           "-R",
           "jpnurmi/sentry-qml",
           "--json",
-          "headRefName,headRefOid",
+          "headRefName,headRefOid,isDraft,mergedAt,state",
         ],
       },
       {
@@ -364,6 +370,98 @@ describe("resolvePrWatchTargets", () => {
           "50",
           "--json",
           "databaseId,event,headSha,url",
+        ],
+      },
+    ]);
+  });
+
+  it("resolves draft pull request runs with a draft source state", async () => {
+    const { executor } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          headRefName: "ci/ios",
+          headRefOid: "abc123",
+          isDraft: true,
+          mergedAt: null,
+          state: "OPEN",
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          {
+            databaseId: 101,
+            event: "pull_request",
+            headSha: "abc123",
+            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
+          },
+        ]),
+        stderr: "",
+      },
+    ]);
+
+    await expect(
+      resolvePrWatchTargets(
+        {
+          kind: "pr",
+          owner: "jpnurmi",
+          repo: "sentry-qml",
+          prNumber: "51",
+          url: "https://github.com/jpnurmi/sentry-qml/pull/51",
+        },
+        executor,
+      ),
+    ).resolves.toMatchObject({
+      sourceState: "draft",
+      targets: [
+        {
+          runId: "101",
+        },
+      ],
+    });
+  });
+
+  it.each([
+    ["merged", { mergedAt: "2026-05-17T10:15:00Z", state: "MERGED" }],
+    ["closed", { mergedAt: null, state: "CLOSED" }],
+  ] as const)("resolves %s pull requests without fetching workflow runs", async (sourceState, prResponse) => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify(prResponse),
+        stderr: "",
+      },
+    ]);
+
+    await expect(
+      resolvePrWatchTargets(
+        {
+          kind: "pr",
+          owner: "jpnurmi",
+          repo: "sentry-qml",
+          prNumber: "51",
+          url: "https://github.com/jpnurmi/sentry-qml/pull/51",
+        },
+        executor,
+      ),
+    ).resolves.toEqual({
+      sourceState,
+      targets: [],
+    });
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "pr",
+          "view",
+          "51",
+          "-R",
+          "jpnurmi/sentry-qml",
+          "--json",
+          "headRefName,headRefOid,isDraft,mergedAt,state",
         ],
       },
     ]);
