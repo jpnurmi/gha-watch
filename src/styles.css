@@ -550,7 +550,6 @@ input {
 }
 
 .watch-pr-reference,
-.watch-pr-state-text,
 .watch-workflow-status,
 .watch-meta-separator {
   flex: 0 0 auto;
@@ -559,22 +558,6 @@ input {
 .watch-pr-reference {
   color: rgb(238 241 245 / 52%);
   font-weight: 750;
-}
-
-.watch-pr-state-draft {
-  color: #8b949e;
-}
-
-.watch-pr-state-ready {
-  color: #3fb950;
-}
-
-.watch-pr-state-merged {
-  color: #a371f7;
-}
-
-.watch-pr-state-closed {
-  color: #f85149;
 }
 
 .watch-workflow-status {

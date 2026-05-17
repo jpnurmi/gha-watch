@@ -299,9 +299,7 @@ function renderWatch(row: WatchRowViewModel): string {
         <span class="watch-label">
           <span class="watch-title-text">${escapeHtml(row.label)}</span>
         </span>
-        <span class="watch-meta">
-          ${renderMetadataItems(row)}
-        </span>
+        ${renderMetadata(row)}
       </button>
       ${renderWatchActions(row)}
     </li>
@@ -316,7 +314,7 @@ function renderLeadingIcon(row: WatchRowViewModel): string {
   return renderStatusIcon(row, "watch-leading-icon");
 }
 
-function renderMetadataItems(row: WatchRowViewModel): string {
+function renderMetadata(row: WatchRowViewModel): string {
   const items: string[] = [];
 
   if (row.prReference) {
@@ -324,12 +322,8 @@ function renderMetadataItems(row: WatchRowViewModel): string {
   }
 
   if (row.prState) {
-    items.push(
-      `<span class="watch-pr-state-text watch-pr-state-${row.prState.tone}">${escapeHtml(row.prState.label)}</span>`,
-    );
+    items.push(renderWorkflowStatus(row));
   }
-
-  items.push(renderWorkflowStatus(row));
 
   const detail = getMetadataDetail(row);
 
@@ -337,7 +331,7 @@ function renderMetadataItems(row: WatchRowViewModel): string {
     items.push(`<span class="watch-meta-text">${escapeHtml(detail)}</span>`);
   }
 
-  return items.join(renderMetaSeparator());
+  return items.length > 0 ? `<span class="watch-meta">${items.join(renderMetaSeparator())}</span>` : "";
 }
 
 function renderMetaSeparator(): string {
