@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addFavoriteRepo,
   getFavoriteRepoKey,
   isFavoriteRepo,
   normalizeFavoriteRepos,
@@ -36,6 +37,16 @@ describe("favorite repo operations", () => {
 
     expect(favorites).toEqual([{ owner: "getsentry", repo: "sentry" }]);
     expect(toggleFavoriteRepo(favorites, { owner: "getsentry", repo: "sentry" })).toEqual([]);
+  });
+
+  it("adds favorite repos without removing existing favorites", () => {
+    const favorites = [{ owner: "getsentry", repo: "sentry" }];
+
+    expect(addFavoriteRepo(favorites, { owner: "getsentry", repo: "sentry" })).toBe(favorites);
+    expect(addFavoriteRepo(favorites, { owner: "jpnurmi", repo: "gha-watch" })).toEqual([
+      { owner: "getsentry", repo: "sentry" },
+      { owner: "jpnurmi", repo: "gha-watch" },
+    ]);
   });
 
   it("checks favorite membership using the stable repo key", () => {
