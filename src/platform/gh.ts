@@ -209,7 +209,16 @@ export function createTauriShellExecutor(): ShellExecutor {
     async execute(program, args) {
       const { Command } = await import("@tauri-apps/plugin-shell");
       const commands =
-        program === "gh" ? ["gh", "gh-homebrew", "gh-usrlocal", "gh-usrbin"] : [program];
+        program === "gh"
+          ? [
+              "gh",
+              "gh-homebrew",
+              "gh-usrlocal",
+              "gh-usrbin",
+              "gh-windows-program-files",
+              "gh-windows-chocolatey",
+            ]
+          : [program];
       let lastError: unknown;
 
       for (const command of commands) {

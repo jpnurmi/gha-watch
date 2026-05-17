@@ -20,6 +20,7 @@ import "./styles.css";
 
 const pollIntervalMs = 30_000;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
+document.documentElement.dataset.platform = /\bWindows\b/i.test(navigator.userAgent) ? "windows" : "default";
 
 if (!appRoot) {
   throw new Error("App root was not found.");

@@ -31,6 +31,16 @@
           "name": "gh-usrbin",
           "cmd": "/usr/bin/gh",
           "args": true
+        },
+        {
+          "name": "gh-windows-program-files",
+          "cmd": "C:\\Program Files\\GitHub CLI\\gh.exe",
+          "args": true
+        },
+        {
+          "name": "gh-windows-chocolatey",
+          "cmd": "C:\\ProgramData\\chocolatey\\bin\\gh.exe",
+          "args": true
         }
       ]
     }
