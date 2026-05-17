@@ -20,7 +20,6 @@ export type WatchRowViewModel = {
   id: string;
   label: string;
   prReference?: string;
-  prSourceReference?: string;
   prState?: PrStateViewModel;
   statusLabel: string;
   description: string;
@@ -76,7 +75,6 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
       id: watch.id,
       label: watch.label,
       prReference: getPullRequestReference(watch),
-      prSourceReference: getPullRequestSourceReference(watch),
       prState: getPullRequestState(watch),
       statusLabel: "Errored",
       description: watch.error,
@@ -125,7 +123,6 @@ function createRow(
     id: watch.id,
     label: watch.label,
     prReference: getPullRequestReference(watch),
-    prSourceReference: getPullRequestSourceReference(watch),
     prState: getPullRequestState(watch),
     statusLabel,
     description,
@@ -139,12 +136,6 @@ function createRow(
 
 function getPullRequestReference(watch: WatchRecord): string | undefined {
   return watch.target.prNumber ? `#${watch.target.prNumber}` : undefined;
-}
-
-function getPullRequestSourceReference(watch: WatchRecord): string | undefined {
-  return watch.target.prNumber
-    ? `${watch.target.owner}/${watch.target.repo}#${watch.target.prNumber}`
-    : undefined;
 }
 
 function getPullRequestState(watch: WatchRecord): PrStateViewModel | undefined {

@@ -557,13 +557,8 @@ input {
 }
 
 .watch-pr-reference {
-  min-width: 0;
-  max-width: 50%;
-  flex: 0 1 auto;
-  overflow: hidden;
   color: rgb(238 241 245 / 52%);
   font-weight: 750;
-  text-overflow: ellipsis;
 }
 
 .watch-pr-state-draft {
@@ -603,17 +598,6 @@ input {
   color: rgb(238 241 245 / 62%);
   font-style: italic;
   text-overflow: ellipsis;
-}
-
-.watch-timing {
-  min-width: 0;
-  overflow: hidden;
-  color: rgb(238 241 245 / 48%);
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .watch-actions {

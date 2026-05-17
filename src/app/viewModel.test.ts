@@ -229,7 +229,6 @@ describe("createPopupViewModel", () => {
     ]);
 
     expect(model.rows[0].prReference).toBe("#51");
-    expect(model.rows[0].prSourceReference).toBe("getsentry/sentry#51");
   });
 
   it("formats queued, running, and completed timing text", () => {

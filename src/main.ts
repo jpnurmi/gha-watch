@@ -300,11 +300,8 @@ function renderWatch(row: WatchRowViewModel): string {
           <span class="watch-title-text">${escapeHtml(row.label)}</span>
         </span>
         <span class="watch-meta">
-          ${renderPrMetadata(row)}
-          ${renderWorkflowStatus(row)}
-          <span class="watch-meta-text">${escapeHtml(row.description)}</span>
+          ${renderMetadataItems(row)}
         </span>
-        ${row.timingText ? `<span class="watch-timing">${escapeHtml(row.timingText)}</span>` : ""}
       </button>
       ${renderWatchActions(row)}
     </li>
@@ -319,11 +316,11 @@ function renderLeadingIcon(row: WatchRowViewModel): string {
   return renderStatusIcon(row, "watch-leading-icon");
 }
 
-function renderPrMetadata(row: WatchRowViewModel): string {
+function renderMetadataItems(row: WatchRowViewModel): string {
   const items: string[] = [];
 
-  if (row.prSourceReference) {
-    items.push(`<span class="watch-pr-reference">${escapeHtml(row.prSourceReference)}</span>`);
+  if (row.prReference) {
+    items.push(`<span class="watch-pr-reference">${escapeHtml(row.prReference)}</span>`);
   }
 
   if (row.prState) {
@@ -332,7 +329,19 @@ function renderPrMetadata(row: WatchRowViewModel): string {
     );
   }
 
-  return items.length > 0 ? `${items.join(renderMetaSeparator())}${renderMetaSeparator()}` : "";
+  items.push(renderWorkflowStatus(row));
+
+  const detail = getMetadataDetail(row);
+
+  if (detail) {
+    items.push(`<span class="watch-meta-text">${escapeHtml(detail)}</span>`);
+  }
+
+  return items.join(renderMetaSeparator());
+}
+
+function renderMetaSeparator(): string {
+  return `<span class="watch-meta-separator">·</span>`;
 }
 
 function renderWorkflowStatus(row: WatchRowViewModel): string {
@@ -341,12 +350,15 @@ function renderWorkflowStatus(row: WatchRowViewModel): string {
       ${getStatusIconSvg(row.tone, `${row.id}-workflow`)}
       <span>${escapeHtml(row.statusLabel)}</span>
     </span>
-    ${renderMetaSeparator()}
   `;
 }
 
-function renderMetaSeparator(): string {
-  return `<span class="watch-meta-separator">·</span>`;
+function getMetadataDetail(row: WatchRowViewModel): string | undefined {
+  if (row.timingText) {
+    return row.timingText;
+  }
+
+  return row.tone === "error" ? row.description : undefined;
 }
 
 function renderWatchActions(row: WatchRowViewModel): string {
