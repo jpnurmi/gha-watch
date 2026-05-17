@@ -6,6 +6,7 @@ describe("normalizeAppSettings", () => {
     expect(defaultAppSettings).toEqual({
       autoClearMergedPrWatches: false,
       favoriteRepos: [],
+      repoOrder: [],
     });
   });
 
@@ -18,6 +19,12 @@ describe("normalizeAppSettings", () => {
           { owner: "getsentry", repo: "sentry" },
           { owner: "jpnurmi", repo: "gha-watch" },
         ],
+        repoOrder: [
+          "jpnurmi/gha-watch",
+          "jpnurmi/gha-watch",
+          "getsentry/sentry",
+          "missing-owner",
+        ],
       }),
     ).toEqual({
       autoClearMergedPrWatches: true,
@@ -25,6 +32,7 @@ describe("normalizeAppSettings", () => {
         { owner: "getsentry", repo: "sentry" },
         { owner: "jpnurmi", repo: "gha-watch" },
       ],
+      repoOrder: ["jpnurmi/gha-watch", "getsentry/sentry"],
     });
   });
 });

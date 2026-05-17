@@ -11,6 +11,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Live pull request watches follow the latest PR head and show the current workflow runs.
 - Group watches by repository.
 - Favorite repositories so they stay visible after their watches are cleared.
+- Long-press repository headers to reorder visible repositories.
 - Load a repository's open pull requests or active workflow runs on demand and start watching from the menu.
 - Show queued, in-progress, successful, failed, cancelled, and errored states.
 - Mark unseen status changes with a blue indicator.

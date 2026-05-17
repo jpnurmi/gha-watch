@@ -8,6 +8,11 @@ import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getPrStateIconSvg } from "./app/prStateIcon";
 import { getRepoHeaderActions } from "./app/repoHeaderActions";
+import {
+  didRepoReorderPressMove,
+  repoReorderClickSuppressMs,
+  repoReorderLongPressMs,
+} from "./app/repoReorderInteraction";
 import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
 import { isWatchActionConfirmation } from "./app/watchActionConfirmation";
@@ -29,6 +34,13 @@ import {
   parseGitHubActionsUrl,
   type ParsedGitHubTarget,
 } from "./domain/githubUrl";
+import {
+  getRepoDropTarget,
+  moveRepoKey,
+  type RepoDropCandidate,
+  type RepoDropPosition,
+  type RepoDropTarget,
+} from "./domain/repoOrder";
 import type { WatchRecord } from "./domain/watches";
 import {
   fetchActiveWorkflowRuns,
@@ -70,11 +82,26 @@ const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let favoritePrMenu: FavoritePullRequestMenuState | undefined;
+let repoPressState: RepoPressState | undefined;
+let repoDragState: RepoDragState | undefined;
+let suppressedRepoToggleKey: string | undefined;
+let suppressedRepoToggleUntilMs = 0;
 let settings = loadSettings();
 
 type PendingWatchAction = {
   id: string;
   kind: "remove" | "rerun";
+};
+
+type RepoDragState = {
+  sourceKey: string;
+};
+
+type RepoPressState = {
+  sourceKey: string;
+  startX: number;
+  startY: number;
+  timeoutId: number;
 };
 
 type ActiveWorkflowRunMenuState =
@@ -198,6 +225,12 @@ document.addEventListener("click", (event) => {
 });
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (repoPressState || repoDragState) {
+      cancelRepoPointerDrag();
+      event.preventDefault();
+      return;
+    }
+
     void hideMainWindow();
   }
 });
@@ -209,7 +242,7 @@ void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
 
 function render(): void {
   const watches = controller.getWatches();
-  const viewModel = createPopupViewModel(watches, new Date(), settings.favoriteRepos);
+  const viewModel = createPopupViewModel(watches, new Date(), settings.favoriteRepos, settings.repoOrder);
   const hasWatches = watches.length > 0;
   const hasFinishedWatches = watches.some((watch) => !watch.active);
 
@@ -323,10 +356,13 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
     watchCount: group.rows.length,
   });
   const isCollapsed = actions.isCollapsed;
-  const collapseDisabled = actions.canToggleCollapse ? "" : "disabled";
+  const collapseDisabled = actions.canToggleCollapse ? "" : `aria-disabled="true" data-disabled="true"`;
 
   return `
-    <li class="watch-group${isCollapsed ? " is-collapsed" : ""}">
+    <li
+      class="watch-group${isCollapsed ? " is-collapsed" : ""}"
+      data-repo="${escapeHtml(group.repoLabel)}"
+    >
       <div class="watch-group-header">
         ${renderFavoriteRepoButton(group)}
         <button
@@ -387,7 +423,23 @@ function renderFavoriteRepoButton(group: WatchGroupViewModel): string {
       <span class="watch-group-star-glyph" aria-hidden="true">
         ${renderStarIcon(group.favorite)}
       </span>
+      <span class="watch-group-drag-glyph" aria-hidden="true">
+        ${renderDragGripIcon()}
+      </span>
     </button>
+  `;
+}
+
+function renderDragGripIcon(): string {
+  return `
+    <svg viewBox="0 0 16 16">
+      <circle cx="6" cy="4" r="1.1" fill="currentColor"/>
+      <circle cx="10" cy="4" r="1.1" fill="currentColor"/>
+      <circle cx="6" cy="8" r="1.1" fill="currentColor"/>
+      <circle cx="10" cy="8" r="1.1" fill="currentColor"/>
+      <circle cx="6" cy="12" r="1.1" fill="currentColor"/>
+      <circle cx="10" cy="12" r="1.1" fill="currentColor"/>
+    </svg>
   `;
 }
 
@@ -753,14 +805,40 @@ function bindEvents(): void {
   );
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-group"]')) {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
       const repoLabel = button.dataset.repo;
 
-      if (repoLabel) {
-        collapsedGroups.toggle(repoLabel);
-        isClearMenuOpen = false;
-        render();
+      if (repoLabel && consumeSuppressedRepoToggle(repoLabel)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
       }
+
+      if (repoLabel) {
+        toggleRepoGroup(repoLabel);
+      }
+    });
+  }
+
+  for (const header of app.querySelectorAll<HTMLElement>(".watch-group-header")) {
+    header.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest('[data-action="toggle-group"]')) {
+        return;
+      }
+
+      const repoLabel = getRepoHeaderPressKey(header, event);
+
+      if (!repoLabel) {
+        return;
+      }
+
+      if (consumeSuppressedRepoToggle(repoLabel)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      toggleRepoGroup(repoLabel);
     });
   }
 
@@ -881,6 +959,8 @@ function bindEvents(): void {
       }
     });
   }
+
+  bindRepoReorderEvents();
 }
 
 function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): string {
@@ -933,6 +1013,247 @@ function renderCheckIcon(): string {
       <path d="m3.5 8.2 2.8 2.8 6.2-6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
     </svg>
   `;
+}
+
+function bindRepoReorderEvents(): void {
+  for (const header of app.querySelectorAll<HTMLElement>(".watch-group-header")) {
+    header.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const repoKey = getRepoHeaderPressKey(header, event);
+
+      if (!repoKey || getVisibleRepoOrder().length < 2) {
+        return;
+      }
+
+      cancelRepoPointerDrag();
+      repoPressState = {
+        sourceKey: repoKey,
+        startX: event.clientX,
+        startY: event.clientY,
+        timeoutId: window.setTimeout(() => {
+          startRepoPointerDrag(repoKey);
+        }, repoReorderLongPressMs),
+      };
+      document.addEventListener("pointermove", updateRepoPointerDrag);
+      document.addEventListener("pointerup", finishRepoPointerDrag, { once: true });
+      document.addEventListener("pointercancel", cancelRepoPointerDrag, { once: true });
+    });
+  }
+}
+
+function getRepoHeaderPressKey(header: HTMLElement, event: Event): string | undefined {
+  if (!(event.target instanceof Element)) {
+    return undefined;
+  }
+
+  if (event.target.closest(".watch-group-star, .watch-group-actions, .repo-action-menu")) {
+    return undefined;
+  }
+
+  return header.closest<HTMLElement>(".watch-group[data-repo]")?.dataset.repo;
+}
+
+function toggleRepoGroup(repoLabel: string): void {
+  const groupToggle = getRepoGroupElement(repoLabel)?.querySelector<HTMLElement>('[data-action="toggle-group"]');
+
+  if (groupToggle?.dataset.disabled === "true") {
+    return;
+  }
+
+  collapsedGroups.toggle(repoLabel);
+  isClearMenuOpen = false;
+  render();
+}
+
+function startRepoPointerDrag(sourceKey: string): void {
+  if (!repoPressState || repoPressState.sourceKey !== sourceKey) {
+    return;
+  }
+
+  repoPressState = undefined;
+  repoDragState = { sourceKey };
+  isClearMenuOpen = false;
+  activeWorkflowRunMenu = undefined;
+  favoritePrMenu = undefined;
+
+  app.querySelector(".watch-list")?.classList.add("is-reordering");
+  getRepoGroupElement(sourceKey)?.classList.add("is-dragging");
+}
+
+function updateRepoPointerDrag(event: PointerEvent): void {
+  if (repoPressState) {
+    if (
+      didRepoReorderPressMove({
+        startX: repoPressState.startX,
+        startY: repoPressState.startY,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      })
+    ) {
+      cancelRepoPointerDrag();
+    }
+
+    return;
+  }
+
+  if (!repoDragState) {
+    return;
+  }
+
+  event.preventDefault();
+  showRepoDropIndicator(getPointerRepoDropTarget(event.clientY));
+}
+
+function finishRepoPointerDrag(event: PointerEvent): void {
+  if (repoPressState) {
+    cancelRepoPointerDrag();
+    return;
+  }
+
+  if (!repoDragState) {
+    return;
+  }
+
+  event.preventDefault();
+  const sourceKey = repoDragState.sourceKey;
+  const target = getPointerRepoDropTarget(event.clientY);
+
+  repoDragState = undefined;
+  suppressNextRepoToggle(sourceKey);
+  document.removeEventListener("pointermove", updateRepoPointerDrag);
+  document.removeEventListener("pointercancel", cancelRepoPointerDrag);
+  clearRepoDragStateClasses();
+
+  if (target) {
+    reorderRepos(sourceKey, target.targetKey, target.position);
+  }
+}
+
+function cancelRepoPointerDrag(): void {
+  if (repoPressState) {
+    window.clearTimeout(repoPressState.timeoutId);
+  }
+
+  repoPressState = undefined;
+  repoDragState = undefined;
+  clearSuppressedRepoToggle();
+  document.removeEventListener("pointermove", updateRepoPointerDrag);
+  document.removeEventListener("pointerup", finishRepoPointerDrag);
+  document.removeEventListener("pointercancel", cancelRepoPointerDrag);
+  clearRepoDragStateClasses();
+}
+
+function suppressNextRepoToggle(repoKey: string): void {
+  suppressedRepoToggleKey = repoKey;
+  suppressedRepoToggleUntilMs = window.performance.now() + repoReorderClickSuppressMs;
+}
+
+function consumeSuppressedRepoToggle(repoKey: string): boolean {
+  if (!suppressedRepoToggleKey) {
+    return false;
+  }
+
+  if (window.performance.now() > suppressedRepoToggleUntilMs) {
+    clearSuppressedRepoToggle();
+    return false;
+  }
+
+  if (suppressedRepoToggleKey !== repoKey) {
+    return false;
+  }
+
+  clearSuppressedRepoToggle();
+  return true;
+}
+
+function clearSuppressedRepoToggle(): void {
+  suppressedRepoToggleKey = undefined;
+  suppressedRepoToggleUntilMs = 0;
+}
+
+function getPointerRepoDropTarget(clientY: number): RepoDropTarget | undefined {
+  if (!repoDragState) {
+    return undefined;
+  }
+
+  return getRepoDropTarget(getVisibleRepoDropCandidates(), repoDragState.sourceKey, clientY);
+}
+
+function getVisibleRepoDropCandidates(): RepoDropCandidate[] {
+  return Array.from(app.querySelectorAll<HTMLElement>(".watch-group[data-repo]"))
+    .map((groupElement) => {
+      const key = groupElement.dataset.repo;
+      const rect = groupElement.getBoundingClientRect();
+
+      return key
+        ? {
+            key,
+            top: rect.top,
+            height: rect.height,
+          }
+        : undefined;
+    })
+    .filter((candidate): candidate is RepoDropCandidate => Boolean(candidate));
+}
+
+function showRepoDropIndicator(target: RepoDropTarget | undefined): void {
+  clearRepoDropIndicators();
+
+  if (!target) {
+    return;
+  }
+
+  getRepoGroupElement(target.targetKey)?.classList.add(
+    target.position === "before" ? "is-drop-before" : "is-drop-after",
+  );
+}
+
+function clearRepoDropIndicators(): void {
+  for (const groupElement of app.querySelectorAll(".watch-group")) {
+    groupElement.classList.remove("is-drop-before", "is-drop-after");
+  }
+}
+
+function clearRepoDragStateClasses(): void {
+  app.querySelector(".watch-list")?.classList.remove("is-reordering");
+
+  for (const groupElement of app.querySelectorAll(".watch-group")) {
+    groupElement.classList.remove("is-dragging", "is-drop-before", "is-drop-after");
+  }
+}
+
+function reorderRepos(sourceKey: string, targetKey: string, position: RepoDropPosition): void {
+  const visibleRepoOrder = getVisibleRepoOrder();
+  const repoOrder = moveRepoKey(visibleRepoOrder, sourceKey, targetKey, position);
+
+  repoDragState = undefined;
+  clearRepoDragStateClasses();
+
+  if (repoOrder === visibleRepoOrder || repoOrdersAreEqual(repoOrder, settings.repoOrder)) {
+    return;
+  }
+
+  settings = { ...settings, repoOrder };
+  void saveSettings(settings);
+  render();
+}
+
+function getVisibleRepoOrder(): string[] {
+  return Array.from(app.querySelectorAll<HTMLElement>(".watch-group[data-repo]"))
+    .map((groupElement) => groupElement.dataset.repo)
+    .filter((repoKey): repoKey is string => Boolean(repoKey));
+}
+
+function getRepoGroupElement(repoKey: string): HTMLElement | undefined {
+  return Array.from(app.querySelectorAll<HTMLElement>(".watch-group[data-repo]"))
+    .find((groupElement) => groupElement.dataset.repo === repoKey);
+}
+
+function repoOrdersAreEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((repoKey, index) => repoKey === right[index]);
 }
 
 function toggleFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): void {
@@ -1203,6 +1524,7 @@ async function hideMainWindow(): Promise<void> {
 }
 
 async function acknowledgePopupDismissal(): Promise<void> {
+  cancelRepoPointerDrag();
   const dismissedState = dismissPopupUi({
     clearMenuOpen: isClearMenuOpen,
   });

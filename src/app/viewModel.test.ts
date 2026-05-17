@@ -93,6 +93,53 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("orders repository groups by saved repo order", () => {
+    const model = createPopupViewModel(
+      [
+        watch({
+          label: "CI",
+          status: "in_progress",
+          lastState: { status: "in_progress", conclusion: null },
+        }),
+        watch({
+          id: "jpnurmi/sentry-qml/run/456",
+          target: {
+            kind: "run",
+            owner: "jpnurmi",
+            repo: "sentry-qml",
+            runId: "456",
+            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/456",
+          },
+          label: "E2E",
+          status: "queued",
+          lastState: { status: "queued", conclusion: null },
+        }),
+        watch({
+          id: "jpnurmi/gha-watch/run/789",
+          target: {
+            kind: "run",
+            owner: "jpnurmi",
+            repo: "gha-watch",
+            runId: "789",
+            url: "https://github.com/jpnurmi/gha-watch/actions/runs/789",
+          },
+          label: "Build",
+          status: "queued",
+          lastState: { status: "queued", conclusion: null },
+        }),
+      ],
+      new Date(),
+      [],
+      ["jpnurmi/sentry-qml", "getsentry/sentry"],
+    );
+
+    expect(model.groups.map((group) => group.repoLabel)).toEqual([
+      "jpnurmi/sentry-qml",
+      "getsentry/sentry",
+      "jpnurmi/gha-watch",
+    ]);
+  });
+
   it("exposes a repository icon URL for grouped rows", () => {
     const model = createPopupViewModel([
       watch({
