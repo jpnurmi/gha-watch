@@ -1,4 +1,4 @@
-import { hasUnseenStatusChange, type WatchRecord } from "../domain/watches";
+import { hasUnseenStatusChange, type PrSourceState, type WatchRecord } from "../domain/watches";
 
 export type RowTone =
   | "pending"
@@ -9,10 +9,21 @@ export type RowTone =
   | "cancelled"
   | "error";
 
+export type PrStateTone = PrSourceState;
+
+export type PrStateViewModel = {
+  label: string;
+  tone: PrStateTone;
+};
+
+export type WatchSubject = "pull-request" | "workflow" | "job";
+
 export type WatchRowViewModel = {
   id: string;
   label: string;
+  subject: WatchSubject;
   prReference?: string;
+  prState?: PrStateViewModel;
   statusLabel: string;
   description: string;
   tone: RowTone;
@@ -66,7 +77,9 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
     return {
       id: watch.id,
       label: watch.label,
+      subject: getWatchSubject(watch),
       prReference: getPullRequestReference(watch),
+      prState: getPullRequestState(watch),
       statusLabel: "Errored",
       description: watch.error,
       tone: "error",
@@ -113,7 +126,9 @@ function createRow(
   return {
     id: watch.id,
     label: watch.label,
+    subject: getWatchSubject(watch),
     prReference: getPullRequestReference(watch),
+    prState: getPullRequestState(watch),
     statusLabel,
     description,
     tone,
@@ -126,6 +141,36 @@ function createRow(
 
 function getPullRequestReference(watch: WatchRecord): string | undefined {
   return watch.target.prNumber ? `#${watch.target.prNumber}` : undefined;
+}
+
+function getWatchSubject(watch: WatchRecord): WatchSubject {
+  if (watch.sourceState) {
+    return "pull-request";
+  }
+
+  return watch.target.kind === "job" ? "job" : "workflow";
+}
+
+function getPullRequestState(watch: WatchRecord): PrStateViewModel | undefined {
+  if (!watch.sourceState) {
+    return undefined;
+  }
+
+  return {
+    label: getPullRequestStateLabel(watch.sourceState),
+    tone: watch.sourceState,
+  };
+}
+
+function getPullRequestStateLabel(sourceState: PrSourceState): string {
+  const labels: Record<PrSourceState, string> = {
+    draft: "Draft",
+    ready: "Ready",
+    merged: "Merged",
+    closed: "Closed",
+  };
+
+  return labels[sourceState];
 }
 
 function canRerun(watch: WatchRecord): boolean {

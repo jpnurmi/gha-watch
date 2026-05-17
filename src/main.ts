@@ -6,11 +6,13 @@ import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu"
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
+import { getPrStateIconSvg } from "./app/prStateIcon";
 import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
 import { isWatchActionConfirmation } from "./app/watchActionConfirmation";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
+import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
 import { isOwnerlessPullRequestSlug, parseGitHubActionsUrl, type ParsedWatchTarget } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
@@ -63,7 +65,7 @@ const controller = createWatchController(
       : fetchWatchState,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     notify: notifyStatusChange,
-    resolvePrWatchTargets: isDemoMode ? async () => [] : resolvePrWatchTargets,
+    resolvePrWatchTargets: isDemoMode ? async () => ({ targets: [], sourceState: "ready" }) : resolvePrWatchTargets,
     rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
     save: saveWatches,
   },
@@ -292,19 +294,65 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
 
 function renderWatch(row: WatchRowViewModel): string {
   return `
-    <li class="watch is-${row.tone}${row.unseenStatusChange ? " has-unseen-change" : ""}">
-      ${renderStatusIcon(row)}
+    <li class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}">
+      ${renderLeadingIcon(row)}
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
         <span class="watch-label">
           <span class="watch-title-text">${escapeHtml(row.label)}</span>
-          ${row.prReference ? `<span class="watch-pr-reference">${escapeHtml(row.prReference)}</span>` : ""}
+          ${row.prReference ? `<span class="watch-title-reference">${escapeHtml(row.prReference)}</span>` : ""}
         </span>
-        <span class="watch-status">${escapeHtml(row.statusLabel)} - ${escapeHtml(row.description)}</span>
-        ${row.timingText ? `<span class="watch-timing">${escapeHtml(row.timingText)}</span>` : ""}
+        ${renderMetadata(row)}
       </button>
       ${renderWatchActions(row)}
     </li>
   `;
+}
+
+function renderLeadingIcon(row: WatchRowViewModel): string {
+  if (row.prState) {
+    return renderPrStateIcon(row.prState, "watch-leading-icon");
+  }
+
+  if (row.subject === "job") {
+    return renderWatchSubjectIcon("job");
+  }
+
+  return renderWatchSubjectIcon("workflow");
+}
+
+function renderMetadata(row: WatchRowViewModel): string {
+  const items: string[] = [];
+
+  items.push(renderWorkflowStatus(row));
+
+  const detail = getMetadataDetail(row);
+
+  if (detail) {
+    items.push(`<span class="watch-meta-text">${escapeHtml(detail)}</span>`);
+  }
+
+  return items.length > 0 ? `<span class="watch-meta">${items.join(renderMetaSeparator())}</span>` : "";
+}
+
+function renderMetaSeparator(): string {
+  return `<span class="watch-meta-separator">·</span>`;
+}
+
+function renderWorkflowStatus(row: WatchRowViewModel): string {
+  return `
+    <span class="watch-workflow-status status-icon-${row.tone}">
+      ${getStatusIconSvg(row.tone, `${row.id}-workflow`)}
+      <span>${escapeHtml(row.statusLabel)}</span>
+    </span>
+  `;
+}
+
+function getMetadataDetail(row: WatchRowViewModel): string | undefined {
+  if (row.timingText) {
+    return row.timingText;
+  }
+
+  return row.tone === "error" ? row.description : undefined;
 }
 
 function renderWatchActions(row: WatchRowViewModel): string {
@@ -340,9 +388,38 @@ function renderWatchActions(row: WatchRowViewModel): string {
   `;
 }
 
-function renderStatusIcon(row: WatchRowViewModel): string {
+function renderStatusIcon(row: WatchRowViewModel, className = "status-icon"): string {
   const icon = getStatusIconSvg(row.tone, row.id);
-  return `<span class="status-icon status-icon-${row.tone}" aria-hidden="true">${icon}</span>`;
+  return `<span class="${className} status-icon status-icon-${row.tone}" aria-hidden="true">${icon}</span>`;
+}
+
+function renderPrStateIcon(
+  prState: NonNullable<WatchRowViewModel["prState"]>,
+  className = "pr-state-icon",
+): string {
+  const label = escapeHtml(prState.label);
+
+  return `
+    <span
+      class="${className} pr-state-icon pr-state-icon-${prState.tone}"
+      title="Pull request ${label}"
+      aria-label="Pull request ${label}"
+    >
+      ${getPrStateIconSvg(prState.tone)}
+    </span>
+  `;
+}
+
+function renderWatchSubjectIcon(subject: Exclude<WatchRowViewModel["subject"], "pull-request">): string {
+  return `
+    <span
+      class="watch-leading-icon watch-subject-icon watch-subject-icon-${subject}"
+      title="${subject === "job" ? "Workflow job" : "Workflow run"}"
+      aria-label="${subject === "job" ? "Workflow job" : "Workflow run"}"
+    >
+      ${getWatchSubjectIconSvg(subject)}
+    </span>
+  `;
 }
 
 function bindEvents(): void {
@@ -681,10 +758,26 @@ function escapeHtml(value: string): string {
 function loadInitialWatches(): WatchRecord[] {
   if (isDemoMode) {
     return [
-      createDemoWatch("1", "CI / Android (Qt LTS, API 28) (push)", "in_progress", null, true),
-      createDemoWatch("2", "E2E / Android (Qt LTS, API 35) (push)", "in_progress", null, true),
-      createDemoWatch("3", "CI / Cocoa (Qt latest, macOS-26) (push)", "queued", null, true),
-      createDemoWatch("4", "CI / Crashpad (Qt LTS, ubuntu-24.04) (push)", "completed", "success", false),
+      createDemoWatch("8", "CI: feat: auto-start", "completed", "success", false, {
+        prNumber: "8",
+        sourceState: "merged",
+      }),
+      createDemoWatch("9", "CI: feat: slug", "completed", "success", false, {
+        prNumber: "9",
+        sourceState: "merged",
+      }),
+      createDemoWatch("10", "CI: ci: add Rust cache", "completed", "success", false, {
+        timing: {
+          startedAt: "2026-05-17T09:28:00Z",
+          completedAt: "2026-05-17T09:31:00Z",
+        },
+      }),
+      createDemoWatch("11", "Build / package app (macOS)", "in_progress", null, true, {
+        jobId: "42",
+        timing: {
+          startedAt: "2026-05-17T11:56:00Z",
+        },
+      }),
     ];
   }
 
@@ -697,19 +790,51 @@ function createDemoWatch(
   status: string,
   conclusion: string | null,
   active: boolean,
+  options: {
+    jobId?: string;
+    prNumber?: string;
+    sourceState?: WatchRecord["sourceState"];
+    timing?: WatchRecord["timing"];
+  } = {},
 ): WatchRecord {
+  const target = options.jobId
+    ? {
+        kind: "job" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId,
+        jobId: options.jobId,
+        ...(options.prNumber ? { prNumber: options.prNumber } : {}),
+        url: `https://github.com/getsentry/sentry/actions/runs/${runId}/job/${options.jobId}`,
+      }
+    : {
+        kind: "run" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId,
+        ...(options.prNumber ? { prNumber: options.prNumber } : {}),
+        url: `https://github.com/getsentry/sentry/actions/runs/${runId}`,
+      };
+
   return {
-    id: `getsentry/sentry/run/${runId}`,
-    target: {
-      kind: "run",
-      owner: "getsentry",
-      repo: "sentry",
-      runId,
-      url: `https://github.com/getsentry/sentry/actions/runs/${runId}`,
-    },
+    id: options.jobId ? `getsentry/sentry/job/${options.jobId}` : `getsentry/sentry/run/${runId}`,
+    target,
+    ...(options.prNumber
+      ? {
+          source: {
+            kind: "pr",
+            owner: "getsentry",
+            repo: "sentry",
+            prNumber: options.prNumber,
+            url: `https://github.com/getsentry/sentry/pull/${options.prNumber}`,
+          },
+        }
+      : {}),
+    ...(options.sourceState ? { sourceState: options.sourceState } : {}),
     label,
     status: conclusion ? `${status}:${conclusion}` : status,
     lastState: { status, conclusion },
+    ...(options.timing ? { timing: options.timing } : {}),
     active,
     error: undefined,
   };

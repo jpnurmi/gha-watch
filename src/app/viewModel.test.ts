@@ -153,6 +153,84 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("keeps workflow status separate from pull request source state", () => {
+    const model = createPopupViewModel([
+      watch({
+        sourceState: "draft",
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+      }),
+      watch({
+        id: "getsentry/sentry/run/456",
+        sourceState: "ready",
+        status: "queued",
+        lastState: { status: "queued", conclusion: null },
+      }),
+      watch({
+        id: "getsentry/sentry/run/789",
+        sourceState: "merged",
+        status: "completed:success",
+        active: false,
+        lastState: { status: "completed", conclusion: "success" },
+      }),
+      watch({
+        id: "getsentry/sentry/run/790",
+        sourceState: "closed",
+        status: "completed:failure",
+        active: false,
+        lastState: { status: "completed", conclusion: "failure" },
+      }),
+    ]);
+
+    expect(
+      model.rows.map((row) => [row.statusLabel, row.tone, row.prState?.label, row.prState?.tone]),
+    ).toEqual([
+      ["In progress", "in-progress", "Draft", "draft"],
+      ["Queued", "queued", "Ready", "ready"],
+      ["Successful", "success", "Merged", "merged"],
+      ["Failed", "failure", "Closed", "closed"],
+    ]);
+  });
+
+  it("classifies rows by watched subject", () => {
+    const model = createPopupViewModel([
+      watch({
+        sourceState: "merged",
+        target: {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "123",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/actions/runs/123",
+        },
+      }),
+      watch({
+        id: "getsentry/sentry/run/456",
+        target: {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "456",
+          url: "https://github.com/getsentry/sentry/actions/runs/456",
+        },
+      }),
+      watch({
+        id: "getsentry/sentry/job/789",
+        target: {
+          kind: "job",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "456",
+          jobId: "789",
+          url: "https://github.com/getsentry/sentry/actions/runs/456/job/789",
+        },
+      }),
+    ]);
+
+    expect(model.rows.map((row) => row.subject)).toEqual(["pull-request", "workflow", "job"]);
+  });
+
   it("marks rows with unseen status changes", () => {
     const model = createPopupViewModel([
       watch({
