@@ -551,6 +551,39 @@ describe("watchController", () => {
     ]);
   });
 
+  it("does not notify status changes while notifications are paused", async () => {
+    const { deps, notifications } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController({
+      ...deps,
+      notificationsPaused: () => true,
+    });
+
+    await controller.add(runTarget);
+    await controller.pollNow();
+
+    expect(notifications).toEqual([]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        status: "completed:success",
+        lastSeenStatus: "in_progress",
+        active: false,
+      },
+    ]);
+  });
+
   it("includes repo, status, and timing details in status change notifications", async () => {
     const { deps, notificationRecords } = createDeps([
       {

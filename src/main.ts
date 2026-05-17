@@ -21,6 +21,7 @@ import {
   shouldDismissPendingWatchActionOnRowLeave,
   type PendingWatchAction,
 } from "./app/watchActionConfirmation";
+import { getHoveredUnseenWatchId } from "./app/watchHoverSeen";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
@@ -80,6 +81,7 @@ let isAdding = false;
 let addError: string | undefined;
 let isPolling = false;
 let isClearMenuOpen = false;
+let isPopupOpen = false;
 let autoStartEnabled = false;
 let autoStartBusy = true;
 let popupHeight = popupMinHeight;
@@ -161,6 +163,7 @@ const controller = createWatchController(
     fetchActiveWorkflowRuns: isDemoMode ? fetchDemoActiveWorkflowRuns : fetchActiveWorkflowRuns,
     fetchOpenPullRequests: isDemoMode ? fetchDemoOpenPullRequests : fetchOpenPullRequests,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
+    notificationsPaused: () => isPopupOpen,
     notify: notifyStatusChange,
     resolvePrWatchTargets: isDemoMode ? async () => ({ targets: [], sourceState: "ready" }) : resolvePrWatchTargets,
     rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
@@ -251,6 +254,8 @@ window.addEventListener("keydown", (event) => {
   }
 });
 void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+  isPopupOpen = focused;
+
   if (!focused) {
     void acknowledgePopupDismissal();
   }
@@ -952,6 +957,14 @@ function bindEvents(): void {
   }
 
   for (const row of app.querySelectorAll<HTMLElement>(".watch")) {
+    row.addEventListener("mouseenter", () => {
+      const id = getHoveredUnseenWatchId(controller.getWatches(), row.dataset.id);
+
+      if (id) {
+        controller.markSeen(id);
+      }
+    });
+
     row.addEventListener("mouseleave", () => {
       dismissWatchActionOnRowLeave(row.dataset.id);
     });
