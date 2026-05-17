@@ -3,6 +3,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
+import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getStatusIconSvg } from "./app/statusIcon";
@@ -568,6 +569,12 @@ async function hideMainWindow(): Promise<void> {
 }
 
 async function acknowledgePopupDismissal(): Promise<void> {
+  const dismissedState = dismissPopupUi({
+    clearMenuOpen: isClearMenuOpen,
+  });
+  isClearMenuOpen = dismissedState.clearMenuOpen;
+  render();
+
   if (createTrayState(controller.getWatches()).hasUnseenChanges) {
     controller.markAllSeen();
   }
