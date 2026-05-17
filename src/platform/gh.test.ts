@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
+  fetchOpenPullRequests,
   fetchRepositoryIconUrl,
   fetchWatchState,
   rerunFailedWatch,
@@ -264,6 +266,230 @@ describe("fetchAuthenticatedUserLogin", () => {
       {
         program: "gh",
         args: ["api", "user"],
+      },
+    ]);
+  });
+});
+
+describe("fetchOpenPullRequests", () => {
+  it("fetches open pull requests through gh and sorts them by update time", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify([
+        {
+          number: 51,
+          title: "Older PR",
+          isDraft: false,
+          updatedAt: "2026-05-16T12:00:00Z",
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+        {
+          number: 52,
+          title: "Newer PR",
+          isDraft: true,
+          updatedAt: "2026-05-17T12:00:00Z",
+          url: "https://github.com/getsentry/sentry/pull/52",
+        },
+      ]),
+      stderr: "",
+    });
+
+    await expect(
+      fetchOpenPullRequests(
+        {
+          owner: "getsentry",
+          repo: "sentry",
+        },
+        executor,
+      ),
+    ).resolves.toEqual([
+      {
+        number: "52",
+        title: "Newer PR",
+        isDraft: true,
+        updatedAt: "2026-05-17T12:00:00Z",
+        url: "https://github.com/getsentry/sentry/pull/52",
+      },
+      {
+        number: "51",
+        title: "Older PR",
+        isDraft: false,
+        updatedAt: "2026-05-16T12:00:00Z",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "pr",
+          "list",
+          "-R",
+          "getsentry/sentry",
+          "--state",
+          "open",
+          "--limit",
+          "20",
+          "--json",
+          "number,title,isDraft,updatedAt,url",
+        ],
+      },
+    ]);
+  });
+
+  it("drops malformed pull requests from the gh response", async () => {
+    const { executor } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify([
+        { number: 51, title: "Valid PR", isDraft: false, url: "https://github.com/getsentry/sentry/pull/51" },
+        { number: 0, title: "Invalid number", isDraft: false, url: "https://github.com/getsentry/sentry/pull/0" },
+        { number: 52, title: "", isDraft: false, url: "https://github.com/getsentry/sentry/pull/52" },
+      ]),
+      stderr: "",
+    });
+
+    await expect(fetchOpenPullRequests({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toEqual([
+      {
+        number: "51",
+        title: "Valid PR",
+        isDraft: false,
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+    ]);
+  });
+});
+
+describe("fetchActiveWorkflowRuns", () => {
+  it("fetches active workflow runs through gh and sorts them by update time", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          {
+            databaseId: 101,
+            displayTitle: "Older run",
+            workflowName: "CI",
+            status: "queued",
+            createdAt: "2026-05-17T10:00:00Z",
+            updatedAt: "2026-05-17T10:05:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/101",
+          },
+        ]),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          {
+            databaseId: 102,
+            displayTitle: "Newer run",
+            workflowName: "Deploy",
+            status: "in_progress",
+            createdAt: "2026-05-17T11:00:00Z",
+            updatedAt: "2026-05-17T11:05:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/102",
+          },
+        ]),
+        stderr: "",
+      },
+    ]);
+
+    await expect(fetchActiveWorkflowRuns({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toEqual([
+      {
+        runId: "102",
+        title: "Deploy: Newer run",
+        status: "in_progress",
+        createdAt: "2026-05-17T11:00:00Z",
+        updatedAt: "2026-05-17T11:05:00Z",
+        url: "https://github.com/getsentry/sentry/actions/runs/102",
+      },
+      {
+        runId: "101",
+        title: "CI: Older run",
+        status: "queued",
+        createdAt: "2026-05-17T10:00:00Z",
+        updatedAt: "2026-05-17T10:05:00Z",
+        url: "https://github.com/getsentry/sentry/actions/runs/101",
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "run",
+          "list",
+          "-R",
+          "getsentry/sentry",
+          "--status",
+          "queued",
+          "--limit",
+          "20",
+          "--json",
+          "databaseId,displayTitle,workflowName,status,createdAt,updatedAt,url",
+        ],
+      },
+      {
+        program: "gh",
+        args: [
+          "run",
+          "list",
+          "-R",
+          "getsentry/sentry",
+          "--status",
+          "in_progress",
+          "--limit",
+          "20",
+          "--json",
+          "databaseId,displayTitle,workflowName,status,createdAt,updatedAt,url",
+        ],
+      },
+    ]);
+  });
+
+  it("drops malformed workflow runs from the gh response", async () => {
+    const { executor } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          {
+            databaseId: 101,
+            displayTitle: "Valid run",
+            workflowName: "CI",
+            status: "queued",
+            url: "https://github.com/getsentry/sentry/actions/runs/101",
+          },
+          {
+            databaseId: 0,
+            displayTitle: "Invalid run id",
+            workflowName: "CI",
+            status: "queued",
+            url: "https://github.com/getsentry/sentry/actions/runs/0",
+          },
+          {
+            databaseId: 102,
+            displayTitle: "",
+            workflowName: "",
+            status: "queued",
+            url: "https://github.com/getsentry/sentry/actions/runs/102",
+          },
+        ]),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: "[]",
+        stderr: "",
+      },
+    ]);
+
+    await expect(fetchActiveWorkflowRuns({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toEqual([
+      {
+        runId: "101",
+        title: "CI: Valid run",
+        status: "queued",
+        url: "https://github.com/getsentry/sentry/actions/runs/101",
       },
     ]);
   });

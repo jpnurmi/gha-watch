@@ -109,6 +109,7 @@ input {
   place-items: center;
   border: 0;
   border-radius: 8px;
+  padding: 0;
   background: transparent;
   color: rgb(238 241 245 / 70%);
   cursor: pointer;
@@ -332,23 +333,191 @@ input {
   border-bottom: 0;
 }
 
+.watch-group-header {
+  display: grid;
+  min-height: 28px;
+  grid-template-columns: 22px minmax(0, 1fr) 78px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.watch-group-header:hover {
+  background: rgb(255 255 255 / 5%);
+}
+
 .watch-group-toggle {
   display: grid;
   width: 100%;
-  grid-template-columns: 18px minmax(0, 1fr) 28px;
   align-items: center;
-  gap: 10px;
+  min-width: 0;
   border: 0;
-  padding: 4px 16px;
-  background: rgb(255 255 255 / 3%);
+  padding: 0;
+  background: transparent;
   color: rgb(238 241 245 / 48%);
   cursor: pointer;
   text-align: left;
 }
 
 .watch-group-toggle:hover {
-  background: rgb(255 255 255 / 5%);
   color: rgb(238 241 245 / 70%);
+}
+
+.watch-group-actions {
+  position: relative;
+  display: flex;
+  width: 78px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-right: 5px;
+}
+
+.watch-group-star,
+.watch-group-workflow-button,
+.watch-group-pr-button,
+.watch-group-chevron {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+  color: rgb(238 241 245 / 46%);
+  cursor: pointer;
+}
+
+.watch-group-star {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  justify-self: center;
+}
+
+.watch-group-star:hover,
+.watch-group-workflow-button:hover,
+.watch-group-pr-button:hover,
+.watch-group-chevron:hover {
+  background: rgb(255 255 255 / 7%);
+  color: rgb(238 241 245 / 78%);
+}
+
+.watch-group-star.is-favorite {
+  color: rgb(238 241 245 / 62%);
+}
+
+.watch-group-star-glyph {
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  display: inline-grid;
+  width: 11px;
+  height: 11px;
+  place-items: center;
+  border-radius: 999px;
+  background: #1f2630;
+  color: rgb(238 241 245 / 52%);
+}
+
+.watch-group-star.is-favorite .watch-group-star-glyph {
+  color: #f0c36a;
+}
+
+.watch-group-star-glyph svg {
+  width: 9px;
+  height: 9px;
+}
+
+.watch-group-chevron svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.watch-group-workflow-button svg,
+.watch-group-pr-button svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.favorite-pr-menu {
+  position: relative;
+}
+
+.favorite-pr-popover {
+  position: absolute;
+  z-index: 20;
+  top: 28px;
+  right: 0;
+  display: grid;
+  width: min(320px, calc(100vw - 32px));
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 8px;
+  background: #1f2630;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 30%);
+}
+
+.favorite-pr-item {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 9px 11px;
+  background: transparent;
+  color: #d8dee7;
+  cursor: pointer;
+  text-align: left;
+}
+
+.favorite-pr-item:hover {
+  background: #2d3642;
+  color: #ffffff;
+}
+
+.favorite-pr-number,
+.favorite-pr-badge {
+  flex: 0 0 auto;
+  color: rgb(216 222 231 / 62%);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.favorite-pr-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-pr-badge {
+  border: 1px solid rgb(139 148 158 / 45%);
+  border-radius: 5px;
+  padding: 3px 5px;
+}
+
+.favorite-pr-status {
+  padding: 10px 11px;
+  color: rgb(216 222 231 / 62%);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.favorite-pr-status.is-error {
+  color: #ffb4a9;
 }
 
 .watch-group-icon {
@@ -385,11 +554,6 @@ input {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   line-height: 1;
-}
-
-.watch-group-action:hover {
-  background: rgb(255 255 255 / 11%);
-  color: rgb(238 241 245 / 82%);
 }
 
 .watch-group-meta {

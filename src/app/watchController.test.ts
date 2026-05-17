@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
+import type { FavoriteRepo } from "../domain/favorites";
 import type { PrWatchResolution, WatchRecord } from "../domain/watches";
-import type { WatchSnapshot } from "../platform/gh";
+import type { ActiveWorkflowRun, OpenPullRequest, WatchSnapshot } from "../platform/gh";
 
 const runTarget: CheckWatchTarget = {
   kind: "run",
@@ -49,12 +50,16 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
   fetches: CheckWatchTarget[];
   reruns: CheckWatchTarget[];
   prResolves: PrWatchTarget[];
+  openPullRequestFetches: FavoriteRepo[];
+  activeWorkflowRunFetches: FavoriteRepo[];
 } {
   const notifications: string[] = [];
   const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
   const fetches: CheckWatchTarget[] = [];
   const reruns: CheckWatchTarget[] = [];
   const prResolves: PrWatchTarget[] = [];
+  const openPullRequestFetches: FavoriteRepo[] = [];
+  const activeWorkflowRunFetches: FavoriteRepo[] = [];
 
   return {
     notifications,
@@ -62,6 +67,8 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
     fetches,
     reruns,
     prResolves,
+    openPullRequestFetches,
+    activeWorkflowRunFetches,
     deps: {
       async fetchState(target) {
         fetches.push(target);
@@ -89,6 +96,30 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
         }
 
         return Array.isArray(targets) ? { targets, sourceState: "ready" } : targets;
+      },
+      async fetchOpenPullRequests(target) {
+        openPullRequestFetches.push(target);
+        return [
+          {
+            number: "52",
+            title: "Improve the tray popup",
+            isDraft: false,
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/pull/52",
+          },
+        ];
+      },
+      async fetchActiveWorkflowRuns(target) {
+        activeWorkflowRunFetches.push(target);
+        return [
+          {
+            runId: "123",
+            title: "CI: Build",
+            status: "in_progress",
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/123",
+          },
+        ];
       },
       async save() {},
     },
@@ -189,6 +220,56 @@ describe("watchController", () => {
         lastSeenStatus: "queued",
       },
     ]);
+  });
+
+  it("loads open pull requests for a repo on demand", async () => {
+    const { deps, openPullRequestFetches } = createDeps([]);
+    const controller = createWatchController(deps);
+
+    await expect(controller.listOpenPullRequests({ owner: "getsentry", repo: "sentry" })).resolves.toEqual([
+      {
+        number: "52",
+        title: "Improve the tray popup",
+        isDraft: false,
+        updatedAt: "2026-05-17T12:00:00Z",
+        url: "https://github.com/getsentry/sentry/pull/52",
+      } satisfies OpenPullRequest,
+    ]);
+    expect(openPullRequestFetches).toEqual([{ owner: "getsentry", repo: "sentry" }]);
+  });
+
+  it("loads active workflow runs for a repo on demand", async () => {
+    const { deps, activeWorkflowRunFetches } = createDeps([]);
+    const controller = createWatchController(deps);
+
+    await expect(controller.listActiveWorkflowRuns({ owner: "getsentry", repo: "sentry" })).resolves.toEqual([
+      {
+        runId: "123",
+        title: "CI: Build",
+        status: "in_progress",
+        updatedAt: "2026-05-17T12:00:00Z",
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
+      } satisfies ActiveWorkflowRun,
+    ]);
+    expect(activeWorkflowRunFetches).toEqual([{ owner: "getsentry", repo: "sentry" }]);
+  });
+
+  it("requires a workflow run listing dependency before loading active workflow runs", async () => {
+    const { deps } = createDeps([]);
+    const controller = createWatchController({ ...deps, fetchActiveWorkflowRuns: undefined });
+
+    await expect(controller.listActiveWorkflowRuns({ owner: "getsentry", repo: "sentry" })).rejects.toThrow(
+      "Active workflow run lists need GitHub run listing support.",
+    );
+  });
+
+  it("requires a pull request listing dependency before loading open pull requests", async () => {
+    const { deps } = createDeps([]);
+    const controller = createWatchController({ ...deps, fetchOpenPullRequests: undefined });
+
+    await expect(controller.listOpenPullRequests({ owner: "getsentry", repo: "sentry" })).rejects.toThrow(
+      "Open pull request lists need GitHub PR listing support.",
+    );
   });
 
   it("replaces old PR source watches when the PR head gets new runs", async () => {

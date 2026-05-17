@@ -9,6 +9,8 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Watch a workflow run URL, a specific job URL, or a pull request URL.
 - Live pull request watches follow the latest PR head and show the current workflow runs.
 - Group watches by repository.
+- Favorite repositories so they stay visible after their watches are cleared.
+- Load a favorite repository's open pull requests on demand and start a live PR watch from the menu.
 - Show queued, in-progress, successful, failed, cancelled, and errored states.
 - Mark unseen status changes with a blue indicator.
 - Re-run failed workflow runs through `gh run rerun --failed`.
