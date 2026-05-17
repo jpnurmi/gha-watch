@@ -1,3 +1,4 @@
+import type { FavoriteRepo } from "../domain/favorites";
 import { hasUnseenStatusChange, type PrSourceState, type WatchRecord } from "../domain/watches";
 
 export type RowTone =
@@ -36,8 +37,11 @@ export type WatchRowViewModel = {
 export type HeaderTone = "pending" | "success" | "warning";
 
 export type WatchGroupViewModel = {
+  owner: string;
+  repo: string;
   repoLabel: string;
   repoIconUrl?: string;
+  favorite: boolean;
   rows: WatchRowViewModel[];
 };
 
@@ -59,7 +63,11 @@ type Counts = {
   errored: number;
 };
 
-export function createPopupViewModel(watches: WatchRecord[], now = new Date()): PopupViewModel {
+export function createPopupViewModel(
+  watches: WatchRecord[],
+  now = new Date(),
+  favoriteRepos: FavoriteRepo[] = [],
+): PopupViewModel {
   const rows = watches.map((watch) => createWatchRowViewModel(watch, now));
   const counts = countRows(rows);
 
@@ -67,7 +75,7 @@ export function createPopupViewModel(watches: WatchRecord[], now = new Date()): 
     title: getTitle(counts, rows.length),
     subtitle: getSubtitle(counts, rows.length),
     headerTone: getHeaderTone(counts, rows.length),
-    groups: groupRowsByRepo(watches, rows),
+    groups: groupRowsByRepo(watches, rows, favoriteRepos),
     rows,
   };
 }
@@ -179,20 +187,32 @@ function canRerun(watch: WatchRecord): boolean {
     watch.lastState.conclusion !== "cancelled";
 }
 
-function groupRowsByRepo(watches: WatchRecord[], rows: WatchRowViewModel[]): WatchGroupViewModel[] {
+function groupRowsByRepo(
+  watches: WatchRecord[],
+  rows: WatchRowViewModel[],
+  favoriteRepos: FavoriteRepo[],
+): WatchGroupViewModel[] {
   const groups: WatchGroupViewModel[] = [];
   const groupByRepo = new Map<string, WatchGroupViewModel>();
 
+  for (const favorite of favoriteRepos) {
+    const repoLabel = getRepoLabel(favorite);
+    const group = createWatchGroup(favorite.owner, favorite.repo, favorite.repoIconUrl, true);
+    groupByRepo.set(repoLabel, group);
+    groups.push(group);
+  }
+
   rows.forEach((row, index) => {
-    const repoLabel = getRepoLabel(watches[index]);
+    const watch = watches[index];
+    const repoLabel = getRepoLabel(watch.target);
     let group = groupByRepo.get(repoLabel);
 
     if (!group) {
-      group = { repoLabel, repoIconUrl: watches[index].repoIconUrl, rows: [] };
+      group = createWatchGroup(watch.target.owner, watch.target.repo, watch.repoIconUrl, false);
       groupByRepo.set(repoLabel, group);
       groups.push(group);
-    } else if (!group.repoIconUrl && watches[index].repoIconUrl) {
-      group.repoIconUrl = watches[index].repoIconUrl;
+    } else if (!group.repoIconUrl && watch.repoIconUrl) {
+      group.repoIconUrl = watch.repoIconUrl;
     }
 
     group.rows.push(row);
@@ -201,8 +221,24 @@ function groupRowsByRepo(watches: WatchRecord[], rows: WatchRowViewModel[]): Wat
   return groups;
 }
 
-function getRepoLabel(watch: WatchRecord): string {
-  return `${watch.target.owner}/${watch.target.repo}`;
+function createWatchGroup(
+  owner: string,
+  repo: string,
+  repoIconUrl: string | undefined,
+  favorite: boolean,
+): WatchGroupViewModel {
+  return {
+    owner,
+    repo,
+    repoLabel: `${owner}/${repo}`,
+    ...(repoIconUrl ? { repoIconUrl } : {}),
+    favorite,
+    rows: [],
+  };
+}
+
+function getRepoLabel(repo: Pick<FavoriteRepo, "owner" | "repo">): string {
+  return `${repo.owner}/${repo.repo}`;
 }
 
 function getTimingText(watch: WatchRecord, tone: RowTone, now: Date): string | undefined {

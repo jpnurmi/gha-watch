@@ -111,6 +111,74 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("keeps favorite repos visible even when they have no watches", () => {
+    const model = createPopupViewModel(
+      [
+        watch({
+          label: "CI",
+          status: "in_progress",
+          lastState: { status: "in_progress", conclusion: null },
+        }),
+      ],
+      new Date(),
+      [
+        {
+          owner: "jpnurmi",
+          repo: "gha-watch",
+          repoIconUrl: "https://avatars.githubusercontent.com/u/123?v=4",
+        },
+      ],
+    );
+
+    expect(
+      model.groups.map((group) => ({
+        repoLabel: group.repoLabel,
+        favorite: group.favorite,
+        repoIconUrl: group.repoIconUrl,
+        rowCount: group.rows.length,
+      })),
+    ).toEqual([
+      {
+        repoLabel: "jpnurmi/gha-watch",
+        favorite: true,
+        repoIconUrl: "https://avatars.githubusercontent.com/u/123?v=4",
+        rowCount: 0,
+      },
+      {
+        repoLabel: "getsentry/sentry",
+        favorite: false,
+        repoIconUrl: undefined,
+        rowCount: 1,
+      },
+    ]);
+  });
+
+  it("marks watched repo groups as favorites when the repo is favorited", () => {
+    const model = createPopupViewModel(
+      [
+        watch({
+          repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
+          label: "CI",
+          status: "in_progress",
+          lastState: { status: "in_progress", conclusion: null },
+        }),
+      ],
+      new Date(),
+      [{ owner: "getsentry", repo: "sentry" }],
+    );
+
+    expect(model.groups).toMatchObject([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        repoLabel: "getsentry/sentry",
+        favorite: true,
+        repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
+        rows: [{ label: "CI" }],
+      },
+    ]);
+  });
+
   it("prioritizes failed checks in the header", () => {
     const model = createPopupViewModel([
       watch({

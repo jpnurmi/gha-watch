@@ -1,3 +1,4 @@
+import type { FavoriteRepo } from "../domain/favorites";
 import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget } from "../domain/githubUrl";
 import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
 import {
@@ -11,6 +12,7 @@ import {
   type WatchRecord,
 } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
+import type { ActiveWorkflowRun, OpenPullRequest } from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
 export type WatchControllerOptions = {
@@ -19,6 +21,8 @@ export type WatchControllerOptions = {
 
 export type WatchControllerDeps = {
   fetchState(target: CheckWatchTarget): Promise<WatchSnapshot>;
+  fetchActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
+  fetchOpenPullRequests?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   notify(notification: WatchNotification): Promise<void>;
   resolvePrWatchTargets?(target: PrWatchTarget): Promise<PrWatchResolution>;
@@ -36,6 +40,8 @@ export type WatchController = {
   clearFinished(): void;
   refreshRepositoryIcons(): Promise<void>;
   refreshWatchMetadata(): Promise<void>;
+  listActiveWorkflowRuns(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
+  listOpenPullRequests(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   rerunFailed(id: string): Promise<void>;
   setOptions(options: WatchControllerOptions): void;
   pollNow(): Promise<void>;
@@ -293,6 +299,22 @@ export function createWatchController(
           // Metadata refresh should not turn existing watches into error rows.
         }
       }
+    },
+
+    async listActiveWorkflowRuns(target) {
+      if (!deps.fetchActiveWorkflowRuns) {
+        throw new Error("Active workflow run lists need GitHub run listing support.");
+      }
+
+      return deps.fetchActiveWorkflowRuns(target);
+    },
+
+    async listOpenPullRequests(target) {
+      if (!deps.fetchOpenPullRequests) {
+        throw new Error("Open pull request lists need GitHub PR listing support.");
+      }
+
+      return deps.fetchOpenPullRequests(target);
     },
 
     async rerunFailed(id) {

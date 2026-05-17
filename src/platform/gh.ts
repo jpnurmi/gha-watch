@@ -52,6 +52,41 @@ type UserViewResponse = {
   login?: string;
 };
 
+export type OpenPullRequest = {
+  number: string;
+  title: string;
+  isDraft: boolean;
+  updatedAt?: string;
+  url: string;
+};
+
+export type ActiveWorkflowRun = {
+  runId: string;
+  title: string;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+  url: string;
+};
+
+type PullRequestListResponse = {
+  isDraft?: boolean;
+  number?: number | string;
+  title?: string;
+  updatedAt?: string;
+  url?: string;
+};
+
+type WorkflowRunListResponse = {
+  createdAt?: string;
+  databaseId?: number | string;
+  displayTitle?: string;
+  status?: string;
+  updatedAt?: string;
+  url?: string;
+  workflowName?: string;
+};
+
 type PullRequestReference = {
   number?: number | string;
 };
@@ -125,6 +160,70 @@ export async function fetchAuthenticatedUserLogin(
   }
 }
 
+export async function fetchOpenPullRequests(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<OpenPullRequest[]> {
+  try {
+    const result = await executor.execute("gh", [
+      "pr",
+      "list",
+      "-R",
+      `${target.owner}/${target.repo}`,
+      "--state",
+      "open",
+      "--limit",
+      "20",
+      "--json",
+      "number,title,isDraft,updatedAt,url",
+    ]);
+
+    assertSuccessfulGhResult(result);
+
+    return parseJson<PullRequestListResponse[]>(result.stdout)
+      .map(normalizeOpenPullRequest)
+      .filter((pullRequest): pullRequest is OpenPullRequest => Boolean(pullRequest))
+      .sort(comparePullRequestsByUpdatedAt);
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function fetchActiveWorkflowRuns(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<ActiveWorkflowRun[]> {
+  try {
+    const results = await Promise.all(
+      ["queued", "in_progress"].map(async (status) => {
+        const result = await executor.execute("gh", [
+          "run",
+          "list",
+          "-R",
+          `${target.owner}/${target.repo}`,
+          "--status",
+          status,
+          "--limit",
+          "20",
+          "--json",
+          "databaseId,displayTitle,workflowName,status,createdAt,updatedAt,url",
+        ]);
+
+        assertSuccessfulGhResult(result);
+        return parseJson<WorkflowRunListResponse[]>(result.stdout);
+      }),
+    );
+
+    return results
+      .flat()
+      .map(normalizeActiveWorkflowRun)
+      .filter((run): run is ActiveWorkflowRun => Boolean(run))
+      .sort(compareWorkflowRunsByUpdatedAt);
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
 export async function resolvePrWatchTargets(
   target: PrWatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
@@ -175,6 +274,69 @@ export async function resolvePrWatchTargets(
   } catch (error) {
     throw normalizeGhError(error);
   }
+}
+
+function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWorkflowRun | undefined {
+  const runId = getRunDatabaseId(response.databaseId);
+  const title = joinTitle(response.workflowName, response.displayTitle);
+  const status = response.status?.trim();
+  const url = response.url?.trim();
+
+  if (!runId || !status || !url || title === "GitHub Actions") {
+    return undefined;
+  }
+
+  return {
+    runId,
+    title,
+    status,
+    ...(response.createdAt ? { createdAt: response.createdAt } : {}),
+    ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
+    url,
+  };
+}
+
+function compareWorkflowRunsByUpdatedAt(left: ActiveWorkflowRun, right: ActiveWorkflowRun): number {
+  return getSortTimestamp(right.updatedAt ?? right.createdAt) - getSortTimestamp(left.updatedAt ?? left.createdAt);
+}
+
+function normalizeOpenPullRequest(response: PullRequestListResponse): OpenPullRequest | undefined {
+  const number = getPullRequestListNumber(response.number);
+  const title = response.title?.trim();
+  const url = response.url?.trim();
+
+  if (!number || !title || !url) {
+    return undefined;
+  }
+
+  return {
+    number,
+    title,
+    isDraft: response.isDraft === true,
+    ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
+    url,
+  };
+}
+
+function getPullRequestListNumber(value: number | string | undefined): string | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return String(value);
+  }
+
+  if (typeof value === "string" && /^[1-9]\d*$/.test(value)) {
+    return value;
+  }
+
+  return undefined;
+}
+
+function comparePullRequestsByUpdatedAt(left: OpenPullRequest, right: OpenPullRequest): number {
+  return getSortTimestamp(right.updatedAt) - getSortTimestamp(left.updatedAt);
+}
+
+function getSortTimestamp(value: string | undefined): number {
+  const timestamp = value ? Date.parse(value) : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function getPrSourceState(pr: PrViewResponse): PrSourceState {
