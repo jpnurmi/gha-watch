@@ -106,6 +106,8 @@ jobs:
             os: ubuntu-24.04
           - name: macOS 26
             os: macos-26
+          - name: Windows 2025
+            os: windows-2025
 
     env:
       CARGO_TERM_COLOR: always
