@@ -2,6 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
+import { renderDragGripIcon, renderWatchLeadingSlot } from "./app/dragGlyph";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
@@ -88,8 +89,12 @@ let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let favoritePrMenu: FavoritePullRequestMenuState | undefined;
 let repoPressState: RepoPressState | undefined;
 let repoDragState: RepoDragState | undefined;
+let watchPressState: WatchPressState | undefined;
+let watchDragState: WatchDragState | undefined;
 let suppressedRepoToggleKey: string | undefined;
 let suppressedRepoToggleUntilMs = 0;
+let suppressedWatchOpenId: string | undefined;
+let suppressedWatchOpenUntilMs = 0;
 let settings = loadSettings();
 
 type RepoDragState = {
@@ -98,6 +103,17 @@ type RepoDragState = {
 
 type RepoPressState = {
   sourceKey: string;
+  startX: number;
+  startY: number;
+  timeoutId: number;
+};
+
+type WatchDragState = {
+  repoKey: string;
+  sourceId: string;
+};
+
+type WatchPressState = WatchDragState & {
   startX: number;
   startY: number;
   timeoutId: number;
@@ -224,8 +240,9 @@ document.addEventListener("click", (event) => {
 });
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    if (repoPressState || repoDragState) {
+    if (repoPressState || repoDragState || watchPressState || watchDragState) {
       cancelRepoPointerDrag();
+      cancelWatchPointerDrag();
       event.preventDefault();
       return;
     }
@@ -426,19 +443,6 @@ function renderFavoriteRepoButton(group: WatchGroupViewModel): string {
         ${renderDragGripIcon()}
       </span>
     </button>
-  `;
-}
-
-function renderDragGripIcon(): string {
-  return `
-    <svg viewBox="0 0 16 16">
-      <circle cx="6" cy="4" r="1.1" fill="currentColor"/>
-      <circle cx="10" cy="4" r="1.1" fill="currentColor"/>
-      <circle cx="6" cy="8" r="1.1" fill="currentColor"/>
-      <circle cx="10" cy="8" r="1.1" fill="currentColor"/>
-      <circle cx="6" cy="12" r="1.1" fill="currentColor"/>
-      <circle cx="10" cy="12" r="1.1" fill="currentColor"/>
-    </svg>
   `;
 }
 
@@ -645,14 +649,14 @@ function renderWatch(row: WatchRowViewModel): string {
 
 function renderLeadingIcon(row: WatchRowViewModel): string {
   if (row.prState) {
-    return renderPrStateIcon(row.prState, "watch-leading-icon");
+    return renderWatchLeadingSlot(renderPrStateIcon(row.prState, "watch-leading-icon"));
   }
 
   if (row.subject === "job") {
-    return renderWatchSubjectIcon("job");
+    return renderWatchLeadingSlot(renderWatchSubjectIcon("job"));
   }
 
-  return renderWatchSubjectIcon("workflow");
+  return renderWatchLeadingSlot(renderWatchSubjectIcon("workflow"));
 }
 
 function renderMetadata(row: WatchRowViewModel): string {
@@ -954,8 +958,15 @@ function bindEvents(): void {
   }
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open"]')) {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
       const id = button.dataset.id || "";
+
+      if (id && consumeSuppressedWatchOpen(id)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       const watch = controller.getWatches().find((item) => item.id === id);
 
       if (watch) {
@@ -966,6 +977,7 @@ function bindEvents(): void {
   }
 
   bindRepoReorderEvents();
+  bindWatchReorderEvents();
 }
 
 function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): string {
@@ -1034,6 +1046,7 @@ function bindRepoReorderEvents(): void {
       }
 
       cancelRepoPointerDrag();
+      cancelWatchPointerDrag();
       repoPressState = {
         sourceKey: repoKey,
         startX: event.clientX,
@@ -1045,6 +1058,37 @@ function bindRepoReorderEvents(): void {
       document.addEventListener("pointermove", updateRepoPointerDrag);
       document.addEventListener("pointerup", finishRepoPointerDrag, { once: true });
       document.addEventListener("pointercancel", cancelRepoPointerDrag, { once: true });
+    });
+  }
+}
+
+function bindWatchReorderEvents(): void {
+  for (const row of app.querySelectorAll<HTMLElement>(".watch[data-id]")) {
+    row.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const target = getWatchRowPressTarget(row, event);
+
+      if (!target || getVisibleWatchOrder(target.repoKey).length < 2) {
+        return;
+      }
+
+      cancelWatchPointerDrag();
+      cancelRepoPointerDrag();
+      watchPressState = {
+        repoKey: target.repoKey,
+        sourceId: target.watchId,
+        startX: event.clientX,
+        startY: event.clientY,
+        timeoutId: window.setTimeout(() => {
+          startWatchPointerDrag(target.repoKey, target.watchId);
+        }, repoReorderLongPressMs),
+      };
+      document.addEventListener("pointermove", updateWatchPointerDrag);
+      document.addEventListener("pointerup", finishWatchPointerDrag, { once: true });
+      document.addEventListener("pointercancel", cancelWatchPointerDrag, { once: true });
     });
   }
 }
@@ -1061,6 +1105,24 @@ function getRepoHeaderPressKey(header: HTMLElement, event: Event): string | unde
   return header.closest<HTMLElement>(".watch-group[data-repo]")?.dataset.repo;
 }
 
+function getWatchRowPressTarget(
+  row: HTMLElement,
+  event: Event,
+): { repoKey: string; watchId: string } | undefined {
+  if (!(event.target instanceof Element)) {
+    return undefined;
+  }
+
+  if (event.target.closest(".watch-actions")) {
+    return undefined;
+  }
+
+  const watchId = row.dataset.id;
+  const repoKey = row.closest<HTMLElement>(".watch-group[data-repo]")?.dataset.repo;
+
+  return watchId && repoKey ? { repoKey, watchId } : undefined;
+}
+
 function toggleRepoGroup(repoLabel: string): void {
   const groupToggle = getRepoGroupElement(repoLabel)?.querySelector<HTMLElement>('[data-action="toggle-group"]');
 
@@ -1071,6 +1133,22 @@ function toggleRepoGroup(repoLabel: string): void {
   collapsedGroups.toggle(repoLabel);
   isClearMenuOpen = false;
   render();
+}
+
+function startWatchPointerDrag(repoKey: string, sourceId: string): void {
+  if (!watchPressState || watchPressState.repoKey !== repoKey || watchPressState.sourceId !== sourceId) {
+    return;
+  }
+
+  watchPressState = undefined;
+  watchDragState = { repoKey, sourceId };
+  isClearMenuOpen = false;
+  activeWorkflowRunMenu = undefined;
+  favoritePrMenu = undefined;
+
+  app.querySelector(".watch-list")?.classList.add("is-reordering-runs");
+  getWatchGroupListElement(repoKey)?.classList.add("is-reordering-runs");
+  getWatchRowElement(sourceId)?.classList.add("is-row-dragging");
 }
 
 function startRepoPointerDrag(sourceKey: string): void {
@@ -1112,6 +1190,30 @@ function updateRepoPointerDrag(event: PointerEvent): void {
   showRepoDropIndicator(getPointerRepoDropTarget(event.clientY));
 }
 
+function updateWatchPointerDrag(event: PointerEvent): void {
+  if (watchPressState) {
+    if (
+      didRepoReorderPressMove({
+        startX: watchPressState.startX,
+        startY: watchPressState.startY,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      })
+    ) {
+      cancelWatchPointerDrag();
+    }
+
+    return;
+  }
+
+  if (!watchDragState) {
+    return;
+  }
+
+  event.preventDefault();
+  showWatchDropIndicator(getPointerWatchDropTarget(event.clientY));
+}
+
 function finishRepoPointerDrag(event: PointerEvent): void {
   if (repoPressState) {
     cancelRepoPointerDrag();
@@ -1137,6 +1239,31 @@ function finishRepoPointerDrag(event: PointerEvent): void {
   }
 }
 
+function finishWatchPointerDrag(event: PointerEvent): void {
+  if (watchPressState) {
+    cancelWatchPointerDrag();
+    return;
+  }
+
+  if (!watchDragState) {
+    return;
+  }
+
+  event.preventDefault();
+  const sourceId = watchDragState.sourceId;
+  const target = getPointerWatchDropTarget(event.clientY);
+
+  watchDragState = undefined;
+  suppressNextWatchOpen(sourceId);
+  document.removeEventListener("pointermove", updateWatchPointerDrag);
+  document.removeEventListener("pointercancel", cancelWatchPointerDrag);
+  clearWatchDragStateClasses();
+
+  if (target) {
+    reorderWatchesWithinRepo(sourceId, target.targetKey, target.position);
+  }
+}
+
 function cancelRepoPointerDrag(): void {
   if (repoPressState) {
     window.clearTimeout(repoPressState.timeoutId);
@@ -1151,9 +1278,28 @@ function cancelRepoPointerDrag(): void {
   clearRepoDragStateClasses();
 }
 
+function cancelWatchPointerDrag(): void {
+  if (watchPressState) {
+    window.clearTimeout(watchPressState.timeoutId);
+  }
+
+  watchPressState = undefined;
+  watchDragState = undefined;
+  clearSuppressedWatchOpen();
+  document.removeEventListener("pointermove", updateWatchPointerDrag);
+  document.removeEventListener("pointerup", finishWatchPointerDrag);
+  document.removeEventListener("pointercancel", cancelWatchPointerDrag);
+  clearWatchDragStateClasses();
+}
+
 function suppressNextRepoToggle(repoKey: string): void {
   suppressedRepoToggleKey = repoKey;
   suppressedRepoToggleUntilMs = window.performance.now() + repoReorderClickSuppressMs;
+}
+
+function suppressNextWatchOpen(watchId: string): void {
+  suppressedWatchOpenId = watchId;
+  suppressedWatchOpenUntilMs = window.performance.now() + repoReorderClickSuppressMs;
 }
 
 function consumeSuppressedRepoToggle(repoKey: string): boolean {
@@ -1174,9 +1320,32 @@ function consumeSuppressedRepoToggle(repoKey: string): boolean {
   return true;
 }
 
+function consumeSuppressedWatchOpen(watchId: string): boolean {
+  if (!suppressedWatchOpenId) {
+    return false;
+  }
+
+  if (window.performance.now() > suppressedWatchOpenUntilMs) {
+    clearSuppressedWatchOpen();
+    return false;
+  }
+
+  if (suppressedWatchOpenId !== watchId) {
+    return false;
+  }
+
+  clearSuppressedWatchOpen();
+  return true;
+}
+
 function clearSuppressedRepoToggle(): void {
   suppressedRepoToggleKey = undefined;
   suppressedRepoToggleUntilMs = 0;
+}
+
+function clearSuppressedWatchOpen(): void {
+  suppressedWatchOpenId = undefined;
+  suppressedWatchOpenUntilMs = 0;
 }
 
 function getPointerRepoDropTarget(clientY: number): RepoDropTarget | undefined {
@@ -1187,11 +1356,46 @@ function getPointerRepoDropTarget(clientY: number): RepoDropTarget | undefined {
   return getRepoDropTarget(getVisibleRepoDropCandidates(), repoDragState.sourceKey, clientY);
 }
 
+function getPointerWatchDropTarget(clientY: number): RepoDropTarget | undefined {
+  if (!watchDragState) {
+    return undefined;
+  }
+
+  return getRepoDropTarget(
+    getVisibleWatchDropCandidates(watchDragState.repoKey),
+    watchDragState.sourceId,
+    clientY,
+  );
+}
+
 function getVisibleRepoDropCandidates(): RepoDropCandidate[] {
   return Array.from(app.querySelectorAll<HTMLElement>(".watch-group[data-repo]"))
     .map((groupElement) => {
       const key = groupElement.dataset.repo;
       const rect = groupElement.getBoundingClientRect();
+
+      return key
+        ? {
+            key,
+            top: rect.top,
+            height: rect.height,
+          }
+        : undefined;
+    })
+    .filter((candidate): candidate is RepoDropCandidate => Boolean(candidate));
+}
+
+function getVisibleWatchDropCandidates(repoKey: string): RepoDropCandidate[] {
+  const groupElement = getRepoGroupElement(repoKey);
+
+  if (!groupElement) {
+    return [];
+  }
+
+  return Array.from(groupElement.querySelectorAll<HTMLElement>(".watch[data-id]"))
+    .map((rowElement) => {
+      const key = rowElement.dataset.id;
+      const rect = rowElement.getBoundingClientRect();
 
       return key
         ? {
@@ -1216,9 +1420,27 @@ function showRepoDropIndicator(target: RepoDropTarget | undefined): void {
   );
 }
 
+function showWatchDropIndicator(target: RepoDropTarget | undefined): void {
+  clearWatchDropIndicators();
+
+  if (!target) {
+    return;
+  }
+
+  getWatchRowElement(target.targetKey)?.classList.add(
+    target.position === "before" ? "is-row-drop-before" : "is-row-drop-after",
+  );
+}
+
 function clearRepoDropIndicators(): void {
   for (const groupElement of app.querySelectorAll(".watch-group")) {
     groupElement.classList.remove("is-drop-before", "is-drop-after");
+  }
+}
+
+function clearWatchDropIndicators(): void {
+  for (const rowElement of app.querySelectorAll(".watch")) {
+    rowElement.classList.remove("is-row-drop-before", "is-row-drop-after");
   }
 }
 
@@ -1227,6 +1449,18 @@ function clearRepoDragStateClasses(): void {
 
   for (const groupElement of app.querySelectorAll(".watch-group")) {
     groupElement.classList.remove("is-dragging", "is-drop-before", "is-drop-after");
+  }
+}
+
+function clearWatchDragStateClasses(): void {
+  app.querySelector(".watch-list")?.classList.remove("is-reordering-runs");
+
+  for (const groupList of app.querySelectorAll(".watch-group-list")) {
+    groupList.classList.remove("is-reordering-runs");
+  }
+
+  for (const rowElement of app.querySelectorAll(".watch")) {
+    rowElement.classList.remove("is-row-dragging", "is-row-drop-before", "is-row-drop-after");
   }
 }
 
@@ -1246,15 +1480,40 @@ function reorderRepos(sourceKey: string, targetKey: string, position: RepoDropPo
   render();
 }
 
+function reorderWatchesWithinRepo(sourceId: string, targetId: string, position: RepoDropPosition): void {
+  controller.reorderWithinRepo(sourceId, targetId, position);
+}
+
 function getVisibleRepoOrder(): string[] {
   return Array.from(app.querySelectorAll<HTMLElement>(".watch-group[data-repo]"))
     .map((groupElement) => groupElement.dataset.repo)
     .filter((repoKey): repoKey is string => Boolean(repoKey));
 }
 
+function getVisibleWatchOrder(repoKey: string): string[] {
+  const groupElement = getRepoGroupElement(repoKey);
+
+  if (!groupElement) {
+    return [];
+  }
+
+  return Array.from(groupElement.querySelectorAll<HTMLElement>(".watch[data-id]"))
+    .map((rowElement) => rowElement.dataset.id)
+    .filter((watchId): watchId is string => Boolean(watchId));
+}
+
 function getRepoGroupElement(repoKey: string): HTMLElement | undefined {
   return Array.from(app.querySelectorAll<HTMLElement>(".watch-group[data-repo]"))
     .find((groupElement) => groupElement.dataset.repo === repoKey);
+}
+
+function getWatchGroupListElement(repoKey: string): HTMLElement | undefined {
+  return getRepoGroupElement(repoKey)?.querySelector<HTMLElement>(".watch-group-list") ?? undefined;
+}
+
+function getWatchRowElement(watchId: string): HTMLElement | undefined {
+  return Array.from(app.querySelectorAll<HTMLElement>(".watch[data-id]"))
+    .find((rowElement) => rowElement.dataset.id === watchId);
 }
 
 function repoOrdersAreEqual(left: string[], right: string[]): boolean {
@@ -1539,6 +1798,7 @@ async function hideMainWindow(): Promise<void> {
 
 async function acknowledgePopupDismissal(): Promise<void> {
   cancelRepoPointerDrag();
+  cancelWatchPointerDrag();
   const dismissedState = dismissPopupUi({
     clearMenuOpen: isClearMenuOpen,
   });

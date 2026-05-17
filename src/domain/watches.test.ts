@@ -1,5 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { addWatch, removeWatch } from "./watches";
+import { addWatch, moveWatchWithinRepo, removeWatch, type WatchRecord } from "./watches";
+
+function watch(overrides: Partial<WatchRecord>): WatchRecord {
+  const target = overrides.target ?? {
+    kind: "run" as const,
+    owner: "getsentry",
+    repo: "sentry",
+    runId: "123",
+    url: "https://github.com/getsentry/sentry/actions/runs/123",
+  };
+
+  return {
+    id: overrides.id ?? "getsentry/sentry/run/123",
+    target,
+    label: overrides.label ?? "CI",
+    status: "pending",
+    lastSeenStatus: "pending",
+    lastState: undefined,
+    active: true,
+    error: undefined,
+    ...overrides,
+  };
+}
+
+function runWatch(owner: string, repo: string, runId: string): WatchRecord {
+  return watch({
+    id: `${owner}/${repo}/run/${runId}`,
+    target: {
+      kind: "run",
+      owner,
+      repo,
+      runId,
+      url: `https://github.com/${owner}/${repo}/actions/runs/${runId}`,
+    },
+  });
+}
 
 describe("watch operations", () => {
   it("adds a pending watch with a stable id", () => {
@@ -82,5 +117,42 @@ describe("watch operations", () => {
     });
 
     expect(removeWatch(watches, "getsentry/sentry/run/123")).toEqual([]);
+  });
+
+  it("moves a watch within its repository while preserving other repository slots", () => {
+    const watches = [
+      runWatch("getsentry", "sentry", "123"),
+      runWatch("jpnurmi", "gha-watch", "456"),
+      runWatch("getsentry", "sentry", "789"),
+    ];
+
+    expect(
+      moveWatchWithinRepo(
+        watches,
+        "getsentry/sentry/run/123",
+        "getsentry/sentry/run/789",
+        "after",
+      ).map((item) => item.id),
+    ).toEqual([
+      "getsentry/sentry/run/789",
+      "jpnurmi/gha-watch/run/456",
+      "getsentry/sentry/run/123",
+    ]);
+  });
+
+  it("does not move a watch across repository groups", () => {
+    const watches = [
+      runWatch("getsentry", "sentry", "123"),
+      runWatch("jpnurmi", "gha-watch", "456"),
+    ];
+
+    expect(
+      moveWatchWithinRepo(
+        watches,
+        "getsentry/sentry/run/123",
+        "jpnurmi/gha-watch/run/456",
+        "before",
+      ),
+    ).toBe(watches);
   });
 });
