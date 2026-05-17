@@ -230,6 +230,29 @@ describe("watchController", () => {
     expect(notifications).toEqual([]);
   });
 
+  it("auto-clears live PR watches when their source PR is merged and the option is enabled", async () => {
+    const mergedWatch: WatchRecord = {
+      id: "getsentry/sentry/run/789",
+      target: prRunTarget,
+      source: prTarget,
+      label: "CI",
+      status: "in_progress",
+      lastSeenStatus: "in_progress",
+      lastState: { status: "in_progress", conclusion: null },
+      active: true,
+      error: undefined,
+    };
+    const { deps, fetches } = createDeps([], [{ targets: [], sourceState: "merged" }]);
+    const controller = createWatchController(deps, [mergedWatch], {
+      autoClearMergedPrWatches: true,
+    });
+
+    await controller.pollNow();
+
+    expect(fetches).toEqual([]);
+    expect(controller.getWatches()).toEqual([]);
+  });
+
   it("updates PR source state without replacing current run watches", async () => {
     const oldWatch: WatchRecord = {
       id: "getsentry/sentry/run/789",
@@ -311,6 +334,48 @@ describe("watchController", () => {
       ]);
     },
   );
+
+  it("keeps closed live PR watches even when auto-clearing merged PR watches is enabled", async () => {
+    const sourceWatch: WatchRecord = {
+      id: "getsentry/sentry/run/789",
+      target: prRunTarget,
+      source: prTarget,
+      label: "CI",
+      status: "queued",
+      lastSeenStatus: "queued",
+      lastState: { status: "queued", conclusion: null },
+      active: true,
+      error: undefined,
+    };
+    const { deps, fetches } = createDeps(
+      [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI",
+          prNumber: "51",
+          url: prRunTarget.url,
+        },
+      ],
+      [{ targets: [], sourceState: "closed" }],
+    );
+    const controller = createWatchController(deps, [sourceWatch], {
+      autoClearMergedPrWatches: true,
+    });
+
+    await controller.pollNow();
+
+    expect(fetches).toEqual([prRunTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/789",
+        source: prTarget,
+        sourceState: "closed",
+        status: "in_progress",
+        active: true,
+      },
+    ]);
+  });
 
   it("refreshes missing pull request references for existing inactive watches", async () => {
     const { deps, notifications } = createDeps([

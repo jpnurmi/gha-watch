@@ -24,8 +24,8 @@ import {
   resolvePrWatchTargets,
 } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
-import { loadWatches, saveWatches } from "./platform/store";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
+import { loadSettings, loadWatches, saveSettings, saveWatches } from "./platform/store";
 import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
@@ -50,6 +50,7 @@ let autoStartBusy = true;
 let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
+let settings = loadSettings();
 
 type PendingWatchAction = {
   id: string;
@@ -70,6 +71,9 @@ const controller = createWatchController(
     save: saveWatches,
   },
   loadInitialWatches(),
+  {
+    autoClearMergedPrWatches: settings.autoClearMergedPrWatches,
+  },
 );
 
 function notifyStatusChange(notification: WatchNotification): Promise<void> {
@@ -496,6 +500,23 @@ function bindEvents(): void {
     },
   );
 
+  app.querySelector<HTMLButtonElement>('[data-action="toggle-auto-clear-merged-prs"]')?.addEventListener(
+    "click",
+    () => {
+      settings = {
+        ...settings,
+        autoClearMergedPrWatches: !settings.autoClearMergedPrWatches,
+      };
+      controller.setOptions({
+        autoClearMergedPrWatches: settings.autoClearMergedPrWatches,
+      });
+      isClearMenuOpen = false;
+      void saveSettings(settings);
+      render();
+      void poll();
+    },
+  );
+
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-remove"]')) {
     button.addEventListener("click", () => {
       armWatchAction(button.dataset.id || "", "remove");
@@ -538,6 +559,7 @@ function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): stri
   return `
     <div class="clear-menu-popover" role="menu">
       ${getOverflowMenuItems({
+        autoClearMergedPrWatches: settings.autoClearMergedPrWatches,
         autoStartEnabled,
         autoStartBusy,
         hasWatches,
