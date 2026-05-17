@@ -476,7 +476,9 @@ function renderClearMenuItem(item: OverflowMenuItem): string {
         data-action="${item.action}"
         ${disabled}
       >
-        <span class="menu-check" aria-hidden="true">${item.checked ? renderCheckIcon() : ""}</span>
+        <span class="menu-checkbox-box is-${item.checkbox}" aria-hidden="true">
+          ${item.checked ? renderCheckIcon() : ""}
+        </span>
         <span>${escapeHtml(item.label)}</span>
       </button>
     `;

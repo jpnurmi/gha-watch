@@ -2,6 +2,7 @@ export type OverflowMenuItem =
   | {
       action: "toggle-autostart";
       checked: boolean;
+      checkbox: "checked" | "empty";
       disabled: boolean;
       kind: "checkbox";
       label: string;
@@ -23,13 +24,6 @@ export type OverflowMenuOptions = {
 export function getOverflowMenuItems(options: OverflowMenuOptions): OverflowMenuItem[] {
   return [
     {
-      action: "toggle-autostart",
-      checked: options.autoStartEnabled,
-      disabled: options.autoStartBusy,
-      kind: "checkbox",
-      label: "Auto-start",
-    },
-    {
       action: "clear-all",
       disabled: !options.hasWatches,
       kind: "action",
@@ -40,6 +34,14 @@ export function getOverflowMenuItems(options: OverflowMenuOptions): OverflowMenu
       disabled: !options.hasFinishedWatches,
       kind: "action",
       label: "Clear finished",
+    },
+    {
+      action: "toggle-autostart",
+      checked: options.autoStartEnabled,
+      checkbox: options.autoStartEnabled ? "checked" : "empty",
+      disabled: options.autoStartBusy,
+      kind: "checkbox",
+      label: "Auto-start",
     },
   ];
 }

@@ -160,22 +160,31 @@ input {
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
 }
 
 .clear-menu-popover .menu-action {
   display: block;
 }
 
-.menu-check {
+.menu-checkbox-box {
   display: inline-grid;
   width: 16px;
   height: 16px;
   place-items: center;
+  border: 1.5px solid rgb(216 222 231 / 62%);
+  border-radius: 4px;
+  color: #58a6ff;
 }
 
-.menu-check svg {
-  width: 14px;
-  height: 14px;
+.menu-checkbox-box.is-checked {
+  border-color: #58a6ff;
+  background: rgb(88 166 255 / 14%);
+}
+
+.menu-checkbox-box svg {
+  width: 12px;
+  height: 12px;
   display: block;
 }
 
