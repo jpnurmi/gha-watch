@@ -13,6 +13,10 @@ import {
 import type { WatchSnapshot } from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
+export type WatchControllerOptions = {
+  autoClearMergedPrWatches?: boolean;
+};
+
 export type WatchControllerDeps = {
   fetchState(target: CheckWatchTarget): Promise<WatchSnapshot>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
@@ -33,6 +37,7 @@ export type WatchController = {
   refreshRepositoryIcons(): Promise<void>;
   refreshWatchMetadata(): Promise<void>;
   rerunFailed(id: string): Promise<void>;
+  setOptions(options: WatchControllerOptions): void;
   pollNow(): Promise<void>;
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
@@ -41,8 +46,10 @@ export type WatchController = {
 export function createWatchController(
   deps: WatchControllerDeps,
   initialWatches: WatchRecord[] = [],
+  initialOptions: WatchControllerOptions = {},
 ): WatchController {
   let watches: WatchRecord[] = initialWatches.map(normalizeWatchSeenStatus);
+  let options: WatchControllerOptions = initialOptions;
   const listeners = new Set<() => void>();
 
   function emitChange(): void {
@@ -180,6 +187,10 @@ export function createWatchController(
   }
 
   function assertPrWatchHasTargets(resolution: PrWatchResolution): void {
+    if (resolution.sourceState === "merged") {
+      throw new Error("This pull request has already been merged.");
+    }
+
     if (resolution.targets.length === 0) {
       throw new Error("No workflow runs were found for this pull request.");
     }
@@ -201,6 +212,12 @@ export function createWatchController(
     for (const source of getPrSources(watches)) {
       try {
         const resolution = await getPrWatchResolution(source);
+
+        if (resolution.sourceState === "merged" && options.autoClearMergedPrWatches) {
+          setWatches(watches.filter((watch) => !isSamePrSource(watch.source, source)));
+          continue;
+        }
+
         reconcilePrWatchTargets(source, resolution);
       } catch {
         // Existing concrete run watches should keep polling even if PR resolution briefly fails.
@@ -291,6 +308,10 @@ export function createWatchController(
         active: true,
         error: undefined,
       }));
+    },
+
+    setOptions(nextOptions) {
+      options = { ...options, ...nextOptions };
     },
 
     async pollNow() {

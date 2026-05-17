@@ -163,6 +163,10 @@ input {
   border-top: 1px solid rgb(255 255 255 / 10%);
 }
 
+.clear-menu-popover .menu-checkbox + .menu-checkbox {
+  border-top: 0;
+}
+
 .clear-menu-popover .menu-action {
   display: block;
 }

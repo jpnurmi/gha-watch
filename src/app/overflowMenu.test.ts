@@ -2,38 +2,51 @@ import { describe, expect, it } from "vitest";
 import { getOverflowMenuItems } from "./overflowMenu";
 
 describe("getOverflowMenuItems", () => {
-  it("places the clear actions before the lower-frequency Auto-start setting", () => {
+  it("places clear actions before lower-frequency settings", () => {
     expect(
       getOverflowMenuItems({
+        autoClearMergedPrWatches: true,
         autoStartEnabled: true,
         autoStartBusy: false,
         hasWatches: true,
         hasFinishedWatches: true,
       }).map((item) => item.action),
-    ).toEqual(["clear-all", "clear-finished", "toggle-autostart"]);
+    ).toEqual(["clear-all", "clear-finished", "toggle-auto-clear-merged-prs", "toggle-autostart"]);
   });
 
-  it("shows Auto-start as a checkable menu item", () => {
+  it("shows Auto-clear and Auto-start as checkable menu items", () => {
     expect(
       getOverflowMenuItems({
-        autoStartEnabled: true,
+        autoClearMergedPrWatches: true,
+        autoStartEnabled: false,
         autoStartBusy: false,
         hasWatches: true,
         hasFinishedWatches: true,
-      })[2],
-    ).toEqual({
-      action: "toggle-autostart",
-      checked: true,
-      checkbox: "checked",
-      disabled: false,
-      kind: "checkbox",
-      label: "Auto-start",
-    });
+      }).slice(2),
+    ).toEqual([
+      {
+        action: "toggle-auto-clear-merged-prs",
+        checked: true,
+        checkbox: "checked",
+        disabled: false,
+        kind: "checkbox",
+        label: "Auto-clear",
+      },
+      {
+        action: "toggle-autostart",
+        checked: false,
+        checkbox: "empty",
+        disabled: false,
+        kind: "checkbox",
+        label: "Auto-start",
+      },
+    ]);
   });
 
-  it("keeps destructive clear actions disabled until they apply", () => {
+  it("keeps clear actions disabled until they apply and disables Auto-start while loading", () => {
     expect(
       getOverflowMenuItems({
+        autoClearMergedPrWatches: false,
         autoStartEnabled: false,
         autoStartBusy: true,
         hasWatches: false,
@@ -51,6 +64,14 @@ describe("getOverflowMenuItems", () => {
         disabled: true,
         kind: "action",
         label: "Clear finished",
+      },
+      {
+        action: "toggle-auto-clear-merged-prs",
+        checked: false,
+        checkbox: "empty",
+        disabled: false,
+        kind: "checkbox",
+        label: "Auto-clear",
       },
       {
         action: "toggle-autostart",
