@@ -16,9 +16,12 @@ export type PrStateViewModel = {
   tone: PrStateTone;
 };
 
+export type WatchSubject = "pull-request" | "workflow" | "job";
+
 export type WatchRowViewModel = {
   id: string;
   label: string;
+  subject: WatchSubject;
   prReference?: string;
   prState?: PrStateViewModel;
   statusLabel: string;
@@ -74,6 +77,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
     return {
       id: watch.id,
       label: watch.label,
+      subject: getWatchSubject(watch),
       prReference: getPullRequestReference(watch),
       prState: getPullRequestState(watch),
       statusLabel: "Errored",
@@ -122,6 +126,7 @@ function createRow(
   return {
     id: watch.id,
     label: watch.label,
+    subject: getWatchSubject(watch),
     prReference: getPullRequestReference(watch),
     prState: getPullRequestState(watch),
     statusLabel,
@@ -136,6 +141,14 @@ function createRow(
 
 function getPullRequestReference(watch: WatchRecord): string | undefined {
   return watch.target.prNumber ? `#${watch.target.prNumber}` : undefined;
+}
+
+function getWatchSubject(watch: WatchRecord): WatchSubject {
+  if (watch.sourceState) {
+    return "pull-request";
+  }
+
+  return watch.target.kind === "job" ? "job" : "workflow";
 }
 
 function getPullRequestState(watch: WatchRecord): PrStateViewModel | undefined {

@@ -192,6 +192,45 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("classifies rows by watched subject", () => {
+    const model = createPopupViewModel([
+      watch({
+        sourceState: "merged",
+        target: {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "123",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/actions/runs/123",
+        },
+      }),
+      watch({
+        id: "getsentry/sentry/run/456",
+        target: {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "456",
+          url: "https://github.com/getsentry/sentry/actions/runs/456",
+        },
+      }),
+      watch({
+        id: "getsentry/sentry/job/789",
+        target: {
+          kind: "job",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "456",
+          jobId: "789",
+          url: "https://github.com/getsentry/sentry/actions/runs/456/job/789",
+        },
+      }),
+    ]);
+
+    expect(model.rows.map((row) => row.subject)).toEqual(["pull-request", "workflow", "job"]);
+  });
+
   it("marks rows with unseen status changes", () => {
     const model = createPopupViewModel([
       watch({

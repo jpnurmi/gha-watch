@@ -430,7 +430,8 @@ input {
 }
 
 .status-icon,
-.pr-state-icon {
+.pr-state-icon,
+.watch-subject-icon {
   display: inline-grid;
   width: 18px;
   height: 18px;
@@ -440,7 +441,8 @@ input {
 }
 
 .status-icon svg,
-.pr-state-icon svg {
+.pr-state-icon svg,
+.watch-subject-icon svg {
   width: 18px;
   height: 18px;
   display: block;
@@ -480,6 +482,10 @@ input {
 
 .pr-state-icon-closed {
   color: #f85149;
+}
+
+.watch-subject-icon {
+  color: #8b949e;
 }
 
 .status-icon-pending svg,

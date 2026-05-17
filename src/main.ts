@@ -12,6 +12,7 @@ import { createWatchController } from "./app/watchController";
 import { isWatchActionConfirmation } from "./app/watchActionConfirmation";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
+import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
 import { isOwnerlessPullRequestSlug, parseGitHubActionsUrl, type ParsedWatchTarget } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
@@ -311,7 +312,11 @@ function renderLeadingIcon(row: WatchRowViewModel): string {
     return renderPrStateIcon(row.prState, "watch-leading-icon");
   }
 
-  return renderStatusIcon(row, "watch-leading-icon");
+  if (row.subject === "job") {
+    return renderWatchSubjectIcon("job");
+  }
+
+  return renderWatchSubjectIcon("workflow");
 }
 
 function renderMetadata(row: WatchRowViewModel): string {
@@ -321,9 +326,7 @@ function renderMetadata(row: WatchRowViewModel): string {
     items.push(`<span class="watch-pr-reference">${escapeHtml(row.prReference)}</span>`);
   }
 
-  if (row.prState) {
-    items.push(renderWorkflowStatus(row));
-  }
+  items.push(renderWorkflowStatus(row));
 
   const detail = getMetadataDetail(row);
 
@@ -406,6 +409,18 @@ function renderPrStateIcon(
       aria-label="Pull request ${label}"
     >
       ${getPrStateIconSvg(prState.tone)}
+    </span>
+  `;
+}
+
+function renderWatchSubjectIcon(subject: Exclude<WatchRowViewModel["subject"], "pull-request">): string {
+  return `
+    <span
+      class="watch-leading-icon watch-subject-icon watch-subject-icon-${subject}"
+      title="${subject === "job" ? "Workflow job" : "Workflow run"}"
+      aria-label="${subject === "job" ? "Workflow job" : "Workflow run"}"
+    >
+      ${getWatchSubjectIconSvg(subject)}
     </span>
   `;
 }
@@ -746,21 +761,25 @@ function escapeHtml(value: string): string {
 function loadInitialWatches(): WatchRecord[] {
   if (isDemoMode) {
     return [
-      createDemoWatch("1", "CI / Android (Qt LTS, API 28) (push)", "in_progress", null, true, {
-        prNumber: "50",
-        sourceState: "draft",
-      }),
-      createDemoWatch("2", "E2E / Android (Qt LTS, API 35) (push)", "in_progress", null, true, {
-        prNumber: "51",
-        sourceState: "ready",
-      }),
-      createDemoWatch("3", "CI / Cocoa (Qt latest, macOS-26) (push)", "queued", null, true, {
-        prNumber: "52",
+      createDemoWatch("8", "CI: feat: auto-start", "completed", "success", false, {
+        prNumber: "8",
         sourceState: "merged",
       }),
-      createDemoWatch("4", "CI / Crashpad (Qt LTS, ubuntu-24.04) (push)", "completed", "success", false, {
-        prNumber: "53",
-        sourceState: "closed",
+      createDemoWatch("9", "CI: feat: slug", "completed", "success", false, {
+        prNumber: "9",
+        sourceState: "merged",
+      }),
+      createDemoWatch("10", "CI: ci: add Rust cache", "completed", "success", false, {
+        timing: {
+          startedAt: "2026-05-17T09:28:00Z",
+          completedAt: "2026-05-17T09:31:00Z",
+        },
+      }),
+      createDemoWatch("11", "Build / package app (macOS)", "in_progress", null, true, {
+        jobId: "42",
+        timing: {
+          startedAt: "2026-05-17T11:56:00Z",
+        },
       }),
     ];
   }
@@ -774,18 +793,35 @@ function createDemoWatch(
   status: string,
   conclusion: string | null,
   active: boolean,
-  options: { prNumber?: string; sourceState?: WatchRecord["sourceState"] } = {},
+  options: {
+    jobId?: string;
+    prNumber?: string;
+    sourceState?: WatchRecord["sourceState"];
+    timing?: WatchRecord["timing"];
+  } = {},
 ): WatchRecord {
+  const target = options.jobId
+    ? {
+        kind: "job" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId,
+        jobId: options.jobId,
+        ...(options.prNumber ? { prNumber: options.prNumber } : {}),
+        url: `https://github.com/getsentry/sentry/actions/runs/${runId}/job/${options.jobId}`,
+      }
+    : {
+        kind: "run" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId,
+        ...(options.prNumber ? { prNumber: options.prNumber } : {}),
+        url: `https://github.com/getsentry/sentry/actions/runs/${runId}`,
+      };
+
   return {
-    id: `getsentry/sentry/run/${runId}`,
-    target: {
-      kind: "run",
-      owner: "getsentry",
-      repo: "sentry",
-      runId,
-      ...(options.prNumber ? { prNumber: options.prNumber } : {}),
-      url: `https://github.com/getsentry/sentry/actions/runs/${runId}`,
-    },
+    id: options.jobId ? `getsentry/sentry/job/${options.jobId}` : `getsentry/sentry/run/${runId}`,
+    target,
     ...(options.prNumber
       ? {
           source: {
@@ -801,6 +837,7 @@ function createDemoWatch(
     label,
     status: conclusion ? `${status}:${conclusion}` : status,
     lastState: { status, conclusion },
+    ...(options.timing ? { timing: options.timing } : {}),
     active,
     error: undefined,
   };
