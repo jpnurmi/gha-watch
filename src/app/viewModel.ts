@@ -381,7 +381,7 @@ function getHeaderTone(counts: Counts, total: number): HeaderTone {
 
 function getSubtitle(counts: Counts, total: number): string {
   if (total === 0) {
-    return "Paste a workflow run or job link to start watching";
+    return "Add a repository, pull request, workflow run, or job";
   }
 
   const parts = [

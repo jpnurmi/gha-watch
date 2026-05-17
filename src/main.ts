@@ -16,13 +16,19 @@ import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel 
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
 import {
+  addFavoriteRepo,
   getFavoriteRepoKey,
   isFavoriteRepo,
   toggleFavoriteRepo,
   updateFavoriteRepoIcon,
   type FavoriteRepo,
 } from "./domain/favorites";
-import { isOwnerlessPullRequestSlug, parseGitHubActionsUrl, type ParsedWatchTarget } from "./domain/githubUrl";
+import {
+  isOwnerlessPullRequestSlug,
+  isOwnerlessRepositorySlug,
+  parseGitHubActionsUrl,
+  type ParsedGitHubTarget,
+} from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
 import {
   fetchActiveWorkflowRuns,
@@ -215,7 +221,7 @@ function render(): void {
           <p>${escapeHtml(viewModel.subtitle)}</p>
         </div>
         <div class="header-actions">
-          <button class="icon-button" type="button" data-action="toggle-add" title="Add watch" aria-label="Add watch">
+          <button class="icon-button" type="button" data-action="toggle-add" title="Add" aria-label="Add repository or watch">
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M8 3.25v9.5M3.25 8h9.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
             </svg>
@@ -273,7 +279,7 @@ function renderWatchList(viewModel: ReturnType<typeof createPopupViewModel>): st
         viewModel.groups.length === 0
           ? `<li class="empty">
               <div class="empty-content">
-                <button class="empty-action" type="button" data-action="toggle-add">Add watch</button>
+                <button class="empty-action" type="button" data-action="toggle-add">Add</button>
               </div>
             </li>`
           : viewModel.groups.map(renderWatchGroup).join("")
@@ -286,7 +292,7 @@ function renderAddForm(): string {
   return `
     <form class="add-form" data-role="add-form">
       <div class="add-field">
-        <button class="add-form-dismiss" type="button" data-action="close-add" title="Cancel" aria-label="Cancel adding watch">
+        <button class="add-form-dismiss" type="button" data-action="close-add" title="Cancel" aria-label="Cancel adding">
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
           </svg>
@@ -297,11 +303,11 @@ function renderAddForm(): string {
           autocomplete="off"
           spellcheck="false"
           placeholder="owner/repo#1234"
-          aria-label="GitHub Actions URL or pull request slug"
+          aria-label="GitHub repository, Actions URL, or pull request slug"
           aria-describedby="add-form-hint"
         />
         <div class="add-field-actions">
-          <button class="add-form-submit" type="submit">Watch</button>
+          <button class="add-form-submit" type="submit">Add</button>
         </div>
       </div>
       <p class="form-hint" id="add-form-hint">or https://github.com/OWNER/REPO/actions/runs/RUN_ID</p>
@@ -947,6 +953,18 @@ function toggleFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): v
   }
 }
 
+async function addFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): Promise<void> {
+  let favoriteRepos = addFavoriteRepo(settings.favoriteRepos, repo);
+  favoriteRepos = updateFavoriteRepoIcon(favoriteRepos, repo, findRepoIconUrl(repo));
+
+  if (favoriteRepos !== settings.favoriteRepos) {
+    settings = { ...settings, favoriteRepos };
+    await saveSettings(settings);
+  }
+
+  void refreshFavoriteRepoIcon(repo);
+}
+
 async function refreshFavoriteRepoIcon(repo: Pick<FavoriteRepo, "owner" | "repo">): Promise<void> {
   const repoKey = getFavoriteRepoKey(repo);
   const current = settings.favoriteRepos.find((favorite) => getFavoriteRepoKey(favorite) === repoKey);
@@ -1198,7 +1216,13 @@ async function acknowledgePopupDismissal(): Promise<void> {
 async function addWatch(url: string): Promise<void> {
   try {
     const target = await parseWatchInput(url);
-    await controller.add(target);
+
+    if (target.kind === "repo") {
+      await addFavoriteRepository(target);
+    } else {
+      await controller.add(target);
+    }
+
     isAdding = false;
     isClearMenuOpen = false;
     addError = undefined;
@@ -1210,8 +1234,8 @@ async function addWatch(url: string): Promise<void> {
   void updateTrayIndicator();
 }
 
-async function parseWatchInput(input: string): Promise<ParsedWatchTarget> {
-  if (!isOwnerlessPullRequestSlug(input)) {
+async function parseWatchInput(input: string): Promise<ParsedGitHubTarget> {
+  if (!isOwnerlessPullRequestSlug(input) && !isOwnerlessRepositorySlug(input)) {
     return parseGitHubActionsUrl(input);
   }
 

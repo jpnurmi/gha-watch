@@ -25,28 +25,44 @@ export type PrWatchTarget = {
   url: string;
 };
 
+export type RepoTarget = {
+  kind: "repo";
+  owner: string;
+  repo: string;
+  url: string;
+};
+
 export type CheckWatchTarget = RunWatchTarget | JobWatchTarget;
 export type ParsedWatchTarget = CheckWatchTarget | PrWatchTarget;
+export type ParsedGitHubTarget = ParsedWatchTarget | RepoTarget;
 
 export type ParseGitHubActionsUrlOptions = {
   defaultOwner?: string;
 };
 
-const unsupportedUrlMessage = "Paste a GitHub Actions run, job, pull request URL, or PR slug.";
+const unsupportedUrlMessage = "Paste a GitHub repository, Actions run, job, pull request URL, or PR slug.";
 const ownerPattern = "[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?";
 const ownerPatternExact = new RegExp(`^${ownerPattern}$`);
 const repoPattern = "[A-Za-z0-9._-]+";
+const repoPatternExact = new RegExp(`^${repoPattern}$`);
 const pullRequestSlugPattern = new RegExp(`^(?:(${ownerPattern})/)?(${repoPattern})#([1-9]\\d*)$`);
+const repositorySlugPattern = new RegExp(`^(?:(${ownerPattern})/)?(${repoPattern})$`);
 
 export function parseGitHubActionsUrl(
   input: string,
   options: ParseGitHubActionsUrlOptions = {},
-): ParsedWatchTarget {
+): ParsedGitHubTarget {
   const reference = extractWatchReference(input);
   const pullRequestSlugTarget = parsePullRequestSlugTarget(reference, options.defaultOwner);
 
   if (pullRequestSlugTarget) {
     return pullRequestSlugTarget;
+  }
+
+  const repositorySlugTarget = parseRepositorySlugTarget(reference, options.defaultOwner);
+
+  if (repositorySlugTarget) {
+    return repositorySlugTarget;
   }
 
   let parsed: URL;
@@ -65,6 +81,15 @@ export function parseGitHubActionsUrl(
   const [owner, repo, section, subSection, runId, jobSection, jobId] = parts;
   const prNumber = getPullRequestNumber(parsed.searchParams);
   const canonicalUrl = `${parsed.origin}${parsed.pathname}${prNumber ? `?pr=${prNumber}` : ""}`;
+
+  if (owner && repo && !section && ownerPatternExact.test(owner) && repoPatternExact.test(repo)) {
+    return {
+      kind: "repo",
+      owner,
+      repo,
+      url: `${parsed.origin}/${owner}/${repo}`,
+    };
+  }
 
   if (owner && repo && section === "pull" && isPositiveInteger(subSection)) {
     return {
@@ -120,10 +145,20 @@ export function isOwnerlessPullRequestSlug(input: string): boolean {
   return Boolean(slug && !slug.owner);
 }
 
+export function isOwnerlessRepositorySlug(input: string): boolean {
+  const slug = parseRepositorySlug(extractWatchReference(input));
+  return Boolean(slug && !slug.owner);
+}
+
 type PullRequestSlug = {
   owner?: string;
   repo: string;
   prNumber: string;
+};
+
+type RepositorySlug = {
+  owner?: string;
+  repo: string;
 };
 
 function parsePullRequestSlugTarget(
@@ -162,6 +197,40 @@ function parsePullRequestSlug(reference: string): PullRequestSlug | undefined {
     ...(match[1] ? { owner: match[1] } : {}),
     repo: match[2],
     prNumber: match[3],
+  };
+}
+
+function parseRepositorySlugTarget(reference: string, defaultOwner: string | undefined): RepoTarget | undefined {
+  const slug = parseRepositorySlug(reference);
+
+  if (!slug) {
+    return undefined;
+  }
+
+  const owner = slug.owner || getDefaultOwner(defaultOwner);
+
+  if (!owner) {
+    return undefined;
+  }
+
+  return {
+    kind: "repo",
+    owner,
+    repo: slug.repo,
+    url: `https://github.com/${owner}/${slug.repo}`,
+  };
+}
+
+function parseRepositorySlug(reference: string): RepositorySlug | undefined {
+  const match = reference.match(repositorySlugPattern);
+
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    ...(match[1] ? { owner: match[1] } : {}),
+    repo: match[2],
   };
 }
 

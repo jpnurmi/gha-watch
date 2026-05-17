@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isOwnerlessPullRequestSlug, parseGitHubActionsUrl } from "./githubUrl";
+import { isOwnerlessPullRequestSlug, isOwnerlessRepositorySlug, parseGitHubActionsUrl } from "./githubUrl";
 
 describe("parseGitHubActionsUrl", () => {
   it("parses workflow run URLs", () => {
@@ -96,14 +96,48 @@ describe("parseGitHubActionsUrl", () => {
     });
   });
 
+  it("parses owner and repository slugs for favorite repositories", () => {
+    expect(parseGitHubActionsUrl("jpnurmi/gha-watch")).toEqual({
+      kind: "repo",
+      owner: "jpnurmi",
+      repo: "gha-watch",
+      url: "https://github.com/jpnurmi/gha-watch",
+    });
+  });
+
+  it("parses ownerless repository slugs with a default owner", () => {
+    expect(parseGitHubActionsUrl("gha-watch", { defaultOwner: "jpnurmi" })).toEqual({
+      kind: "repo",
+      owner: "jpnurmi",
+      repo: "gha-watch",
+      url: "https://github.com/jpnurmi/gha-watch",
+    });
+  });
+
+  it("parses repository URLs for favorite repositories", () => {
+    expect(parseGitHubActionsUrl("https://github.com/getsentry/sentry")).toEqual({
+      kind: "repo",
+      owner: "getsentry",
+      repo: "sentry",
+      url: "https://github.com/getsentry/sentry",
+    });
+  });
+
   it("detects ownerless repository pull request slugs", () => {
     expect(isOwnerlessPullRequestSlug("gha-watch#456")).toBe(true);
     expect(isOwnerlessPullRequestSlug("jpnurmi/gha-watch#123")).toBe(false);
     expect(isOwnerlessPullRequestSlug("https://github.com/jpnurmi/gha-watch/pull/123")).toBe(false);
   });
 
+  it("detects ownerless repository slugs", () => {
+    expect(isOwnerlessRepositorySlug("gha-watch")).toBe(true);
+    expect(isOwnerlessRepositorySlug("jpnurmi/gha-watch")).toBe(false);
+    expect(isOwnerlessRepositorySlug("https://github.com/jpnurmi/gha-watch")).toBe(false);
+    expect(isOwnerlessRepositorySlug("gha-watch#456")).toBe(false);
+  });
+
   it("rejects unsupported URLs", () => {
     expect(() => parseGitHubActionsUrl("https://example.com/getsentry/sentry/actions/runs/1"))
-      .toThrow("Paste a GitHub Actions run, job, pull request URL, or PR slug.");
+      .toThrow("Paste a GitHub repository, Actions run, job, pull request URL, or PR slug.");
   });
 });

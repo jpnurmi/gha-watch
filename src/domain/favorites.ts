@@ -35,6 +35,14 @@ export function normalizeFavoriteRepos(value: unknown): FavoriteRepo[] {
   return favorites;
 }
 
+export function addFavoriteRepo(favorites: FavoriteRepo[], repo: Pick<FavoriteRepo, "owner" | "repo">): FavoriteRepo[] {
+  if (isFavoriteRepo(favorites, repo)) {
+    return favorites;
+  }
+
+  return [...favorites, { owner: repo.owner, repo: repo.repo }];
+}
+
 export function toggleFavoriteRepo(favorites: FavoriteRepo[], repo: Pick<FavoriteRepo, "owner" | "repo">): FavoriteRepo[] {
   const key = getFavoriteRepoKey(repo);
 
