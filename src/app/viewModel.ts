@@ -67,6 +67,7 @@ export function createPopupViewModel(
   watches: WatchRecord[],
   now = new Date(),
   favoriteRepos: FavoriteRepo[] = [],
+  repoOrder: string[] = [],
 ): PopupViewModel {
   const rows = watches.map((watch) => createWatchRowViewModel(watch, now));
   const counts = countRows(rows);
@@ -75,7 +76,7 @@ export function createPopupViewModel(
     title: getTitle(counts, rows.length),
     subtitle: getSubtitle(counts, rows.length),
     headerTone: getHeaderTone(counts, rows.length),
-    groups: groupRowsByRepo(watches, rows, favoriteRepos),
+    groups: orderGroups(groupRowsByRepo(watches, rows, favoriteRepos), repoOrder),
     rows,
   };
 }
@@ -219,6 +220,33 @@ function groupRowsByRepo(
   });
 
   return groups;
+}
+
+function orderGroups(groups: WatchGroupViewModel[], repoOrder: string[]): WatchGroupViewModel[] {
+  if (repoOrder.length === 0) {
+    return groups;
+  }
+
+  const orderByRepo = new Map(repoOrder.map((repoLabel, index) => [repoLabel, index]));
+
+  return groups
+    .map((group, index) => ({ group, index, order: orderByRepo.get(group.repoLabel) }))
+    .sort((left, right) => {
+      if (left.order === undefined && right.order === undefined) {
+        return left.index - right.index;
+      }
+
+      if (left.order === undefined) {
+        return 1;
+      }
+
+      if (right.order === undefined) {
+        return -1;
+      }
+
+      return left.order - right.order;
+    })
+    .map(({ group }) => group);
 }
 
 function createWatchGroup(
