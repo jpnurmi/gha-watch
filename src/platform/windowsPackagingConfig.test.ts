@@ -3,11 +3,13 @@ import capabilities from "../../src-tauri/capabilities/default.json";
 import config from "../../src-tauri/tauri.windows.conf.json";
 
 describe("Windows packaging configuration", () => {
-  it("uses a transparent popup window without macOS-only window effects", () => {
+  it("uses native Windows rounding for the popup frame", () => {
     expect(config.app.windows[0]).toMatchObject({
       label: "main",
-      transparent: true,
-      backgroundColor: "#00000000",
+      decorations: false,
+      transparent: false,
+      backgroundColor: "#161b22",
+      shadow: true,
       skipTaskbar: true,
     });
     expect(config.app.windows[0]).not.toHaveProperty("windowEffects");

@@ -10,8 +10,8 @@
         "visible": false,
         "resizable": false,
         "decorations": false,
-        "transparent": true,
-        "backgroundColor": "#00000000",
+        "transparent": false,
+        "backgroundColor": "#161b22",
         "shadow": true,
         "alwaysOnTop": true,
         "skipTaskbar": true
