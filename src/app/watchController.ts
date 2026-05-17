@@ -6,9 +6,11 @@ import {
   getWatchId,
   markAllWatchesSeen,
   markWatchSeen,
+  moveWatchWithinRepo,
   normalizeWatchSeenStatus,
   removeWatch,
   type PrWatchResolution,
+  type WatchDropPosition,
   type WatchRecord,
 } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
@@ -34,6 +36,7 @@ export type WatchControllerDeps = {
 export type WatchController = {
   add(target: ParsedWatchTarget): Promise<void>;
   remove(id: string): void;
+  reorderWithinRepo(draggedId: string, targetId: string, position: WatchDropPosition): void;
   markSeen(id: string): void;
   markAllSeen(): void;
   clearAll(): void;
@@ -250,6 +253,14 @@ export function createWatchController(
       }
 
       setWatches(removeWatch(watches, id));
+    },
+
+    reorderWithinRepo(draggedId, targetId, position) {
+      const next = moveWatchWithinRepo(watches, draggedId, targetId, position);
+
+      if (next !== watches) {
+        setWatches(next);
+      }
     },
 
     markSeen(id) {

@@ -47,6 +47,7 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
   notificationRecords: WatchControllerDeps extends { notify(notification: infer Notification): Promise<void> }
     ? Notification[]
     : never;
+  saves: WatchRecord[][];
   fetches: CheckWatchTarget[];
   reruns: CheckWatchTarget[];
   prResolves: PrWatchTarget[];
@@ -55,6 +56,7 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
 } {
   const notifications: string[] = [];
   const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
+  const saves: WatchRecord[][] = [];
   const fetches: CheckWatchTarget[] = [];
   const reruns: CheckWatchTarget[] = [];
   const prResolves: PrWatchTarget[] = [];
@@ -64,6 +66,7 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
   return {
     notifications,
     notificationRecords,
+    saves,
     fetches,
     reruns,
     prResolves,
@@ -121,7 +124,9 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
           },
         ];
       },
-      async save() {},
+      async save(watches) {
+        saves.push(watches);
+      },
     },
   };
 }
@@ -219,6 +224,49 @@ describe("watchController", () => {
         status: "queued",
         lastSeenStatus: "queued",
       },
+    ]);
+  });
+
+  it("reorders watches inside one repository without changing other repository slots", () => {
+    const { deps, saves } = createDeps([]);
+    const first = existingWatch();
+    const otherRepo = {
+      ...existingWatch(),
+      id: "jpnurmi/gha-watch/run/456",
+      target: {
+        kind: "run" as const,
+        owner: "jpnurmi",
+        repo: "gha-watch",
+        runId: "456",
+        url: "https://github.com/jpnurmi/gha-watch/actions/runs/456",
+      },
+      label: "Build",
+    };
+    const second = {
+      ...existingWatch(),
+      id: "getsentry/sentry/run/789",
+      target: {
+        kind: "run" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "789",
+        url: "https://github.com/getsentry/sentry/actions/runs/789",
+      },
+      label: "Lint",
+    };
+    const controller = createWatchController(deps, [first, otherRepo, second]);
+
+    controller.reorderWithinRepo(first.id, second.id, "after");
+
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/789",
+      "jpnurmi/gha-watch/run/456",
+      "getsentry/sentry/run/123",
+    ]);
+    expect(saves.at(-1)?.map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/789",
+      "jpnurmi/gha-watch/run/456",
+      "getsentry/sentry/run/123",
     ]);
   });
 
