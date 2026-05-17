@@ -12,9 +12,15 @@ import { isWatchActionConfirmation } from "./app/watchActionConfirmation";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
 import type { WatchNotification } from "./app/watchNotification";
-import { parseGitHubActionsUrl } from "./domain/githubUrl";
+import { isOwnerlessPullRequestSlug, parseGitHubActionsUrl, type ParsedWatchTarget } from "./domain/githubUrl";
 import type { WatchRecord } from "./domain/watches";
-import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch, resolvePrWatchTargets } from "./platform/gh";
+import {
+  fetchAuthenticatedUserLogin,
+  fetchRepositoryIconUrl,
+  fetchWatchState,
+  rerunFailedWatch,
+  resolvePrWatchTargets,
+} from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
 import { loadWatches, saveWatches } from "./platform/store";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
@@ -224,16 +230,18 @@ function renderAddForm(): string {
         </button>
         <input
           name="url"
-          type="url"
+          type="text"
           autocomplete="off"
           spellcheck="false"
-          placeholder="https://github.com/OWNER/REPO/actions/runs/..."
-          aria-label="GitHub Actions URL"
+          placeholder="owner/repo#1234"
+          aria-label="GitHub Actions URL or pull request slug"
+          aria-describedby="add-form-hint"
         />
         <div class="add-field-actions">
           <button class="add-form-submit" type="submit">Watch</button>
         </div>
       </div>
+      <p class="form-hint" id="add-form-hint">or https://github.com/OWNER/REPO/actions/runs/RUN_ID</p>
       ${addError ? `<p class="form-error">${escapeHtml(addError)}</p>` : ""}
     </form>
   `;
@@ -588,7 +596,7 @@ async function acknowledgePopupDismissal(): Promise<void> {
 
 async function addWatch(url: string): Promise<void> {
   try {
-    const target = parseGitHubActionsUrl(url);
+    const target = await parseWatchInput(url);
     await controller.add(target);
     isAdding = false;
     isClearMenuOpen = false;
@@ -599,6 +607,14 @@ async function addWatch(url: string): Promise<void> {
 
   render();
   void updateTrayIndicator();
+}
+
+async function parseWatchInput(input: string): Promise<ParsedWatchTarget> {
+  if (!isOwnerlessPullRequestSlug(input)) {
+    return parseGitHubActionsUrl(input);
+  }
+
+  return parseGitHubActionsUrl(input, { defaultOwner: await fetchAuthenticatedUserLogin() });
 }
 
 async function poll(): Promise<void> {

@@ -36,9 +36,12 @@ https://github.com/OWNER/REPO/actions/runs/RUN_ID
 https://github.com/OWNER/REPO/actions/runs/RUN_ID/job/JOB_ID
 https://github.com/OWNER/REPO/runs/JOB_ID
 https://github.com/OWNER/REPO/pull/PR_NUMBER
+OWNER/REPO#PR_NUMBER
+REPO#PR_NUMBER
 ```
 
 Pull request links are live watches. On each poll, the app resolves the current PR head and watches the matching workflow runs for that head.
+Ownerless pull request slugs use the authenticated GitHub CLI user as the owner.
 
 ## Development
 

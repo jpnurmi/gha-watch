@@ -48,6 +48,10 @@ type RepositoryViewResponse = {
   };
 };
 
+type UserViewResponse = {
+  login?: string;
+};
+
 type PullRequestReference = {
   number?: number | string;
 };
@@ -100,6 +104,19 @@ export async function fetchRepositoryIconUrl(
 
     assertSuccessfulGhResult(result);
     return parseJson<RepositoryViewResponse>(result.stdout).owner?.avatar_url;
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function fetchAuthenticatedUserLogin(
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<string> {
+  try {
+    const result = await executor.execute("gh", ["api", "user"]);
+
+    assertSuccessfulGhResult(result);
+    return requiredString(parseJson<UserViewResponse>(result.stdout).login, "authenticated user login");
   } catch (error) {
     throw normalizeGhError(error);
   }
