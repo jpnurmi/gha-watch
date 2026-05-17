@@ -299,6 +299,7 @@ function renderWatch(row: WatchRowViewModel): string {
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
         <span class="watch-label">
           <span class="watch-title-text">${escapeHtml(row.label)}</span>
+          ${row.prReference ? `<span class="watch-title-reference">${escapeHtml(row.prReference)}</span>` : ""}
         </span>
         ${renderMetadata(row)}
       </button>
@@ -321,10 +322,6 @@ function renderLeadingIcon(row: WatchRowViewModel): string {
 
 function renderMetadata(row: WatchRowViewModel): string {
   const items: string[] = [];
-
-  if (row.prReference) {
-    items.push(`<span class="watch-pr-reference">${escapeHtml(row.prReference)}</span>`);
-  }
 
   items.push(renderWorkflowStatus(row));
 

@@ -537,8 +537,17 @@ input {
 
 .watch-title-text {
   min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-title-reference {
+  flex: 0 0 auto;
+  color: rgb(238 241 245 / 52%);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .watch-meta {
@@ -555,15 +564,9 @@ input {
   white-space: nowrap;
 }
 
-.watch-pr-reference,
 .watch-workflow-status,
 .watch-meta-separator {
   flex: 0 0 auto;
-}
-
-.watch-pr-reference {
-  color: rgb(238 241 245 / 52%);
-  font-weight: 750;
 }
 
 .watch-workflow-status {
