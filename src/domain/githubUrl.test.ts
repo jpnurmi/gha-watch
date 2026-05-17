@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGitHubActionsUrl } from "./githubUrl";
+import { isOwnerlessPullRequestSlug, parseGitHubActionsUrl } from "./githubUrl";
 
 describe("parseGitHubActionsUrl", () => {
   it("parses workflow run URLs", () => {
@@ -76,8 +76,34 @@ describe("parseGitHubActionsUrl", () => {
     });
   });
 
+  it("parses owner and repository pull request slugs for live PR watches", () => {
+    expect(parseGitHubActionsUrl("jpnurmi/gha-watch#123")).toEqual({
+      kind: "pr",
+      owner: "jpnurmi",
+      repo: "gha-watch",
+      prNumber: "123",
+      url: "https://github.com/jpnurmi/gha-watch/pull/123",
+    });
+  });
+
+  it("parses ownerless repository pull request slugs with a default owner", () => {
+    expect(parseGitHubActionsUrl("gha-watch#456", { defaultOwner: "jpnurmi" })).toEqual({
+      kind: "pr",
+      owner: "jpnurmi",
+      repo: "gha-watch",
+      prNumber: "456",
+      url: "https://github.com/jpnurmi/gha-watch/pull/456",
+    });
+  });
+
+  it("detects ownerless repository pull request slugs", () => {
+    expect(isOwnerlessPullRequestSlug("gha-watch#456")).toBe(true);
+    expect(isOwnerlessPullRequestSlug("jpnurmi/gha-watch#123")).toBe(false);
+    expect(isOwnerlessPullRequestSlug("https://github.com/jpnurmi/gha-watch/pull/123")).toBe(false);
+  });
+
   it("rejects unsupported URLs", () => {
     expect(() => parseGitHubActionsUrl("https://example.com/getsentry/sentry/actions/runs/1"))
-      .toThrow("Paste a GitHub Actions run, job, or pull request URL.");
+      .toThrow("Paste a GitHub Actions run, job, pull request URL, or PR slug.");
   });
 });

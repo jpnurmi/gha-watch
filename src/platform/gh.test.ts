@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  fetchAuthenticatedUserLogin,
   fetchRepositoryIconUrl,
   fetchWatchState,
   rerunFailedWatch,
@@ -242,6 +243,27 @@ describe("fetchRepositoryIconUrl", () => {
       {
         program: "gh",
         args: ["api", "repos/getsentry/sentry-native"],
+      },
+    ]);
+  });
+});
+
+describe("fetchAuthenticatedUserLogin", () => {
+  it("fetches the authenticated GitHub user login via gh api", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        login: "jpnurmi",
+      }),
+      stderr: "",
+    });
+
+    await expect(fetchAuthenticatedUserLogin(executor)).resolves.toBe("jpnurmi");
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "user"],
       },
     ]);
   });
