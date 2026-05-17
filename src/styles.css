@@ -144,6 +144,7 @@ input {
 }
 
 .clear-menu-popover button {
+  width: 100%;
   border: 0;
   padding: 9px 11px;
   background: transparent;
@@ -152,6 +153,30 @@ input {
   font-size: 12px;
   font-weight: 650;
   text-align: left;
+}
+
+.clear-menu-popover .menu-checkbox {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.clear-menu-popover .menu-action {
+  display: block;
+}
+
+.menu-check {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+}
+
+.menu-check svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .clear-menu-popover button:hover:not(:disabled) {

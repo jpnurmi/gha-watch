@@ -2,6 +2,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
+import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getStatusIconSvg } from "./app/statusIcon";
@@ -15,6 +16,7 @@ import type { WatchRecord } from "./domain/watches";
 import { fetchRepositoryIconUrl, fetchWatchState, rerunFailedWatch, resolvePrWatchTargets } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
 import { loadWatches, saveWatches } from "./platform/store";
+import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
 import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
@@ -34,6 +36,8 @@ let isAdding = false;
 let addError: string | undefined;
 let isPolling = false;
 let isClearMenuOpen = false;
+let autoStartEnabled = false;
+let autoStartBusy = true;
 let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
@@ -70,6 +74,7 @@ controller.subscribe(() => {
 
 render();
 void updateTrayIndicator();
+void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void controller.refreshWatchMetadata();
 void listenForDesktopNotificationClicks((click) => {
@@ -163,10 +168,7 @@ function render(): void {
             </button>
             ${
               isClearMenuOpen
-                ? `<div class="clear-menu-popover" role="menu">
-                    <button type="button" role="menuitem" data-action="clear-all" ${hasWatches ? "" : "disabled"}>Clear all</button>
-                    <button type="button" role="menuitem" data-action="clear-finished" ${hasFinishedWatches ? "" : "disabled"}>Clear finished</button>
-                  </div>`
+                ? renderClearMenu(hasWatches, hasFinishedWatches)
                 : ""
             }
           </div>
@@ -373,6 +375,13 @@ function bindEvents(): void {
     },
   );
 
+  app.querySelector<HTMLButtonElement>('[data-action="toggle-autostart"]')?.addEventListener(
+    "click",
+    () => {
+      void toggleAutoStart();
+    },
+  );
+
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-group"]')) {
     button.addEventListener("click", () => {
       const repoLabel = button.dataset.repo;
@@ -439,6 +448,55 @@ function bindEvents(): void {
   }
 }
 
+function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): string {
+  return `
+    <div class="clear-menu-popover" role="menu">
+      ${getOverflowMenuItems({
+        autoStartEnabled,
+        autoStartBusy,
+        hasWatches,
+        hasFinishedWatches,
+      })
+        .map(renderClearMenuItem)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderClearMenuItem(item: OverflowMenuItem): string {
+  const disabled = item.disabled ? "disabled" : "";
+
+  if (item.kind === "checkbox") {
+    return `
+      <button
+        class="menu-checkbox"
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked="${item.checked ? "true" : "false"}"
+        data-action="${item.action}"
+        ${disabled}
+      >
+        <span class="menu-check" aria-hidden="true">${item.checked ? renderCheckIcon() : ""}</span>
+        <span>${escapeHtml(item.label)}</span>
+      </button>
+    `;
+  }
+
+  return `
+    <button class="menu-action" type="button" role="menuitem" data-action="${item.action}" ${disabled}>
+      ${escapeHtml(item.label)}
+    </button>
+  `;
+}
+
+function renderCheckIcon(): string {
+  return `
+    <svg viewBox="0 0 16 16">
+      <path d="m3.5 8.2 2.8 2.8 6.2-6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+    </svg>
+  `;
+}
+
 function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
   if (!id) {
     return;
@@ -464,6 +522,38 @@ async function confirmRerun(id: string): Promise<void> {
 
   render();
   void updateTrayIndicator();
+}
+
+async function refreshAutoStartState(): Promise<void> {
+  autoStartBusy = true;
+  render();
+
+  try {
+    autoStartEnabled = await getAutoStartEnabled();
+  } catch (error) {
+    console.warn("Unable to read Auto-start state", error);
+  } finally {
+    autoStartBusy = false;
+    render();
+  }
+}
+
+async function toggleAutoStart(): Promise<void> {
+  if (autoStartBusy) {
+    return;
+  }
+
+  autoStartBusy = true;
+  render();
+
+  try {
+    autoStartEnabled = await setAutoStartEnabled(!autoStartEnabled);
+  } catch (error) {
+    console.warn("Unable to update Auto-start state", error);
+  } finally {
+    autoStartBusy = false;
+    render();
+  }
 }
 
 async function hideMainWindow(): Promise<void> {
