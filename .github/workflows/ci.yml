@@ -44,6 +44,11 @@ jobs:
           rustup toolchain install stable --profile minimal --component clippy --component rustfmt
           rustup default stable
 
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: src-tauri -> target
+
       - name: Install Tauri dependencies
         if: runner.os == 'Linux'
         run: |
@@ -71,8 +76,8 @@ jobs:
       - name: Check Rust lints
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 
-  test:
-    name: Test
+  vitest:
+    name: Vitest
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -97,7 +102,7 @@ jobs:
     name: Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    needs: test
+    needs: vitest
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +132,11 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: src-tauri -> target
 
       - name: Install Tauri dependencies
         if: runner.os == 'Linux'
