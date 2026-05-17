@@ -230,7 +230,7 @@ function renderAddForm(): string {
           type="text"
           autocomplete="off"
           spellcheck="false"
-          placeholder="gha-watch#456"
+          placeholder="owner/repo#1234"
           aria-label="GitHub Actions URL or pull request slug"
           aria-describedby="add-form-hint"
         />
