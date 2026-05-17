@@ -415,9 +415,9 @@ input {
 .watch {
   display: grid;
   min-height: 62px;
-  grid-template-columns: 18px minmax(0, 1fr) 43px;
+  grid-template-columns: 22px minmax(0, 1fr) 43px;
   align-items: start;
-  gap: 10px;
+  gap: 8px;
   padding: 10px 16px;
 }
 
@@ -429,18 +429,20 @@ input {
   background: rgb(255 255 255 / 6%);
 }
 
-.status-icon {
+.status-icon,
+.pr-state-icon {
   display: inline-grid;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   margin-top: 3px;
   place-items: center;
   justify-self: center;
 }
 
-.status-icon svg {
-  width: 16px;
-  height: 16px;
+.status-icon svg,
+.pr-state-icon svg {
+  width: 18px;
+  height: 18px;
   display: block;
   transform-origin: center;
 }
@@ -462,6 +464,22 @@ input {
 
 .status-icon-cancelled {
   color: #8b949e;
+}
+
+.pr-state-icon-draft {
+  color: #8b949e;
+}
+
+.pr-state-icon-ready {
+  color: #3fb950;
+}
+
+.pr-state-icon-merged {
+  color: #a371f7;
+}
+
+.pr-state-icon-closed {
+  color: #f85149;
 }
 
 .status-icon-pending svg,
@@ -517,27 +535,35 @@ input {
   text-overflow: ellipsis;
 }
 
-.watch-pr-reference {
-  flex: 0 0 auto;
-  color: rgb(238 241 245 / 48%);
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.watch-pr-state {
-  display: inline-flex;
+.watch-meta {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
-  gap: 3px;
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1;
+  gap: 6px;
+  overflow: hidden;
+  color: rgb(238 241 245 / 60%);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
-.watch-pr-state svg {
-  width: 13px;
-  height: 13px;
-  display: block;
+.watch-pr-reference,
+.watch-pr-state-text,
+.watch-workflow-status,
+.watch-meta-separator {
+  flex: 0 0 auto;
+}
+
+.watch-pr-reference {
+  min-width: 0;
+  max-width: 50%;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: rgb(238 241 245 / 52%);
+  font-weight: 750;
+  text-overflow: ellipsis;
 }
 
 .watch-pr-state-draft {
@@ -556,17 +582,27 @@ input {
   color: #f85149;
 }
 
-.watch-status {
+.watch-workflow-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 750;
+}
+
+.watch-workflow-status svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+  transform-origin: center;
+}
+
+.watch-meta-text {
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;
-  color: rgb(238 241 245 / 68%);
-  font-size: 12px;
+  color: rgb(238 241 245 / 62%);
   font-style: italic;
-  font-weight: 600;
-  line-height: 1.35;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .watch-timing {

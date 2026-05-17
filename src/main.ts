@@ -293,15 +293,17 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
 
 function renderWatch(row: WatchRowViewModel): string {
   return `
-    <li class="watch is-${row.tone}${row.unseenStatusChange ? " has-unseen-change" : ""}">
-      ${renderStatusIcon(row)}
+    <li class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}">
+      ${renderLeadingIcon(row)}
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
         <span class="watch-label">
           <span class="watch-title-text">${escapeHtml(row.label)}</span>
-          ${row.prReference ? `<span class="watch-pr-reference">${escapeHtml(row.prReference)}</span>` : ""}
-          ${row.prState ? renderPrState(row.prState) : ""}
         </span>
-        <span class="watch-status">${escapeHtml(row.statusLabel)} - ${escapeHtml(row.description)}</span>
+        <span class="watch-meta">
+          ${renderPrMetadata(row)}
+          ${renderWorkflowStatus(row)}
+          <span class="watch-meta-text">${escapeHtml(row.description)}</span>
+        </span>
         ${row.timingText ? `<span class="watch-timing">${escapeHtml(row.timingText)}</span>` : ""}
       </button>
       ${renderWatchActions(row)}
@@ -309,15 +311,42 @@ function renderWatch(row: WatchRowViewModel): string {
   `;
 }
 
-function renderPrState(prState: NonNullable<WatchRowViewModel["prState"]>): string {
-  const label = escapeHtml(prState.label);
+function renderLeadingIcon(row: WatchRowViewModel): string {
+  if (row.prState) {
+    return renderPrStateIcon(row.prState, "watch-leading-icon");
+  }
 
+  return renderStatusIcon(row, "watch-leading-icon");
+}
+
+function renderPrMetadata(row: WatchRowViewModel): string {
+  const items: string[] = [];
+
+  if (row.prSourceReference) {
+    items.push(`<span class="watch-pr-reference">${escapeHtml(row.prSourceReference)}</span>`);
+  }
+
+  if (row.prState) {
+    items.push(
+      `<span class="watch-pr-state-text watch-pr-state-${row.prState.tone}">${escapeHtml(row.prState.label)}</span>`,
+    );
+  }
+
+  return items.length > 0 ? `${items.join(renderMetaSeparator())}${renderMetaSeparator()}` : "";
+}
+
+function renderWorkflowStatus(row: WatchRowViewModel): string {
   return `
-    <span class="watch-pr-state watch-pr-state-${prState.tone}" title="Pull request ${label}" aria-label="Pull request ${label}">
-      ${getPrStateIconSvg(prState.tone)}
-      <span>${label}</span>
+    <span class="watch-workflow-status status-icon-${row.tone}">
+      ${getStatusIconSvg(row.tone, `${row.id}-workflow`)}
+      <span>${escapeHtml(row.statusLabel)}</span>
     </span>
+    ${renderMetaSeparator()}
   `;
+}
+
+function renderMetaSeparator(): string {
+  return `<span class="watch-meta-separator">·</span>`;
 }
 
 function renderWatchActions(row: WatchRowViewModel): string {
@@ -353,9 +382,26 @@ function renderWatchActions(row: WatchRowViewModel): string {
   `;
 }
 
-function renderStatusIcon(row: WatchRowViewModel): string {
+function renderStatusIcon(row: WatchRowViewModel, className = "status-icon"): string {
   const icon = getStatusIconSvg(row.tone, row.id);
-  return `<span class="status-icon status-icon-${row.tone}" aria-hidden="true">${icon}</span>`;
+  return `<span class="${className} status-icon status-icon-${row.tone}" aria-hidden="true">${icon}</span>`;
+}
+
+function renderPrStateIcon(
+  prState: NonNullable<WatchRowViewModel["prState"]>,
+  className = "pr-state-icon",
+): string {
+  const label = escapeHtml(prState.label);
+
+  return `
+    <span
+      class="${className} pr-state-icon pr-state-icon-${prState.tone}"
+      title="Pull request ${label}"
+      aria-label="Pull request ${label}"
+    >
+      ${getPrStateIconSvg(prState.tone)}
+    </span>
+  `;
 }
 
 function bindEvents(): void {
