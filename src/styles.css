@@ -360,8 +360,12 @@ input {
   text-align: left;
 }
 
-.watch-group-toggle:hover {
+.watch-group-toggle:hover:not(:disabled) {
   color: rgb(238 241 245 / 70%);
+}
+
+.watch-group-toggle:disabled {
+  cursor: default;
 }
 
 .watch-group-actions {
@@ -401,9 +405,14 @@ input {
 .watch-group-star:hover,
 .watch-group-workflow-button:hover,
 .watch-group-pr-button:hover,
-.watch-group-chevron:hover {
+.watch-group-chevron:hover:not(:disabled) {
   background: rgb(255 255 255 / 7%);
   color: rgb(238 241 245 / 78%);
+}
+
+.watch-group-chevron:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .watch-group-star.is-favorite {

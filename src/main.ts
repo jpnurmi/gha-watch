@@ -317,8 +317,13 @@ function renderAddForm(): string {
 }
 
 function renderWatchGroup(group: WatchGroupViewModel): string {
-  const isCollapsed = collapsedGroups.has(group.repoLabel);
-  const actions = getRepoHeaderActions({ favorite: group.favorite });
+  const actions = getRepoHeaderActions({
+    favorite: group.favorite,
+    userCollapsed: collapsedGroups.has(group.repoLabel),
+    watchCount: group.rows.length,
+  });
+  const isCollapsed = actions.isCollapsed;
+  const collapseDisabled = actions.canToggleCollapse ? "" : "disabled";
 
   return `
     <li class="watch-group${isCollapsed ? " is-collapsed" : ""}">
@@ -330,6 +335,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
           data-action="toggle-group"
           data-repo="${escapeHtml(group.repoLabel)}"
           aria-expanded="${isCollapsed ? "false" : "true"}"
+          ${collapseDisabled}
         >
           <span class="watch-group-meta">
             <span class="watch-group-title">${escapeHtml(group.repoLabel)}</span>
@@ -347,6 +353,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
             title="${isCollapsed ? "Expand" : "Collapse"}"
             aria-label="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(group.repoLabel)}"
             aria-expanded="${isCollapsed ? "false" : "true"}"
+            ${collapseDisabled}
           >
             ${renderChevronIcon(isCollapsed)}
           </button>
