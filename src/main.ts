@@ -15,7 +15,11 @@ import {
 } from "./app/repoReorderInteraction";
 import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
-import { isWatchActionConfirmation } from "./app/watchActionConfirmation";
+import {
+  isWatchActionConfirmation,
+  shouldDismissPendingWatchActionOnRowLeave,
+  type PendingWatchAction,
+} from "./app/watchActionConfirmation";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
@@ -87,11 +91,6 @@ let repoDragState: RepoDragState | undefined;
 let suppressedRepoToggleKey: string | undefined;
 let suppressedRepoToggleUntilMs = 0;
 let settings = loadSettings();
-
-type PendingWatchAction = {
-  id: string;
-  kind: "remove" | "rerun";
-};
 
 type RepoDragState = {
   sourceKey: string;
@@ -630,7 +629,7 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
 
 function renderWatch(row: WatchRowViewModel): string {
   return `
-    <li class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}">
+    <li class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}" data-id="${escapeHtml(row.id)}">
       ${renderLeadingIcon(row)}
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
         <span class="watch-label">
@@ -945,6 +944,12 @@ function bindEvents(): void {
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-rerun"]')) {
     button.addEventListener("click", () => {
       void confirmRerun(button.dataset.id || "");
+    });
+  }
+
+  for (const row of app.querySelectorAll<HTMLElement>(".watch")) {
+    row.addEventListener("mouseleave", () => {
+      dismissWatchActionOnRowLeave(row.dataset.id);
     });
   }
 
@@ -1462,6 +1467,15 @@ function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
 
   pendingWatchAction = { id, kind };
   isClearMenuOpen = false;
+  render();
+}
+
+function dismissWatchActionOnRowLeave(rowId: string | undefined): void {
+  if (!shouldDismissPendingWatchActionOnRowLeave(pendingWatchAction, rowId)) {
+    return;
+  }
+
+  pendingWatchAction = undefined;
   render();
 }
 
