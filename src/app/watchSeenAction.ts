@@ -1,6 +1,6 @@
 import { hasUnseenStatusChange, type WatchRecord } from "../domain/watches";
 
-export function getHoveredUnseenWatchId(watches: WatchRecord[], id: string | undefined): string | undefined {
+export function getClickedUnseenWatchId(watches: WatchRecord[], id: string | undefined): string | undefined {
   if (!id) {
     return undefined;
   }
