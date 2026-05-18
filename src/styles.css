@@ -627,6 +627,8 @@ input {
 }
 
 .watch {
+  --watch-row-bg: #161b22;
+
   display: grid;
   min-height: 62px;
   grid-template-columns: 22px minmax(0, 1fr) 43px;
@@ -664,6 +666,8 @@ input {
 }
 
 .watch:hover {
+  --watch-row-bg: rgb(36 41 47);
+
   background: rgb(255 255 255 / 6%);
 }
 
@@ -858,6 +862,7 @@ input {
 }
 
 .watch-actions {
+  position: relative;
   display: flex;
   width: 43px;
   height: 20px;
@@ -868,6 +873,24 @@ input {
   justify-self: end;
   margin-top: 2px;
   padding-right: 5px;
+}
+
+.watch.has-confirmation .watch-actions::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 84px;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--watch-row-bg) 28px);
+  content: "";
+  pointer-events: none;
+}
+
+.watch.has-confirmation .confirm-button {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  z-index: 1;
 }
 
 .watch-action-button {

@@ -637,8 +637,10 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
 }
 
 function renderWatch(row: WatchRowViewModel): string {
+  const hasConfirmation = pendingWatchAction?.id === row.id;
+
   return `
-    <li class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}" data-id="${escapeHtml(row.id)}">
+    <li class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasConfirmation ? " has-confirmation" : ""}" data-id="${escapeHtml(row.id)}">
       ${renderLeadingIcon(row)}
       <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
         <span class="watch-label">
