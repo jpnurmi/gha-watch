@@ -6,6 +6,7 @@ import { renderDragGripIcon, renderWatchLeadingSlot } from "./app/dragGlyph";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
+import { replacePopupHtmlPreservingScroll } from "./app/popupScroll";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getPrStateIconSvg } from "./app/prStateIcon";
 import { getRepoHeaderActions } from "./app/repoHeaderActions";
@@ -267,7 +268,7 @@ function render(): void {
   const hasWatches = watches.length > 0;
   const hasFinishedWatches = watches.some((watch) => !watch.active);
 
-  app.innerHTML = `
+  replacePopupHtmlPreservingScroll(app, `
     <section class="shell">
       <header class="header">
         <div>
@@ -309,7 +310,7 @@ function render(): void {
         .map((section) => renderPopupBodySection(section, viewModel))
         .join("")}
     </section>
-  `;
+  `);
 
   bindEvents();
   void resizePopupToContent();
