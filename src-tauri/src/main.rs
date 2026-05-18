@@ -458,74 +458,6 @@ fn position_window_near_top_right(window: &tauri::WebviewWindow) -> Result<(), S
         .map_err(|error| error.to_string())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tauri::{PhysicalRect, PhysicalSize};
-
-    fn physical_tray_rect(x: i32, y: i32, width: u32, height: u32) -> Rect {
-        Rect {
-            position: PhysicalPosition::new(x, y).into(),
-            size: PhysicalSize::new(width, height).into(),
-        }
-    }
-
-    fn monitor_area(
-        x: i32,
-        y: i32,
-        width: u32,
-        height: u32,
-        work_x: i32,
-        work_y: i32,
-        work_width: u32,
-        work_height: u32,
-        scale_factor: f64,
-    ) -> MonitorArea {
-        MonitorArea {
-            position: PhysicalPosition::new(x, y),
-            size: PhysicalSize::new(width, height),
-            work_area: PhysicalRect {
-                position: PhysicalPosition::new(work_x, work_y),
-                size: PhysicalSize::new(work_width, work_height),
-            },
-            scale_factor,
-        }
-    }
-
-    #[test]
-    fn selects_primary_left_display_from_scaled_macos_tray_rect() {
-        let monitors = [
-            monitor_area(0, 0, 2880, 1800, 0, 48, 2880, 1752, 2.0),
-            monitor_area(1440, 0, 1920, 1080, 1440, 24, 1920, 1056, 1.0),
-        ];
-        let tray_rect = physical_tray_rect(2800, 0, 44, 44);
-
-        let monitor = monitor_area_for_tray_rect(tray_rect, &monitors).unwrap();
-
-        assert_eq!(monitor.position.x, 0);
-    }
-
-    #[test]
-    fn positions_secondary_display_popup_in_secondary_logical_work_area() {
-        let monitor = monitor_area(1440, 0, 1920, 1080, 1440, 24, 1920, 1056, 1.0);
-        let tray_rect = physical_tray_rect(3200, 0, 22, 22);
-
-        let position = popup_position_for_tray_rect(
-            tray_rect,
-            LogicalDisplaySize {
-                width: 420.0,
-                height: 360.0,
-            },
-            monitor,
-        )
-        .unwrap();
-
-        assert!(position.x >= 1448.0);
-        assert!(position.x <= 2932.0);
-        assert_eq!(position.y, 32.0);
-    }
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
@@ -589,4 +521,69 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running GHA Watch");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tauri::{PhysicalRect, PhysicalSize};
+
+    fn physical_tray_rect(x: i32, y: i32, width: u32, height: u32) -> Rect {
+        Rect {
+            position: PhysicalPosition::new(x, y).into(),
+            size: PhysicalSize::new(width, height).into(),
+        }
+    }
+
+    fn monitor_area(
+        bounds: (i32, i32, u32, u32),
+        work_area: (i32, i32, u32, u32),
+        scale_factor: f64,
+    ) -> MonitorArea {
+        let (x, y, width, height) = bounds;
+        let (work_x, work_y, work_width, work_height) = work_area;
+
+        MonitorArea {
+            position: PhysicalPosition::new(x, y),
+            size: PhysicalSize::new(width, height),
+            work_area: PhysicalRect {
+                position: PhysicalPosition::new(work_x, work_y),
+                size: PhysicalSize::new(work_width, work_height),
+            },
+            scale_factor,
+        }
+    }
+
+    #[test]
+    fn selects_primary_left_display_from_scaled_macos_tray_rect() {
+        let monitors = [
+            monitor_area((0, 0, 2880, 1800), (0, 48, 2880, 1752), 2.0),
+            monitor_area((1440, 0, 1920, 1080), (1440, 24, 1920, 1056), 1.0),
+        ];
+        let tray_rect = physical_tray_rect(2800, 0, 44, 44);
+
+        let monitor = monitor_area_for_tray_rect(tray_rect, &monitors).unwrap();
+
+        assert_eq!(monitor.position.x, 0);
+    }
+
+    #[test]
+    fn positions_secondary_display_popup_in_secondary_logical_work_area() {
+        let monitor = monitor_area((1440, 0, 1920, 1080), (1440, 24, 1920, 1056), 1.0);
+        let tray_rect = physical_tray_rect(3200, 0, 22, 22);
+
+        let position = popup_position_for_tray_rect(
+            tray_rect,
+            LogicalDisplaySize {
+                width: 420.0,
+                height: 360.0,
+            },
+            monitor,
+        )
+        .unwrap();
+
+        assert!(position.x >= 1448.0);
+        assert!(position.x <= 2932.0);
+        assert_eq!(position.y, 32.0);
+    }
 }
