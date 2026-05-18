@@ -21,7 +21,7 @@ import {
   shouldDismissPendingWatchActionOnRowLeave,
   type PendingWatchAction,
 } from "./app/watchActionConfirmation";
-import { getHoveredUnseenWatchId } from "./app/watchHoverSeen";
+import { getClickedUnseenWatchId } from "./app/watchSeenAction";
 import { createTrayState } from "./app/trayState";
 import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
@@ -655,15 +655,25 @@ function renderWatch(row: WatchRowViewModel): string {
 }
 
 function renderLeadingIcon(row: WatchRowViewModel): string {
+  const markSeenOverlay = row.unseenStatusChange ? renderWatchSeenOverlay(row) : "";
+
   if (row.prState) {
-    return renderWatchLeadingSlot(renderPrStateIcon(row.prState, "watch-leading-icon"));
+    return renderWatchLeadingSlot(renderPrStateIcon(row.prState, "watch-leading-icon"), markSeenOverlay);
   }
 
   if (row.subject === "job") {
-    return renderWatchLeadingSlot(renderWatchSubjectIcon("job"));
+    return renderWatchLeadingSlot(renderWatchSubjectIcon("job"), markSeenOverlay);
   }
 
-  return renderWatchLeadingSlot(renderWatchSubjectIcon("workflow"));
+  return renderWatchLeadingSlot(renderWatchSubjectIcon("workflow"), markSeenOverlay);
+}
+
+function renderWatchSeenOverlay(row: WatchRowViewModel): string {
+  return `
+    <button class="watch-leading-seen-button" type="button" data-action="mark-seen" data-id="${escapeHtml(row.id)}" title="Mark seen" aria-label="Mark ${escapeHtml(row.label)} seen">
+      <span class="unseen-dot" aria-hidden="true"></span>
+    </button>
+  `;
 }
 
 function renderMetadata(row: WatchRowViewModel): string {
@@ -726,9 +736,8 @@ function renderWatchActions(row: WatchRowViewModel): string {
             </button>`
           : ""
       }
-      <button class="watch-action-button remove-button${row.unseenStatusChange ? " is-unseen" : ""}" type="button" data-action="arm-remove" data-id="${escapeHtml(row.id)}" title="Remove" aria-label="Remove ${escapeHtml(row.label)}">
+      <button class="watch-action-button remove-button" type="button" data-action="arm-remove" data-id="${escapeHtml(row.id)}" title="Remove" aria-label="Remove ${escapeHtml(row.label)}">
         <span class="remove-icon" aria-hidden="true">&times;</span>
-        ${row.unseenStatusChange ? `<span class="unseen-dot" aria-hidden="true"></span>` : ""}
       </button>
     </div>
   `;
@@ -958,15 +967,20 @@ function bindEvents(): void {
     });
   }
 
-  for (const row of app.querySelectorAll<HTMLElement>(".watch")) {
-    row.addEventListener("mouseenter", () => {
-      const id = getHoveredUnseenWatchId(controller.getWatches(), row.dataset.id);
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="mark-seen"]')) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const id = getClickedUnseenWatchId(controller.getWatches(), button.dataset.id);
 
       if (id) {
         controller.markSeen(id);
       }
     });
+  }
 
+  for (const row of app.querySelectorAll<HTMLElement>(".watch")) {
     row.addEventListener("mouseleave", () => {
       dismissWatchActionOnRowLeave(row.dataset.id);
     });
@@ -1128,7 +1142,7 @@ function getWatchRowPressTarget(
     return undefined;
   }
 
-  if (event.target.closest(".watch-actions")) {
+  if (event.target.closest('.watch-actions, [data-action="mark-seen"]')) {
     return undefined;
   }
 

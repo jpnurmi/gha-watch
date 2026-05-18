@@ -11,10 +11,11 @@ export function renderDragGripIcon(): string {
   `;
 }
 
-export function renderWatchLeadingSlot(iconHtml: string): string {
+export function renderWatchLeadingSlot(iconHtml: string, overlayHtml = ""): string {
   return `
     <span class="watch-leading-slot">
       ${iconHtml}
+      ${overlayHtml}
       <span class="watch-drag-glyph" aria-hidden="true">
         ${renderDragGripIcon()}
       </span>
