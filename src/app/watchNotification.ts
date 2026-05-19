@@ -1,6 +1,6 @@
-import type { PrWatchTarget } from "../domain/githubUrl";
+import type { PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
-import type { WatchRecord } from "../domain/watches";
+import { getWatchId, type WatchRecord } from "../domain/watches";
 import { createPopupViewModel } from "./viewModel";
 
 export type WatchNotification = {
@@ -48,9 +48,7 @@ export function createPullRequestNotification(
 ): WatchNotification | undefined {
   const repoLabel = `${source.owner}/${source.repo}`;
   const summary = `${repoLabel} #${source.prNumber}`;
-  const node = createPopupViewModel(sourceWatches, now)
-    .groups.find((group) => group.repoLabel === repoLabel)
-    ?.tree.find((item) => item.kind === "pull-request" && item.referenceLabel === `#${source.prNumber}`);
+  const node = getPullRequestNotificationNode(source, sourceWatches, now);
 
   if (!node) {
     return undefined;
@@ -71,8 +69,76 @@ export function createPullRequestNotification(
   };
 }
 
+export function createWorkflowNotification(
+  source: RunWatchTarget,
+  sourceWatches: WatchRecord[],
+  now = new Date(),
+): WatchNotification | undefined {
+  const repoLabel = `${source.owner}/${source.repo}`;
+  const node = getWorkflowNotificationNode(source, sourceWatches, now);
+
+  if (!node) {
+    return undefined;
+  }
+
+  const statusLine = [node.statusLabel, node.detailLabel].filter(isString).join(" - ");
+  const body = [repoLabel, statusLine, node.timingText].filter(isString).join("\n");
+
+  return {
+    watchId: getWatchId(source),
+    title: node.label,
+    url: source.url,
+    body,
+    largeBody: body,
+    persistent: isPersistentNotification(node.tone),
+    summary: repoLabel,
+    group: repoLabel,
+  };
+}
+
+export function getPullRequestNotificationStatus(
+  source: PrWatchTarget,
+  sourceWatches: WatchRecord[],
+  now = new Date(),
+): string | undefined {
+  return getPullRequestNotificationNode(source, sourceWatches, now)?.tone;
+}
+
+export function getWorkflowNotificationStatus(
+  source: RunWatchTarget,
+  sourceWatches: WatchRecord[],
+  now = new Date(),
+): string | undefined {
+  return getWorkflowNotificationNode(source, sourceWatches, now)?.tone;
+}
+
 export function getPullRequestNotificationId(source: PrWatchTarget): string {
   return `${source.owner}/${source.repo}/pull/${source.prNumber}`;
+}
+
+function getPullRequestNotificationNode(
+  source: PrWatchTarget,
+  sourceWatches: WatchRecord[],
+  now: Date,
+) {
+  const repoLabel = `${source.owner}/${source.repo}`;
+
+  return createPopupViewModel(sourceWatches, now)
+    .groups.find((group) => group.repoLabel === repoLabel)
+    ?.tree.find((item) => item.kind === "pull-request" && item.referenceLabel === `#${source.prNumber}`);
+}
+
+function getWorkflowNotificationNode(
+  source: RunWatchTarget,
+  sourceWatches: WatchRecord[],
+  now: Date,
+) {
+  const repoLabel = `${source.owner}/${source.repo}`;
+  const nodeId = `workflow-run:${getWatchId(source)}`;
+
+  return createPopupViewModel(sourceWatches, now)
+    .groups.find((group) => group.repoLabel === repoLabel)
+    ?.tree.find((item) => item.kind === "workflow" && item.id === nodeId);
 }
 
 function getNotificationRepoLabel(watch: WatchRecord): string {
