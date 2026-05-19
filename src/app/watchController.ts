@@ -17,7 +17,12 @@ import {
 } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
 import type { ActiveWorkflowRun, OpenPullRequest } from "../platform/gh";
-import { createWatchNotification, type WatchNotification } from "./watchNotification";
+import {
+  createPullRequestNotification,
+  createWatchNotification,
+  getPullRequestNotificationId,
+  type WatchNotification,
+} from "./watchNotification";
 
 export type WatchControllerOptions = {
   autoClearMergedPrWatches?: boolean;
@@ -458,6 +463,15 @@ export function createWatchController(
     },
 
     markSeen(id) {
+      const prSource = getPrSourceByNotificationId(watches, id);
+
+      if (prSource) {
+        setWatches(
+          watches.map((watch) => (isSamePrSource(watch.source, prSource) ? markWatchSeenStatus(watch) : watch)),
+        );
+        return;
+      }
+
       setWatches(markWatchSeen(watches, id));
     },
 
@@ -546,6 +560,8 @@ export function createWatchController(
       await refreshPrSourceWatches();
       await refreshRunSourceWatches();
       const activeWatches = watches.filter((watch) => watch.active);
+      const rowNotifications: WatchNotification[] = [];
+      const changedPrSources = new Map<string, PrWatchTarget>();
 
       for (const watch of activeWatches) {
         const snapshot = await deps.fetchState(watch.target);
@@ -555,7 +571,7 @@ export function createWatchController(
         };
         const status = formatWatchState(nextState);
         const transition = getStatusTransition(watch.lastState, nextState);
-        let notification: WatchNotification | undefined;
+        let changedWatch: WatchRecord | undefined;
 
         updateWatch(watch.id, (current) => {
           const nextWatch = {
@@ -572,15 +588,44 @@ export function createWatchController(
           };
 
           if (transition.notify) {
-            notification = createWatchNotification(nextWatch, watch.lastState, deps.now?.() ?? new Date());
+            changedWatch = nextWatch;
           }
 
           return nextWatch;
         });
 
-        if (notification && !deps.notificationsPaused?.()) {
+        if (!transition.notify || !changedWatch) {
+          continue;
+        }
+
+        if (watch.source) {
+          changedPrSources.set(getPullRequestNotificationId(watch.source), watch.source);
+          continue;
+        }
+
+        if (!watch.sourceRun) {
+          rowNotifications.push(createWatchNotification(changedWatch, watch.lastState, deps.now?.() ?? new Date()));
+        }
+      }
+
+      if (deps.notificationsPaused?.()) {
+        return;
+      }
+
+      for (const source of changedPrSources.values()) {
+        const notification = createPullRequestNotification(
+          source,
+          watches.filter((watch) => isSamePrSource(watch.source, source)),
+          deps.now?.() ?? new Date(),
+        );
+
+        if (notification) {
           await deps.notify(notification);
         }
+      }
+
+      for (const notification of rowNotifications) {
+        await deps.notify(notification);
       }
     },
 
@@ -715,6 +760,17 @@ function withIgnoredTargetIds(watch: WatchRecord, ignoredTargetIds: string[]): W
     ...baseWatch,
     ...(ignoredTargetIds.length ? { ignoredTargetIds } : {}),
   };
+}
+
+function markWatchSeenStatus(watch: WatchRecord): WatchRecord {
+  return {
+    ...watch,
+    lastSeenStatus: watch.status,
+  };
+}
+
+function getPrSourceByNotificationId(watches: WatchRecord[], id: string): PrWatchTarget | undefined {
+  return watches.find((watch) => watch.source && getPullRequestNotificationId(watch.source) === id)?.source;
 }
 
 function getPrSources(watches: WatchRecord[]): PrWatchTarget[] {
