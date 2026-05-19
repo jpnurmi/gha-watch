@@ -18,7 +18,8 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
     (watch) =>
       watch.lastState?.status === "completed" &&
       watch.lastState.conclusion !== "success" &&
-      watch.lastState.conclusion !== "cancelled",
+      watch.lastState.conclusion !== "cancelled" &&
+      watch.lastState.conclusion !== "skipped",
   );
   const cancelled = watches.filter(
     (watch) => watch.lastState?.status === "completed" && watch.lastState.conclusion === "cancelled",

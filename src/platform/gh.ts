@@ -1,6 +1,13 @@
-import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
+import type { CheckWatchTarget, JobWatchTarget, ParsedWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
-import type { PrSourceState, PrWatchResolution, WatchTiming } from "../domain/watches";
+import {
+  getWatchId,
+  type PrSourceState,
+  type PrWatchResolution,
+  type RunWatchResolution,
+  type WatchMetadata,
+  type WatchTiming,
+} from "../domain/watches";
 
 export type ShellResult = {
   code: number;
@@ -14,6 +21,7 @@ export type ShellExecutor = {
 
 export type WatchSnapshot = WatchState & {
   title: string;
+  metadata?: WatchMetadata;
   prNumber?: string;
   timing?: WatchTiming;
   url: string;
@@ -97,6 +105,7 @@ type PrViewResponse = {
   isDraft?: boolean;
   mergedAt?: string | null;
   state?: string;
+  title?: string;
 };
 
 type RunListResponse = {
@@ -104,6 +113,17 @@ type RunListResponse = {
   event?: string;
   headSha?: string;
   url?: string;
+  workflowName?: string;
+};
+
+type RunJobsResponse = {
+  jobs?: RunJobResponse[];
+};
+
+type RunJobResponse = {
+  html_url?: string;
+  id?: number | string;
+  name?: string;
 };
 
 export async function fetchWatchState(
@@ -236,12 +256,13 @@ export async function resolvePrWatchTargets(
       "-R",
       `${target.owner}/${target.repo}`,
       "--json",
-      "headRefName,headRefOid,isDraft,mergedAt,state",
+      "headRefName,headRefOid,isDraft,mergedAt,state,title",
     ]);
     assertSuccessfulGhResult(prResult);
 
     const pr = parseJson<PrViewResponse>(prResult.stdout);
     const sourceState = getPrSourceState(pr);
+    const prTitle = pr.title?.trim();
 
     if (sourceState === "merged" || sourceState === "closed") {
       return { targets: [], sourceState };
@@ -261,16 +282,61 @@ export async function resolvePrWatchTargets(
       "--limit",
       "50",
       "--json",
-      "databaseId,event,headSha,url",
+      "databaseId,event,headSha,url,workflowName",
     ]);
     assertSuccessfulGhResult(runsResult);
 
-    const targets = parseJson<RunListResponse[]>(runsResult.stdout)
-      .filter((run) => run.event === "pull_request" && run.headSha === headRefOid)
-      .map((run) => toPrRunTarget(target, run))
-      .filter((run): run is RunWatchTarget => Boolean(run));
+    const targets: CheckWatchTarget[] = [];
+    const targetMetadata: Record<string, WatchMetadata> = {};
 
-    return { targets, sourceState };
+    for (const run of parseJson<RunListResponse[]>(runsResult.stdout)) {
+      if (run.event !== "pull_request" || run.headSha !== headRefOid) {
+        continue;
+      }
+
+      const runTarget = toPrRunTarget(target, run);
+
+      if (!runTarget) {
+        continue;
+      }
+
+      const jobs = await resolvePrRunJobTargets(runTarget, run.workflowName, prTitle, executor);
+
+      if (jobs.length > 0) {
+        for (const { target: jobTarget, metadata } of jobs) {
+          targets.push(jobTarget);
+
+          if (metadata) {
+            targetMetadata[getWatchId(jobTarget)] = metadata;
+          }
+        }
+      } else {
+        targets.push(runTarget);
+
+        const metadata = compactMetadata({ prTitle, workflowName: run.workflowName });
+
+        if (metadata) {
+          targetMetadata[getWatchId(runTarget)] = metadata;
+        }
+      }
+    }
+
+    return {
+      targets,
+      ...(Object.keys(targetMetadata).length ? { targetMetadata } : {}),
+      sourceState,
+    };
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function resolveRunWatchTargets(
+  target: RunWatchTarget,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<RunWatchResolution> {
+  try {
+    return await resolveRunJobTargets(target, executor);
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -370,6 +436,87 @@ function toPrRunTarget(source: PrWatchTarget, run: RunListResponse): RunWatchTar
   };
 }
 
+async function resolvePrRunJobTargets(
+  runTarget: RunWatchTarget,
+  workflowName: string | undefined,
+  prTitle: string | undefined,
+  executor: ShellExecutor,
+): Promise<Array<{ target: JobWatchTarget; metadata?: WatchMetadata }>> {
+  try {
+    const resolution = await resolveRunJobTargets(runTarget, executor, { prTitle, workflowName });
+
+    return resolution.targets.map((target) => ({
+      target,
+      ...(resolution.targetMetadata?.[getWatchId(target)]
+        ? { metadata: resolution.targetMetadata[getWatchId(target)] }
+        : {}),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function resolveRunJobTargets(
+  runTarget: RunWatchTarget,
+  executor: ShellExecutor,
+  metadataDefaults: Pick<WatchMetadata, "prTitle" | "workflowName"> = {},
+): Promise<RunWatchResolution> {
+  const result = await executor.execute("gh", [
+    "api",
+    `repos/${runTarget.owner}/${runTarget.repo}/actions/runs/${runTarget.runId}/jobs?per_page=100`,
+  ]);
+
+  assertSuccessfulGhResult(result);
+
+  const targets: JobWatchTarget[] = [];
+  const targetMetadata: Record<string, WatchMetadata> = {};
+
+  for (const job of parseJson<RunJobsResponse>(result.stdout).jobs ?? []) {
+    const target = toRunJobTarget(runTarget, job);
+
+    if (!target) {
+      continue;
+    }
+
+    targets.push(target);
+
+    const metadata = compactMetadata({
+      ...metadataDefaults,
+      jobName: job.name,
+    });
+
+    if (metadata) {
+      targetMetadata[getWatchId(target)] = metadata;
+    }
+  }
+
+  return {
+    targets,
+    ...(Object.keys(targetMetadata).length ? { targetMetadata } : {}),
+  };
+}
+
+function toRunJobTarget(
+  runTarget: RunWatchTarget,
+  job: RunJobResponse,
+): JobWatchTarget | undefined {
+  const jobId = getRunDatabaseId(job.id);
+
+  if (!jobId) {
+    return undefined;
+  }
+
+  return {
+    kind: "job",
+    owner: runTarget.owner,
+    repo: runTarget.repo,
+    runId: runTarget.runId,
+    jobId,
+    ...(runTarget.prNumber ? { prNumber: runTarget.prNumber } : {}),
+    url: job.html_url || `https://github.com/${runTarget.owner}/${runTarget.repo}/actions/runs/${runTarget.runId}/job/${jobId}`,
+  };
+}
+
 function getRunDatabaseId(value: number | string | undefined): string | undefined {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) {
     return String(value);
@@ -461,6 +608,10 @@ function toRunSnapshot(fallbackUrl: string, response: RunViewResponse): WatchSna
     status,
     conclusion: normalizeConclusion(response.conclusion),
     title: joinTitle(response.name, response.display_title),
+    metadata: compactMetadata({
+      workflowName: response.name,
+      runTitle: response.display_title,
+    }),
     ...(prNumber ? { prNumber } : {}),
     ...(timing ? { timing } : {}),
     url: response.html_url || fallbackUrl,
@@ -478,9 +629,24 @@ function toJobSnapshot(fallbackUrl: string, response: JobViewResponse): WatchSna
     status: requiredString(response.status, "job status"),
     conclusion: normalizeConclusion(response.conclusion),
     title: joinTitle(response.workflow_name, response.name),
+    metadata: compactMetadata({
+      workflowName: response.workflow_name,
+      jobName: response.name,
+    }),
     ...(timing ? { timing } : {}),
     url: response.html_url || fallbackUrl,
   };
+}
+
+function compactMetadata(metadata: WatchMetadata): WatchMetadata | undefined {
+  const entries = Object.entries(metadata)
+    .map(([key, value]) => [key, value?.trim()] as const)
+    .filter((entry): entry is [keyof WatchMetadata, string] => {
+      const value = entry[1];
+      return typeof value === "string" && value.length > 0;
+    });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function compactTiming(timing: WatchTiming): WatchTiming | undefined {

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { calculatePopupHeight } from "./popupSize";
+import { calculatePopupHeight, popupWidth } from "./popupSize";
 
 describe("calculatePopupHeight", () => {
+  it("keeps enough popup width for nested check hierarchy", () => {
+    expect(popupWidth).toBe(460);
+  });
+
   it("keeps short content at the compact popup height", () => {
     expect(calculatePopupHeight(280)).toBe(360);
   });

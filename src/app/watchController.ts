@@ -1,15 +1,17 @@
 import type { FavoriteRepo } from "../domain/favorites";
-import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget } from "../domain/githubUrl";
+import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
 import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
 import {
   addWatch,
   getWatchId,
   markAllWatchesSeen,
   markWatchSeen,
+  moveWatchGroupWithinRepo,
   moveWatchWithinRepo,
   normalizeWatchSeenStatus,
   removeWatch,
   type PrWatchResolution,
+  type RunWatchResolution,
   type WatchDropPosition,
   type WatchRecord,
 } from "../domain/watches";
@@ -29,6 +31,7 @@ export type WatchControllerDeps = {
   notificationsPaused?(): boolean;
   notify(notification: WatchNotification): Promise<void>;
   resolvePrWatchTargets?(target: PrWatchTarget): Promise<PrWatchResolution>;
+  resolveRunWatchTargets?(target: RunWatchTarget): Promise<RunWatchResolution>;
   rerunFailed?(target: CheckWatchTarget): Promise<void>;
   now?(): Date;
   save(watches: WatchRecord[]): Promise<void>;
@@ -37,6 +40,8 @@ export type WatchControllerDeps = {
 export type WatchController = {
   add(target: ParsedWatchTarget): Promise<void>;
   remove(id: string): void;
+  ignorePrWorkflow(id: string): void;
+  reorderGroupWithinRepo(draggedIds: string[], targetIds: string[], position: WatchDropPosition): void;
   reorderWithinRepo(draggedId: string, targetId: string, position: WatchDropPosition): void;
   markSeen(id: string): void;
   markAllSeen(): void;
@@ -108,6 +113,7 @@ export function createWatchController(
         ...watch,
         target: withSnapshotPrNumber(watch.target, snapshot.prNumber),
         label: snapshot.title,
+        metadata: mergeWatchMetadata(watch.metadata, snapshot.metadata),
         status,
         lastSeenStatus: status,
         lastState: {
@@ -132,9 +138,22 @@ export function createWatchController(
     target: CheckWatchTarget,
     source?: PrWatchTarget,
     sourceState?: PrWatchResolution["sourceState"],
+    metadata?: WatchRecord["metadata"],
+    ignoredWorkflowNames?: string[],
+    ignoredTargetIds?: string[],
+    sourceRun?: RunWatchTarget,
   ): Promise<void> {
     const previous = watches;
-    const next = addWatch(watches, target, source, sourceState);
+    const next = addWatch(
+      watches,
+      target,
+      source,
+      sourceState,
+      metadata,
+      ignoredWorkflowNames,
+      ignoredTargetIds,
+      sourceRun,
+    );
 
     if (next === previous) {
       return;
@@ -147,6 +166,76 @@ export function createWatchController(
     await loadBaselineState(id, target);
   }
 
+  function reconcileRunWatchTargets(sourceRun: RunWatchTarget, resolution: RunWatchResolution): void {
+    const parent = watches.find((watch) => isDirectRunWatch(watch, sourceRun));
+
+    if (!parent) {
+      return;
+    }
+
+    const ignoredTargetIds = parent.ignoredTargetIds ?? [];
+    const visibleTargets = resolution.targets.filter((target) => !ignoredTargetIds.includes(getWatchId(target)));
+    const targetIds = new Set(visibleTargets.map(getWatchId));
+    let next = watches.filter((watch) => !isSameRunSource(watch.sourceRun, sourceRun) || targetIds.has(watch.id));
+
+    for (const target of visibleTargets) {
+      const id = getWatchId(target);
+      const existing = next.find((watch) => watch.id === id);
+      const metadata = getResolutionTargetMetadata(resolution, target);
+
+      if (existing) {
+        next = next.map((watch) =>
+          watch.id === id
+            ? {
+                ...watch,
+                target,
+                sourceRun,
+                ...(metadata ? { metadata: mergeWatchMetadata(watch.metadata, metadata) } : {}),
+              }
+            : watch,
+        );
+      } else {
+        next = addWatch(next, target, undefined, undefined, metadata, undefined, undefined, sourceRun);
+      }
+    }
+
+    setWatches(next);
+  }
+
+  async function getRunWatchResolution(sourceRun: RunWatchTarget): Promise<RunWatchResolution> {
+    if (!deps.resolveRunWatchTargets) {
+      return { targets: [] };
+    }
+
+    return deps.resolveRunWatchTargets(sourceRun);
+  }
+
+  async function addRunWatch(target: RunWatchTarget): Promise<void> {
+    const previousIds = new Set(watches.map((watch) => watch.id));
+
+    await addCheckWatch(target);
+
+    if (previousIds.has(getWatchId(target))) {
+      return;
+    }
+
+    try {
+      const resolution = await getRunWatchResolution(target);
+
+      reconcileRunWatchTargets(target, resolution);
+
+      for (const jobTarget of resolution.targets) {
+        if (!watches.some((watch) => watch.id === getWatchId(jobTarget))) {
+          continue;
+        }
+
+        await loadBaselineState(getWatchId(jobTarget), jobTarget);
+      }
+    } catch {
+      // The workflow itself is still a valid watch even if job expansion fails.
+    }
+  }
+
   function reconcilePrWatchTargets(source: PrWatchTarget, resolution: PrWatchResolution): void {
     const { targets, sourceState } = resolution;
 
@@ -155,17 +244,37 @@ export function createWatchController(
       return;
     }
 
-    const targetIds = new Set(targets.map(getWatchId));
+    const ignoredWorkflowNames = getIgnoredWorkflowNames(watches, source);
+    const ignoredTargetIds = getIgnoredTargetIds(watches, source);
+    const visibleTargets = targets.filter((target) => {
+      if (ignoredTargetIds.includes(getWatchId(target))) {
+        return false;
+      }
+
+      const metadata = getResolutionTargetMetadata(resolution, target);
+      const workflowName = getWorkflowNameFromMetadata(metadata);
+      return !workflowName || !ignoredWorkflowNames.includes(workflowName);
+    });
+    const targetIds = new Set(visibleTargets.map(getWatchId));
     let next = watches.filter((watch) => !isSamePrSource(watch.source, source) || targetIds.has(watch.id));
 
-    for (const target of targets) {
+    for (const target of visibleTargets) {
       const id = getWatchId(target);
       const existing = next.find((watch) => watch.id === id);
+      const metadata = getResolutionTargetMetadata(resolution, target);
 
       if (existing) {
-        next = next.map((watch) => (watch.id === id ? { ...watch, target, source, sourceState } : watch));
+        next = next.map((watch) =>
+          watch.id === id
+            ? withIgnoredPrExclusions(
+                { ...watch, target, source, sourceState, ...(metadata ? { metadata } : {}) },
+                ignoredWorkflowNames,
+                ignoredTargetIds,
+              )
+            : watch,
+        );
       } else {
-        next = addWatch(next, target, source, sourceState);
+        next = addWatch(next, target, source, sourceState, metadata, ignoredWorkflowNames, ignoredTargetIds);
       }
     }
 
@@ -235,10 +344,31 @@ export function createWatchController(
     }
   }
 
+  async function refreshRunSourceWatches(): Promise<void> {
+    for (const sourceRun of getRunSources(watches)) {
+      const parent = watches.find((watch) => isDirectRunWatch(watch, sourceRun));
+
+      if (!parent?.active) {
+        continue;
+      }
+
+      try {
+        reconcileRunWatchTargets(sourceRun, await getRunWatchResolution(sourceRun));
+      } catch {
+        // Existing concrete run watches should keep polling even if job expansion briefly fails.
+      }
+    }
+  }
+
   return {
     async add(target) {
       if (target.kind === "pr") {
         await addPrWatch(target);
+        return;
+      }
+
+      if (target.kind === "run") {
+        await addRunWatch(target);
         return;
       }
 
@@ -253,7 +383,70 @@ export function createWatchController(
         return;
       }
 
+      if (watch?.sourceRun) {
+        const sourceRun = watch.sourceRun;
+        const ignoredTargetIds = addIgnoredTargetIds(getIgnoredRunTargetIds(watches, sourceRun), [watch.id]);
+        const next = watches.flatMap((item) => {
+          if (item.id === id) {
+            return [];
+          }
+
+          return isDirectRunWatch(item, sourceRun) ? [withIgnoredTargetIds(item, ignoredTargetIds)] : [item];
+        });
+
+        setWatches(next);
+        return;
+      }
+
+      if (watch?.target.kind === "run" && isDirectRunWatch(watch, watch.target)) {
+        const sourceRun = watch.target;
+
+        setWatches(watches.filter((item) => item.id !== id && !isSameRunSource(item.sourceRun, sourceRun)));
+        return;
+      }
+
       setWatches(removeWatch(watches, id));
+    },
+
+    ignorePrWorkflow(id) {
+      const watch = watches.find((item) => item.id === id);
+
+      if (!watch?.source) {
+        return;
+      }
+
+      const workflowName = getWatchWorkflowName(watch);
+
+      if (!workflowName) {
+        return;
+      }
+
+      const ignoredWorkflowNames = addIgnoredWorkflowName(getIgnoredWorkflowNames(watches, watch.source), workflowName);
+      const ignoredTargetIds = addIgnoredTargetIds(
+        getIgnoredTargetIds(watches, watch.source),
+        watches
+          .filter((item) => isSamePrSource(item.source, watch.source!) && getWatchWorkflowName(item) === workflowName)
+          .map((item) => item.id),
+      );
+      const next = watches.flatMap((item) => {
+        if (!isSamePrSource(item.source, watch.source!)) {
+          return [item];
+        }
+
+        return getWatchWorkflowName(item) === workflowName
+          ? []
+          : [withIgnoredPrExclusions(item, ignoredWorkflowNames, ignoredTargetIds)];
+      });
+
+      setWatches(next);
+    },
+
+    reorderGroupWithinRepo(draggedIds, targetIds, position) {
+      const next = moveWatchGroupWithinRepo(watches, draggedIds, targetIds, position);
+
+      if (next !== watches) {
+        setWatches(next);
+      }
     },
 
     reorderWithinRepo(draggedId, targetId, position) {
@@ -300,6 +493,7 @@ export function createWatchController(
             ...current,
             target: withSnapshotPrNumber(current.target, snapshot.prNumber),
             label: snapshot.title,
+            metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
             status,
             lastSeenStatus: current.lastSeenStatus ?? current.status,
             lastState: nextState,
@@ -350,6 +544,7 @@ export function createWatchController(
 
     async pollNow() {
       await refreshPrSourceWatches();
+      await refreshRunSourceWatches();
       const activeWatches = watches.filter((watch) => watch.active);
 
       for (const watch of activeWatches) {
@@ -367,6 +562,7 @@ export function createWatchController(
             ...current,
             target: withSnapshotPrNumber(current.target, snapshot.prNumber),
             label: snapshot.title,
+            metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
             status,
             lastSeenStatus: current.lastSeenStatus ?? current.status,
             lastState: nextState,
@@ -413,6 +609,114 @@ function withSnapshotPrNumber(target: CheckWatchTarget, prNumber: string | undef
   };
 }
 
+function getResolutionTargetMetadata(
+  resolution: Pick<PrWatchResolution | RunWatchResolution, "targetMetadata">,
+  target: CheckWatchTarget,
+): WatchRecord["metadata"] | undefined {
+  return resolution.targetMetadata?.[getWatchId(target)];
+}
+
+function getIgnoredWorkflowNames(watches: WatchRecord[], source: PrWatchTarget): string[] {
+  for (const watch of watchesForSource(watches, source)) {
+    if (watch.ignoredWorkflowNames?.length) {
+      return watch.ignoredWorkflowNames;
+    }
+  }
+
+  return [];
+}
+
+function getIgnoredTargetIds(watches: WatchRecord[], source: PrWatchTarget): string[] {
+  for (const watch of watchesForSource(watches, source)) {
+    if (watch.ignoredTargetIds?.length) {
+      return watch.ignoredTargetIds;
+    }
+  }
+
+  return [];
+}
+
+function getIgnoredRunTargetIds(watches: WatchRecord[], sourceRun: RunWatchTarget): string[] {
+  return watches.find((watch) => isDirectRunWatch(watch, sourceRun))?.ignoredTargetIds ?? [];
+}
+
+function watchesForSource(watches: WatchRecord[], source: PrWatchTarget): WatchRecord[] {
+  return watches.filter((watch) => isSamePrSource(watch.source, source));
+}
+
+function getWatchWorkflowName(watch: WatchRecord): string | undefined {
+  const metadataName = getWorkflowNameFromMetadata(watch.metadata);
+
+  if (metadataName) {
+    return metadataName;
+  }
+
+  const separatorIndex = watch.label.indexOf(": ");
+
+  return (separatorIndex > 0 ? watch.label.slice(0, separatorIndex) : watch.label).trim() || undefined;
+}
+
+function getWorkflowNameFromMetadata(metadata: WatchRecord["metadata"]): string | undefined {
+  return metadata?.workflowName?.trim() || undefined;
+}
+
+function mergeWatchMetadata(
+  current: WatchRecord["metadata"],
+  snapshot: WatchRecord["metadata"],
+): WatchRecord["metadata"] {
+  const metadata = {
+    ...(current ?? {}),
+    ...(snapshot ?? {}),
+  };
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function addIgnoredWorkflowName(ignoredWorkflowNames: string[], workflowName: string): string[] {
+  return ignoredWorkflowNames.includes(workflowName)
+    ? ignoredWorkflowNames
+    : [...ignoredWorkflowNames, workflowName];
+}
+
+function addIgnoredTargetIds(ignoredTargetIds: string[], targetIds: string[]): string[] {
+  const next = [...ignoredTargetIds];
+
+  for (const targetId of targetIds) {
+    if (!next.includes(targetId)) {
+      next.push(targetId);
+    }
+  }
+
+  return next;
+}
+
+function withIgnoredPrExclusions(
+  watch: WatchRecord,
+  ignoredWorkflowNames: string[],
+  ignoredTargetIds: string[],
+): WatchRecord {
+  const {
+    ignoredWorkflowNames: _ignoredWorkflowNames,
+    ignoredTargetIds: _ignoredTargetIds,
+    ...baseWatch
+  } = watch;
+
+  return {
+    ...baseWatch,
+    ...(ignoredTargetIds.length ? { ignoredTargetIds } : {}),
+    ...(ignoredWorkflowNames.length ? { ignoredWorkflowNames } : {}),
+  };
+}
+
+function withIgnoredTargetIds(watch: WatchRecord, ignoredTargetIds: string[]): WatchRecord {
+  const { ignoredTargetIds: _ignoredTargetIds, ...baseWatch } = watch;
+
+  return {
+    ...baseWatch,
+    ...(ignoredTargetIds.length ? { ignoredTargetIds } : {}),
+  };
+}
+
 function getPrSources(watches: WatchRecord[]): PrWatchTarget[] {
   const sources = new Map<string, PrWatchTarget>();
 
@@ -425,10 +729,38 @@ function getPrSources(watches: WatchRecord[]): PrWatchTarget[] {
   return Array.from(sources.values());
 }
 
+function getRunSources(watches: WatchRecord[]): RunWatchTarget[] {
+  const sources = new Map<string, RunWatchTarget>();
+
+  for (const watch of watches) {
+    if (isDirectRunWatch(watch)) {
+      sources.set(getRunSourceKey(watch.target), watch.target);
+    }
+  }
+
+  return Array.from(sources.values());
+}
+
+function isDirectRunWatch(watch: WatchRecord, sourceRun?: RunWatchTarget): watch is WatchRecord & { target: RunWatchTarget } {
+  if (watch.target.kind !== "run" || watch.source || watch.sourceRun) {
+    return false;
+  }
+
+  return sourceRun ? getRunSourceKey(watch.target) === getRunSourceKey(sourceRun) : true;
+}
+
 function isSamePrSource(left: PrWatchTarget | undefined, right: PrWatchTarget): boolean {
   return Boolean(left && getPrSourceKey(left) === getPrSourceKey(right));
 }
 
 function getPrSourceKey(source: PrWatchTarget): string {
   return `${source.owner}/${source.repo}/pull/${source.prNumber}`;
+}
+
+function isSameRunSource(left: RunWatchTarget | undefined, right: RunWatchTarget): boolean {
+  return Boolean(left && getRunSourceKey(left) === getRunSourceKey(right));
+}
+
+function getRunSourceKey(source: RunWatchTarget): string {
+  return `${source.owner}/${source.repo}/run/${source.runId}`;
 }

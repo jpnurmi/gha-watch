@@ -6,6 +6,7 @@ describe("Windows packaging configuration", () => {
   it("uses native Windows rounding for the popup frame", () => {
     expect(config.app.windows[0]).toMatchObject({
       label: "main",
+      width: 460,
       decorations: false,
       transparent: false,
       backgroundColor: "#161b22",

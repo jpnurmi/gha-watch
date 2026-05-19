@@ -7,8 +7,10 @@ const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 describe("isWatchActionConfirmation", () => {
   it("only lets explicit confirmation actions pass through", () => {
     expect(isWatchActionConfirmation("confirm-remove")).toBe(true);
+    expect(isWatchActionConfirmation("confirm-ignore-pr-workflow")).toBe(true);
     expect(isWatchActionConfirmation("confirm-rerun")).toBe(true);
     expect(isWatchActionConfirmation("arm-remove")).toBe(false);
+    expect(isWatchActionConfirmation("arm-ignore-pr-workflow")).toBe(false);
     expect(isWatchActionConfirmation("arm-rerun")).toBe(false);
     expect(isWatchActionConfirmation("open")).toBe(false);
     expect(isWatchActionConfirmation(undefined)).toBe(false);
@@ -30,9 +32,13 @@ describe("shouldDismissPendingWatchActionOnRowLeave", () => {
 
 describe("watch action confirmation layout", () => {
   it("keeps the title column stable while a confirmation button is visible", () => {
-    expect(styles).toMatch(/\.watch\s*\{[^}]*grid-template-columns:\s*22px minmax\(0,\s*1fr\) 43px;/s);
+    expect(styles).toMatch(
+      /\.watch\s*\{[^}]*grid-template-columns:\s*var\(--tree-leading-width\) minmax\(0,\s*1fr\) var\(--tree-actions-width\);/s,
+    );
     expect(styles).not.toMatch(/\.watch\.has-confirmation\s*\{[^}]*grid-template-columns:/s);
-    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*position:\s*relative;[^}]*(?:^|\n)\s*width:\s*43px;/s);
+    expect(styles).toMatch(
+      /\.watch-actions\s*\{[^}]*position:\s*relative;[^}]*(?:^|\n)\s*width:\s*var\(--tree-actions-width\);[^}]*padding-right:\s*0;/s,
+    );
     expect(styles).toMatch(
       /\.watch\.has-confirmation \.confirm-button\s*\{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*z-index:\s*1;/s,
     );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addWatch, moveWatchWithinRepo, removeWatch, type WatchRecord } from "./watches";
+import { addWatch, moveWatchGroupWithinRepo, moveWatchWithinRepo, removeWatch, type WatchRecord } from "./watches";
 
 function watch(overrides: Partial<WatchRecord>): WatchRecord {
   const target = overrides.target ?? {
@@ -152,6 +152,44 @@ describe("watch operations", () => {
         "getsentry/sentry/run/123",
         "jpnurmi/gha-watch/run/456",
         "before",
+      ),
+    ).toBe(watches);
+  });
+
+  it("moves a group of watches within one repository", () => {
+    const watches = [
+      runWatch("getsentry", "sentry", "101"),
+      runWatch("getsentry", "sentry", "102"),
+      runWatch("getsentry", "sentry", "201"),
+      runWatch("getsentry", "sentry", "301"),
+      runWatch("getsentry", "sentry", "302"),
+    ];
+
+    expect(
+      moveWatchGroupWithinRepo(
+        watches,
+        ["getsentry/sentry/run/301", "getsentry/sentry/run/302"],
+        ["getsentry/sentry/run/101", "getsentry/sentry/run/102"],
+        "before",
+      ).map((watch) => watch.id),
+    ).toEqual([
+      "getsentry/sentry/run/301",
+      "getsentry/sentry/run/302",
+      "getsentry/sentry/run/101",
+      "getsentry/sentry/run/102",
+      "getsentry/sentry/run/201",
+    ]);
+  });
+
+  it("does not move a group across repository groups", () => {
+    const watches = [runWatch("getsentry", "sentry", "101"), runWatch("jpnurmi", "gha-watch", "201")];
+
+    expect(
+      moveWatchGroupWithinRepo(
+        watches,
+        ["getsentry/sentry/run/101"],
+        ["jpnurmi/gha-watch/run/201"],
+        "after",
       ),
     ).toBe(watches);
   });

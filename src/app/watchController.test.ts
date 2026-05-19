@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
-import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
+import type { CheckWatchTarget, JobWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
 import type { FavoriteRepo } from "../domain/favorites";
-import type { PrWatchResolution, WatchRecord } from "../domain/watches";
+import { getWatchId, type PrWatchResolution, type RunWatchResolution, type WatchRecord } from "../domain/watches";
 import type { ActiveWorkflowRun, OpenPullRequest, WatchSnapshot } from "../platform/gh";
 
 const runTarget: CheckWatchTarget = {
@@ -40,8 +40,13 @@ const prRunTarget: RunWatchTarget = {
 };
 
 type TestPrWatchResolution = CheckWatchTarget[] | PrWatchResolution;
+type TestRunWatchResolution = JobWatchTarget[] | RunWatchResolution;
 
-function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolution[] = []): {
+function createDeps(
+  states: WatchSnapshot[],
+  prResolutions: TestPrWatchResolution[] = [],
+  runResolutions?: TestRunWatchResolution[],
+): {
   deps: WatchControllerDeps;
   notifications: string[];
   notificationRecords: WatchControllerDeps extends { notify(notification: infer Notification): Promise<void> }
@@ -51,6 +56,7 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
   fetches: CheckWatchTarget[];
   reruns: CheckWatchTarget[];
   prResolves: PrWatchTarget[];
+  runResolves: RunWatchTarget[];
   openPullRequestFetches: FavoriteRepo[];
   activeWorkflowRunFetches: FavoriteRepo[];
 } {
@@ -60,6 +66,7 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
   const fetches: CheckWatchTarget[] = [];
   const reruns: CheckWatchTarget[] = [];
   const prResolves: PrWatchTarget[] = [];
+  const runResolves: RunWatchTarget[] = [];
   const openPullRequestFetches: FavoriteRepo[] = [];
   const activeWorkflowRunFetches: FavoriteRepo[] = [];
 
@@ -70,6 +77,7 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
     fetches,
     reruns,
     prResolves,
+    runResolves,
     openPullRequestFetches,
     activeWorkflowRunFetches,
     deps: {
@@ -100,6 +108,20 @@ function createDeps(states: WatchSnapshot[], prResolutions: TestPrWatchResolutio
 
         return Array.isArray(targets) ? { targets, sourceState: "ready" } : targets;
       },
+      ...(runResolutions
+        ? {
+            async resolveRunWatchTargets(target: RunWatchTarget) {
+              runResolves.push(target);
+              const targets = runResolutions.shift();
+
+              if (!targets) {
+                throw new Error("No fake run resolution queued.");
+              }
+
+              return Array.isArray(targets) ? { targets } : targets;
+            },
+          }
+        : {}),
       async fetchOpenPullRequests(target) {
         openPullRequestFetches.push(target);
         return [
@@ -195,6 +217,104 @@ describe("watchController", () => {
     });
   });
 
+  it("adds a workflow watch as a run scope with resolved job children", async () => {
+    const linuxJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      jobId: "456",
+      url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+    };
+    const windowsJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      jobId: "789",
+      url: "https://github.com/getsentry/sentry/actions/runs/123/job/789",
+    };
+    const { deps, fetches, runResolves } = createDeps(
+      [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: Fix tests",
+          metadata: {
+            workflowName: "CI",
+            runTitle: "Fix tests",
+          },
+          url: runTarget.url,
+        },
+        {
+          status: "completed",
+          conclusion: "success",
+          title: "CI: Linux",
+          metadata: {
+            workflowName: "CI",
+            jobName: "Linux",
+          },
+          url: linuxJobTarget.url,
+        },
+        {
+          status: "queued",
+          conclusion: null,
+          title: "CI: Windows",
+          metadata: {
+            workflowName: "CI",
+            jobName: "Windows",
+          },
+          url: windowsJobTarget.url,
+        },
+      ],
+      [],
+      [
+        {
+          targets: [linuxJobTarget, windowsJobTarget],
+          targetMetadata: {
+            [getWatchId(linuxJobTarget)]: { jobName: "Linux" },
+            [getWatchId(windowsJobTarget)]: { jobName: "Windows" },
+          },
+        },
+      ],
+    );
+    const controller = createWatchController(deps);
+
+    await controller.add(runTarget);
+
+    expect(runResolves).toEqual([runTarget]);
+    expect(fetches).toEqual([runTarget, linuxJobTarget, windowsJobTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/123",
+        target: runTarget,
+        label: "CI: Fix tests",
+        metadata: {
+          workflowName: "CI",
+          runTitle: "Fix tests",
+        },
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+      },
+      {
+        id: "getsentry/sentry/job/456",
+        target: linuxJobTarget,
+        sourceRun: runTarget,
+        label: "CI: Linux",
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+      },
+      {
+        id: "getsentry/sentry/job/789",
+        target: windowsJobTarget,
+        sourceRun: runTarget,
+        label: "CI: Windows",
+        status: "queued",
+        lastSeenStatus: "queued",
+      },
+    ]);
+  });
+
   it("adds a live PR watch as the PR's current run watches", async () => {
     const { deps, fetches, prResolves } = createDeps(
       [
@@ -225,6 +345,49 @@ describe("watchController", () => {
         lastSeenStatus: "queued",
       },
     ]);
+  });
+
+  it("keeps PR title metadata when baseline job state is loaded", async () => {
+    const prJobTarget: CheckWatchTarget = {
+      ...jobTarget,
+      prNumber: "51",
+    };
+    const { deps } = createDeps(
+      [
+        {
+          status: "queued",
+          conclusion: null,
+          title: "CI: macOS",
+          metadata: {
+            workflowName: "CI",
+            jobName: "macOS",
+          },
+          url: prJobTarget.url,
+        },
+      ],
+      [
+        {
+          sourceState: "ready",
+          targets: [prJobTarget],
+          targetMetadata: {
+            [getWatchId(prJobTarget)]: {
+              prTitle: "Fix flaky CI",
+              workflowName: "CI",
+              jobName: "macOS",
+            },
+          },
+        },
+      ],
+    );
+    const controller = createWatchController(deps);
+
+    await controller.add(prTarget);
+
+    expect(controller.getWatches()[0].metadata).toEqual({
+      prTitle: "Fix flaky CI",
+      workflowName: "CI",
+      jobName: "macOS",
+    });
   });
 
   it("reorders watches inside one repository without changing other repository slots", () => {
@@ -267,6 +430,77 @@ describe("watchController", () => {
       "getsentry/sentry/run/789",
       "jpnurmi/gha-watch/run/456",
       "getsentry/sentry/run/123",
+    ]);
+  });
+
+  it("reorders watch groups inside one repository", () => {
+    const { deps, saves } = createDeps([]);
+    const first = {
+      ...existingWatch(),
+      id: "getsentry/sentry/run/101",
+      target: {
+        kind: "run" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "101",
+        url: "https://github.com/getsentry/sentry/actions/runs/101",
+      },
+    };
+    const firstJob = {
+      ...existingWatch(),
+      id: "getsentry/sentry/job/102",
+      target: {
+        kind: "job" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "101",
+        jobId: "102",
+        url: "https://github.com/getsentry/sentry/actions/runs/101/job/102",
+      },
+      sourceRun: first.target,
+    };
+    const second = {
+      ...existingWatch(),
+      id: "getsentry/sentry/run/201",
+      target: {
+        kind: "run" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "201",
+        url: "https://github.com/getsentry/sentry/actions/runs/201",
+      },
+    };
+    const secondJob = {
+      ...existingWatch(),
+      id: "getsentry/sentry/job/202",
+      target: {
+        kind: "job" as const,
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "201",
+        jobId: "202",
+        url: "https://github.com/getsentry/sentry/actions/runs/201/job/202",
+      },
+      sourceRun: second.target,
+    };
+    const controller = createWatchController(deps, [first, firstJob, second, secondJob]);
+
+    controller.reorderGroupWithinRepo(["getsentry/sentry/run/201", "getsentry/sentry/job/202"], [
+      "getsentry/sentry/run/101",
+      "getsentry/sentry/job/102",
+    ], "before");
+
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/201",
+      "getsentry/sentry/job/202",
+      "getsentry/sentry/run/101",
+      "getsentry/sentry/job/102",
+    ]);
+    expect(saves.at(-1)?.map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/201",
+      "getsentry/sentry/job/202",
+      "getsentry/sentry/run/101",
+      "getsentry/sentry/job/102",
     ]);
   });
 
@@ -397,6 +631,12 @@ describe("watchController", () => {
     };
     const { deps } = createDeps(
       [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: Fix tests",
+          url: runTarget.url,
+        },
         {
           status: "in_progress",
           conclusion: null,
@@ -695,6 +935,254 @@ describe("watchController", () => {
     controller.remove("getsentry/sentry/run/789");
 
     expect(controller.getWatches()).toEqual([]);
+  });
+
+  it("hides one PR workflow while keeping the remaining workflows attached to the PR source", async () => {
+    const lintRunTarget: RunWatchTarget = {
+      ...prRunTarget,
+      runId: "790",
+      url: "https://github.com/getsentry/sentry/actions/runs/790",
+    };
+    const nextLicenseRunTarget: RunWatchTarget = {
+      ...prRunTarget,
+      runId: "791",
+      url: "https://github.com/getsentry/sentry/actions/runs/791",
+    };
+    const nextLintRunTarget: RunWatchTarget = {
+      ...prRunTarget,
+      runId: "792",
+      url: "https://github.com/getsentry/sentry/actions/runs/792",
+    };
+    const { deps } = createDeps(
+      [
+        {
+          status: "completed",
+          conclusion: "success",
+          title: "Lint: eslint",
+          metadata: { workflowName: "Lint" },
+          prNumber: "51",
+          url: nextLintRunTarget.url,
+        },
+      ],
+      [
+        {
+          targets: [nextLicenseRunTarget, nextLintRunTarget],
+          targetMetadata: {
+            [getWatchId(nextLicenseRunTarget)]: { workflowName: "License" },
+            [getWatchId(nextLintRunTarget)]: { workflowName: "Lint" },
+          },
+          sourceState: "ready",
+        },
+        {
+          targets: [],
+          sourceState: "merged",
+        },
+      ],
+    );
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry/run/789",
+        target: prRunTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "License: check",
+        metadata: { workflowName: "License" },
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+      {
+        id: "getsentry/sentry/run/790",
+        target: lintRunTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "Lint: eslint",
+        metadata: { workflowName: "Lint" },
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    controller.ignorePrWorkflow("getsentry/sentry/run/789");
+    await controller.pollNow();
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/792",
+        source: prTarget,
+        sourceState: "ready",
+        metadata: { workflowName: "Lint" },
+        ignoredWorkflowNames: ["License"],
+      },
+    ]);
+
+    controller.setOptions({ autoClearMergedPrWatches: true });
+    await controller.pollNow();
+
+    expect(controller.getWatches()).toEqual([]);
+  });
+
+  it("hides one direct workflow job while keeping the remaining jobs attached to the workflow", async () => {
+    const linuxJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      jobId: "456",
+      url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+    };
+    const windowsJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      jobId: "789",
+      url: "https://github.com/getsentry/sentry/actions/runs/123/job/789",
+    };
+    const { deps } = createDeps(
+      [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: Fix tests",
+          url: runTarget.url,
+        },
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: Linux",
+          url: linuxJobTarget.url,
+        },
+        {
+          status: "completed",
+          conclusion: "success",
+          title: "CI: Windows",
+          url: windowsJobTarget.url,
+        },
+      ],
+      [],
+      [
+        {
+          targets: [linuxJobTarget, windowsJobTarget],
+          targetMetadata: {
+            [getWatchId(linuxJobTarget)]: { jobName: "Linux" },
+            [getWatchId(windowsJobTarget)]: { jobName: "Windows" },
+          },
+        },
+      ],
+    );
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry/run/123",
+        target: runTarget,
+        label: "CI: Fix tests",
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+        error: undefined,
+      },
+      {
+        id: "getsentry/sentry/job/456",
+        target: linuxJobTarget,
+        sourceRun: runTarget,
+        label: "CI: Linux",
+        metadata: { jobName: "Linux" },
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    controller.remove("getsentry/sentry/job/456");
+    await controller.pollNow();
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/123",
+        ignoredTargetIds: ["getsentry/sentry/job/456"],
+      },
+      {
+        id: "getsentry/sentry/job/789",
+        sourceRun: runTarget,
+        metadata: { jobName: "Windows" },
+      },
+    ]);
+  });
+
+  it("keeps a hidden PR workflow hidden when PR refresh metadata is missing", async () => {
+    const lintRunTarget: RunWatchTarget = {
+      ...prRunTarget,
+      runId: "790",
+      url: "https://github.com/getsentry/sentry/actions/runs/790",
+    };
+    const nextLicenseRunTarget: RunWatchTarget = {
+      ...prRunTarget,
+      runId: "789",
+      url: "https://github.com/getsentry/sentry/actions/runs/789",
+    };
+    const nextLintRunTarget: RunWatchTarget = {
+      ...prRunTarget,
+      runId: "790",
+      url: "https://github.com/getsentry/sentry/actions/runs/790",
+    };
+    const { deps } = createDeps(
+      [
+        {
+          status: "completed",
+          conclusion: "success",
+          title: "Lint: eslint",
+          prNumber: "51",
+          url: nextLintRunTarget.url,
+        },
+      ],
+      [
+        {
+          targets: [nextLicenseRunTarget, nextLintRunTarget],
+          sourceState: "ready",
+        },
+      ],
+    );
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry/run/789",
+        target: prRunTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "License: check",
+        metadata: { workflowName: "License" },
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+      {
+        id: "getsentry/sentry/run/790",
+        target: lintRunTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "Lint: eslint",
+        metadata: { workflowName: "Lint" },
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    controller.ignorePrWorkflow("getsentry/sentry/run/789");
+    await controller.pollNow();
+
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/790"]);
   });
 
   it("clears all watches", async () => {

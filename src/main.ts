@@ -2,14 +2,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
-import { renderDragGripIcon, renderWatchLeadingSlot } from "./app/dragGlyph";
+import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { replacePopupHtmlPreservingScroll } from "./app/popupScroll";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getPrStateIconSvg } from "./app/prStateIcon";
-import { getRepoHeaderActions } from "./app/repoHeaderActions";
+import { getRepoHeaderActions, type RepoHeaderActions } from "./app/repoHeaderActions";
 import {
   didRepoReorderPressMove,
   repoReorderClickSuppressMs,
@@ -22,9 +22,22 @@ import {
   shouldDismissPendingWatchActionOnRowLeave,
   type PendingWatchAction,
 } from "./app/watchActionConfirmation";
-import { getClickedUnseenWatchId } from "./app/watchSeenAction";
+import { getClickedUnseenWatchIds } from "./app/watchSeenAction";
+import {
+  canRemoveWatchTreeNode,
+  getWatchTreeNodeRemoveMode,
+  shouldDismissPendingTreeActionOnHeaderLeave,
+  type PendingWatchTreeAction,
+  type WatchTreeNodeRemoveMode,
+} from "./app/watchTreeActions";
 import { createTrayState } from "./app/trayState";
-import { createPopupViewModel, type WatchGroupViewModel, type WatchRowViewModel } from "./app/viewModel";
+import {
+  createPopupViewModel,
+  type RowTone,
+  type WatchGroupViewModel,
+  type WatchRowViewModel,
+  type WatchTreeNodeViewModel,
+} from "./app/viewModel";
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
 import {
@@ -59,6 +72,7 @@ import {
   type OpenPullRequest,
   rerunFailedWatch,
   resolvePrWatchTargets,
+  resolveRunWatchTargets,
 } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
@@ -67,6 +81,7 @@ import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
 const pollIntervalMs = 30_000;
+const treeIndentStepPx = 26;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
 document.documentElement.dataset.platform = /\bWindows\b/i.test(navigator.userAgent) ? "windows" : "default";
 
@@ -88,6 +103,8 @@ let autoStartBusy = true;
 let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
+let pendingTreeAction: PendingWatchTreeAction | undefined;
+let pendingRepoAction: PendingRepoAction | undefined;
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let favoritePrMenu: FavoritePullRequestMenuState | undefined;
 let repoPressState: RepoPressState | undefined;
@@ -96,6 +113,8 @@ let watchPressState: WatchPressState | undefined;
 let watchDragState: WatchDragState | undefined;
 let suppressedRepoToggleKey: string | undefined;
 let suppressedRepoToggleUntilMs = 0;
+let suppressedTreeToggleKey: string | undefined;
+let suppressedTreeToggleUntilMs = 0;
 let suppressedWatchOpenId: string | undefined;
 let suppressedWatchOpenUntilMs = 0;
 let settings = loadSettings();
@@ -113,13 +132,20 @@ type RepoPressState = {
 
 type WatchDragState = {
   repoKey: string;
-  sourceId: string;
+  sourceKey: string;
+  sourceIds: string[];
 };
 
 type WatchPressState = WatchDragState & {
   startX: number;
   startY: number;
   timeoutId: number;
+};
+
+type WatchReorderTarget = {
+  repoKey: string;
+  key: string;
+  rowIds: string[];
 };
 
 type ActiveWorkflowRunMenuState =
@@ -154,6 +180,14 @@ type FavoritePullRequestMenuState =
       error: string;
     };
 
+type PendingRepoAction = {
+  owner: string;
+  repo: string;
+  repoLabel: string;
+  rowIds: string[];
+  removeFavorite: boolean;
+};
+
 const controller = createWatchController(
   {
     fetchState: isDemoMode
@@ -167,6 +201,7 @@ const controller = createWatchController(
     notificationsPaused: () => isPopupOpen,
     notify: notifyStatusChange,
     resolvePrWatchTargets: isDemoMode ? async () => ({ targets: [], sourceState: "ready" }) : resolvePrWatchTargets,
+    resolveRunWatchTargets: isDemoMode ? async () => ({ targets: [] }) : resolveRunWatchTargets,
     rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
     save: saveWatches,
   },
@@ -201,7 +236,7 @@ void poll();
 document.addEventListener(
   "click",
   (event) => {
-    if (!pendingWatchAction) {
+    if (!pendingWatchAction && !pendingTreeAction && !pendingRepoAction) {
       return;
     }
 
@@ -209,11 +244,13 @@ document.addEventListener(
     const actionTarget = target instanceof Element ? target.closest<HTMLElement>("[data-action]") : null;
     const action = actionTarget?.dataset.action;
 
-    if (isWatchActionConfirmation(action)) {
+    if (isWatchActionConfirmation(action) || action === "confirm-remove-group" || action === "confirm-remove-repo") {
       return;
     }
 
     pendingWatchAction = undefined;
+    pendingTreeAction = undefined;
+    pendingRepoAction = undefined;
     render();
     event.preventDefault();
     event.stopPropagation();
@@ -386,6 +423,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
       data-repo="${escapeHtml(group.repoLabel)}"
     >
       <div class="watch-group-header">
+        ${renderRepoGroupChevron(group, actions, isCollapsed)}
         ${renderFavoriteRepoButton(group)}
         <button
           class="watch-group-toggle"
@@ -397,34 +435,92 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
         >
           <span class="watch-group-meta">
             <span class="watch-group-title">${escapeHtml(group.repoLabel)}</span>
-            <span class="watch-group-action watch-group-badge" aria-hidden="true">${group.rows.length}</span>
           </span>
         </button>
-        <div class="watch-group-actions">
-          ${actions.showOpenPullRequests ? renderFavoritePullRequestMenu(group) : ""}
-          ${actions.showActiveWorkflowRuns ? renderActiveWorkflowRunMenu(group) : ""}
-          <button
-            class="watch-group-chevron"
-            type="button"
-            data-action="toggle-group"
-            data-repo="${escapeHtml(group.repoLabel)}"
-            title="${isCollapsed ? "Expand" : "Collapse"}"
-            aria-label="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(group.repoLabel)}"
-            aria-expanded="${isCollapsed ? "false" : "true"}"
-            ${collapseDisabled}
-          >
-            ${renderChevronIcon(isCollapsed)}
-          </button>
-        </div>
+        ${renderRepoGroupActions(group, actions)}
       </div>
       ${
         isCollapsed || group.rows.length === 0
           ? ""
           : `<ul class="watch-group-list">
-              ${group.rows.map(renderWatch).join("")}
+              ${group.items.map((item) => renderWatchGroupItem(item)).join("")}
             </ul>`
       }
     </li>
+  `;
+}
+
+function renderWatchGroupItem(item: WatchGroupViewModel["items"][number]): string {
+  return item.kind === "tree" ? renderWatchTreeNode(item.node, 0) : renderWatch(item.row, 0);
+}
+
+function renderRepoGroupChevron(
+  group: WatchGroupViewModel,
+  actions: RepoHeaderActions,
+  isCollapsed: boolean,
+): string {
+  const collapseDisabled = actions.canToggleCollapse ? "" : `aria-disabled="true" data-disabled="true"`;
+
+  return `
+    <button
+      class="watch-tree-chevron watch-group-toggle-chevron"
+      type="button"
+      data-action="toggle-group"
+      data-repo="${escapeHtml(group.repoLabel)}"
+      title="${isCollapsed ? "Expand" : "Collapse"}"
+      aria-label="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(group.repoLabel)}"
+      aria-expanded="${isCollapsed ? "false" : "true"}"
+      ${collapseDisabled}
+    >
+      ${renderChevronIcon(isCollapsed)}
+    </button>
+  `;
+}
+
+function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderActions): string {
+  if (pendingRepoAction?.repoLabel === group.repoLabel) {
+    return `
+      <div class="watch-group-actions has-confirmation">
+        <button
+          class="watch-group-confirm-button confirm-button confirm-button-remove"
+          type="button"
+          data-action="confirm-remove-repo"
+          data-owner="${escapeHtml(group.owner)}"
+          data-repo="${escapeHtml(group.repo)}"
+          data-row-ids="${escapeHtml(group.rows.map((row) => row.id).join("\n"))}"
+          data-remove-favorite="${group.favorite ? "true" : "false"}"
+        >
+          Remove
+        </button>
+      </div>
+    `;
+  }
+
+  const canRemove = group.rows.length > 0 || group.favorite;
+
+  return `
+    <div class="watch-group-actions">
+      ${actions.showOpenPullRequests ? renderFavoritePullRequestMenu(group) : ""}
+      ${actions.showActiveWorkflowRuns ? renderActiveWorkflowRunMenu(group) : ""}
+      ${
+        canRemove
+          ? `<button
+              class="watch-group-remove-button remove-button"
+              type="button"
+              data-action="arm-remove-repo"
+              data-owner="${escapeHtml(group.owner)}"
+              data-repo="${escapeHtml(group.repo)}"
+              data-repo-label="${escapeHtml(group.repoLabel)}"
+              data-row-ids="${escapeHtml(group.rows.map((row) => row.id).join("\n"))}"
+              data-remove-favorite="${group.favorite ? "true" : "false"}"
+              title="Remove"
+              aria-label="Remove ${escapeHtml(group.repoLabel)}"
+            >
+              <span class="remove-icon" aria-hidden="true">&times;</span>
+            </button>`
+          : ""
+      }
+    </div>
   `;
 }
 
@@ -637,19 +733,251 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
   `;
 }
 
-function renderWatch(row: WatchRowViewModel): string {
+function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): string {
+  const hasVisibleChildren = node.children.length > 0 || node.rows.length > 0;
+  const isCollapsed = hasVisibleChildren && collapsedGroups.has(node.id);
+  const actionLabel = hasVisibleChildren ? `${isCollapsed ? "Expand" : "Collapse"} ${node.label}` : node.label;
+  const treeToggleAttributes = hasVisibleChildren
+    ? `
+          data-action="toggle-tree-node"
+          data-tree-node="${escapeHtml(node.id)}"
+          aria-expanded="${isCollapsed ? "false" : "true"}"`
+    : "";
+  const canRemove = canRemoveWatchTreeNode(node, depth);
+  const hasActions = canRemove || Boolean(node.url);
+  const children = !hasVisibleChildren || isCollapsed
+    ? ""
+    : `
+      <ul class="watch-tree-children">
+        ${node.children.map((child) => renderWatchTreeNode(child, depth + 1)).join("")}
+        ${node.rows.map((row) => renderWatch(row, depth + 1)).join("")}
+      </ul>
+    `;
+
+  return `
+    <li
+      class="watch-tree-node watch-tree-node-${node.kind}${isCollapsed ? " is-collapsed" : ""}"
+      data-tree-node="${escapeHtml(node.id)}"
+      data-reorder-key="${escapeHtml(node.id)}"
+      data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
+      style="--tree-indent: ${depth * treeIndentStepPx}px;"
+    >
+      <div class="watch-tree-header is-${node.tone}${hasActions ? " has-actions" : ""}">
+        ${renderWatchTreeChevron(node, hasVisibleChildren, isCollapsed)}
+        ${renderWatchTreeLeading(node, depth, actionLabel, treeToggleAttributes, isCollapsed)}
+        <button
+          class="watch-tree-main"
+          type="button"
+          title="${escapeHtml(actionLabel)}"
+          aria-label="${escapeHtml(actionLabel)}"
+          ${treeToggleAttributes}
+        >
+          <span class="watch-label">
+            <span class="watch-title-text">${escapeHtml(node.label)}</span>
+            ${node.referenceLabel ? `<span class="watch-title-reference">${escapeHtml(node.referenceLabel)}</span>` : ""}
+          </span>
+          ${renderWatchTreeMetadata(node)}
+        </button>
+        ${renderWatchTreeActions(node, depth)}
+      </div>
+      ${children}
+    </li>
+  `;
+}
+
+function renderWatchTreeLeading(
+  node: WatchTreeNodeViewModel,
+  depth: number,
+  actionLabel: string,
+  treeToggleAttributes: string,
+  isCollapsed: boolean,
+): string {
+  const className = `watch-tree-leading${depth === 0 ? " is-top-level" : ""}`;
+  const showUnseenIndicator = shouldShowWatchTreeUnseenIndicator(node, isCollapsed);
+  const leadingSlot = renderWatchTreeLeadingSlot(
+    renderWatchTreeLeadingIcon(node),
+    showUnseenIndicator ? renderUnseenDot() : "",
+  );
+
+  if (showUnseenIndicator) {
+    return `
+      <button
+        class="${className}"
+        type="button"
+        data-action="mark-seen"
+        data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
+        title="Mark seen"
+        aria-label="Mark ${escapeHtml(node.label)} seen"
+      >
+        ${leadingSlot}
+      </button>
+    `;
+  }
+
+  return `
+    <button
+      class="${className}"
+      type="button"
+      title="${escapeHtml(actionLabel)}"
+      aria-label="${escapeHtml(actionLabel)}"
+      ${treeToggleAttributes}
+    >
+      ${leadingSlot}
+    </button>
+  `;
+}
+
+function shouldShowWatchTreeUnseenIndicator(node: WatchTreeNodeViewModel, isCollapsed: boolean): boolean {
+  if (!node.unseenStatusChange) {
+    return false;
+  }
+
+  const hasVisibleChildren = node.children.length > 0 || node.rows.length > 0;
+
+  return isCollapsed || !hasVisibleChildren || !hasVisibleUnseenDescendantIndicator(node);
+}
+
+function hasVisibleUnseenDescendantIndicator(node: WatchTreeNodeViewModel): boolean {
+  if (node.rows.some((row) => row.unseenStatusChange)) {
+    return true;
+  }
+
+  return node.children.some((child) => {
+    const childHasVisibleChildren = child.children.length > 0 || child.rows.length > 0;
+    const childIsCollapsed = childHasVisibleChildren && collapsedGroups.has(child.id);
+
+    return shouldShowWatchTreeUnseenIndicator(child, childIsCollapsed) ||
+      (!childIsCollapsed && hasVisibleUnseenDescendantIndicator(child));
+  });
+}
+
+function renderWatchTreeChevron(
+  node: WatchTreeNodeViewModel,
+  hasVisibleChildren: boolean,
+  isCollapsed: boolean,
+): string {
+  if (!hasVisibleChildren) {
+    return `<span class="watch-tree-chevron-spacer" aria-hidden="true"></span>`;
+  }
+
+  return `
+    <button
+      class="watch-tree-chevron"
+      type="button"
+      data-action="toggle-tree-node"
+      data-tree-node="${escapeHtml(node.id)}"
+      title="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(node.label)}"
+      aria-label="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(node.label)}"
+      aria-expanded="${isCollapsed ? "false" : "true"}"
+    >
+      ${renderChevronIcon(isCollapsed)}
+    </button>
+  `;
+}
+
+function renderWatchTreeLeadingIcon(node: WatchTreeNodeViewModel): string {
+  if (node.kind === "pull-request" && node.prState) {
+    return renderPrStateIcon(node.prState, "watch-tree-leading-icon");
+  }
+
+  return renderWatchSubjectIcon("workflow", "watch-tree-leading-icon");
+}
+
+function renderWatchTreeMetadata(node: WatchTreeNodeViewModel): string {
+  const items = [renderWorkflowStatusIcon(node.id, node.tone, node.statusLabel)];
+  const detail = [node.timingText, node.detailLabel].filter((item): item is string => Boolean(item)).join(" · ");
+
+  if (detail) {
+    items.push(`<span class="watch-meta-text">${escapeHtml(detail)}</span>`);
+  }
+
+  return `<span class="watch-meta">${items.join(renderMetaSeparator())}</span>`;
+}
+
+function renderWatchTreeActions(node: WatchTreeNodeViewModel, depth: number): string {
+  const canRemove = canRemoveWatchTreeNode(node, depth);
+
+  if (!canRemove && !node.url) {
+    return "";
+  }
+
+  const removeMode = getWatchTreeNodeRemoveMode(node, depth);
+
+  if (pendingTreeAction?.nodeId === node.id) {
+    return `
+      <div class="watch-tree-actions">
+        <button
+          class="watch-tree-confirm-button confirm-button confirm-button-remove"
+          type="button"
+          data-action="confirm-remove-group"
+          data-tree-node="${escapeHtml(node.id)}"
+          data-remove-mode="${removeMode ?? "remove"}"
+          data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
+        >
+          Remove
+        </button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="watch-tree-actions">
+      ${node.url ? renderOpenLinkButton("watch-tree-action-button open-link-button", node.label, node.url, node.kind === "workflow" ? node.primaryRowId : undefined) : ""}
+      ${
+        canRemove
+          ? `<button
+              class="watch-tree-action-button remove-button"
+              type="button"
+              data-action="arm-remove-group"
+              data-tree-node="${escapeHtml(node.id)}"
+              data-remove-mode="${removeMode ?? "remove"}"
+              data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
+              title="Remove"
+              aria-label="Remove ${escapeHtml(node.label)}"
+            >
+              <span class="remove-icon" aria-hidden="true">&times;</span>
+            </button>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderOpenLinkButton(className: string, label: string, url: string, id?: string): string {
+  return `
+    <button
+      class="${className}"
+      type="button"
+      data-action="open"
+      ${id ? `data-id="${escapeHtml(id)}"` : ""}
+      data-url="${escapeHtml(url)}"
+      title="Open"
+      aria-label="Open ${escapeHtml(label)} in GitHub"
+    >
+      ${renderOpenLinkIcon()}
+    </button>
+  `;
+}
+
+function renderWatch(row: WatchRowViewModel, depth = 0): string {
   const hasConfirmation = pendingWatchAction?.id === row.id;
 
   return `
-    <li class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasConfirmation ? " has-confirmation" : ""}" data-id="${escapeHtml(row.id)}">
+    <li
+      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasConfirmation ? " has-confirmation" : ""}"
+      data-id="${escapeHtml(row.id)}"
+      data-reorder-key="${escapeHtml(row.id)}"
+      data-row-ids="${escapeHtml(row.id)}"
+      style="--watch-indent: ${depth * treeIndentStepPx}px;"
+    >
       ${renderLeadingIcon(row)}
-      <button class="watch-main" type="button" data-action="open" data-id="${escapeHtml(row.id)}" title="Open in GitHub">
+      <div class="watch-main">
         <span class="watch-label">
           <span class="watch-title-text">${escapeHtml(row.label)}</span>
           ${row.prReference ? `<span class="watch-title-reference">${escapeHtml(row.prReference)}</span>` : ""}
         </span>
         ${renderMetadata(row)}
-      </button>
+      </div>
       ${renderWatchActions(row)}
     </li>
   `;
@@ -657,10 +985,6 @@ function renderWatch(row: WatchRowViewModel): string {
 
 function renderLeadingIcon(row: WatchRowViewModel): string {
   const markSeenOverlay = row.unseenStatusChange ? renderWatchSeenOverlay(row) : "";
-
-  if (row.prState) {
-    return renderWatchLeadingSlot(renderPrStateIcon(row.prState, "watch-leading-icon"), markSeenOverlay);
-  }
 
   if (row.subject === "job") {
     return renderWatchLeadingSlot(renderWatchSubjectIcon("job"), markSeenOverlay);
@@ -672,9 +996,13 @@ function renderLeadingIcon(row: WatchRowViewModel): string {
 function renderWatchSeenOverlay(row: WatchRowViewModel): string {
   return `
     <button class="watch-leading-seen-button" type="button" data-action="mark-seen" data-id="${escapeHtml(row.id)}" title="Mark seen" aria-label="Mark ${escapeHtml(row.label)} seen">
-      <span class="unseen-dot" aria-hidden="true"></span>
+      ${renderUnseenDot()}
     </button>
   `;
+}
+
+function renderUnseenDot(): string {
+  return `<span class="unseen-dot" aria-hidden="true"></span>`;
 }
 
 function renderMetadata(row: WatchRowViewModel): string {
@@ -696,10 +1024,14 @@ function renderMetaSeparator(): string {
 }
 
 function renderWorkflowStatus(row: WatchRowViewModel): string {
+  return renderWorkflowStatusIcon(row.id, row.tone, row.statusLabel);
+}
+
+function renderWorkflowStatusIcon(id: string, tone: RowTone, statusLabel: string): string {
   return `
-    <span class="watch-workflow-status status-icon-${row.tone}">
-      ${getStatusIconSvg(row.tone, `${row.id}-workflow`)}
-      <span>${escapeHtml(row.statusLabel)}</span>
+    <span class="watch-workflow-status status-icon-${tone}">
+      ${getStatusIconSvg(tone, `${id}-workflow`)}
+      <span>${escapeHtml(statusLabel)}</span>
     </span>
   `;
 }
@@ -715,8 +1047,9 @@ function getMetadataDetail(row: WatchRowViewModel): string | undefined {
 function renderWatchActions(row: WatchRowViewModel): string {
   if (pendingWatchAction?.id === row.id) {
     const isRerun = pendingWatchAction.kind === "rerun";
+    const isPrWorkflowIgnore = pendingWatchAction.kind === "ignore-pr-workflow";
     const label = isRerun ? "Re-run" : "Remove";
-    const action = isRerun ? "confirm-rerun" : "confirm-remove";
+    const action = isRerun ? "confirm-rerun" : isPrWorkflowIgnore ? "confirm-ignore-pr-workflow" : "confirm-remove";
     const tone = isRerun ? "rerun" : "remove";
 
     return `
@@ -737,7 +1070,8 @@ function renderWatchActions(row: WatchRowViewModel): string {
             </button>`
           : ""
       }
-      <button class="watch-action-button remove-button" type="button" data-action="arm-remove" data-id="${escapeHtml(row.id)}" title="Remove" aria-label="Remove ${escapeHtml(row.label)}">
+      ${renderOpenLinkButton("watch-action-button open-link-button", row.label, row.url, row.id)}
+      <button class="watch-action-button remove-button" type="button" data-action="${row.removeMode === "ignore-pr-workflow" ? "arm-ignore-pr-workflow" : "arm-remove"}" data-id="${escapeHtml(row.id)}" title="Remove" aria-label="Remove ${escapeHtml(row.label)}">
         <span class="remove-icon" aria-hidden="true">&times;</span>
       </button>
     </div>
@@ -766,10 +1100,13 @@ function renderPrStateIcon(
   `;
 }
 
-function renderWatchSubjectIcon(subject: Exclude<WatchRowViewModel["subject"], "pull-request">): string {
+function renderWatchSubjectIcon(
+  subject: Exclude<WatchRowViewModel["subject"], "pull-request">,
+  className = "watch-leading-icon",
+): string {
   return `
     <span
-      class="watch-leading-icon watch-subject-icon watch-subject-icon-${subject}"
+      class="${className} watch-subject-icon watch-subject-icon-${subject}"
       title="${subject === "job" ? "Workflow job" : "Workflow run"}"
       aria-label="${subject === "job" ? "Workflow job" : "Workflow run"}"
     >
@@ -840,6 +1177,52 @@ function bindEvents(): void {
     });
   }
 
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-tree-node"]')) {
+    button.addEventListener("click", (event) => {
+      const nodeId = button.dataset.treeNode;
+
+      if (nodeId) {
+        if (consumeSuppressedTreeToggle(nodeId)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+
+        toggleTreeNode(nodeId);
+      }
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-remove-group"]')) {
+    button.addEventListener("click", () => {
+      armTreeNodeRemoval(button.dataset.treeNode || "", getTreeNodeRowIds(button), getTreeNodeRemoveMode(button));
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-remove-group"]')) {
+    button.addEventListener("click", () => {
+      removeTreeNodeWatches(getTreeNodeRowIds(button), getTreeNodeRemoveMode(button));
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-remove-repo"]')) {
+    button.addEventListener("click", () => {
+      armRepoGroupRemoval(button);
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-remove-repo"]')) {
+    button.addEventListener("click", () => {
+      removeRepoGroupWatches(button);
+    });
+  }
+
+  for (const header of app.querySelectorAll<HTMLElement>(".watch-tree-header")) {
+    header.addEventListener("mouseleave", () => {
+      dismissTreeActionOnHeaderLeave(header.closest<HTMLElement>(".watch-tree-node")?.dataset.treeNode);
+    });
+  }
+
   for (const header of app.querySelectorAll<HTMLElement>(".watch-group-header")) {
     header.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest('[data-action="toggle-group"]')) {
@@ -859,6 +1242,9 @@ function bindEvents(): void {
       }
 
       toggleRepoGroup(repoLabel);
+    });
+    header.addEventListener("mouseleave", () => {
+      dismissRepoActionOnHeaderLeave(header.closest<HTMLElement>(".watch-group[data-repo]")?.dataset.repo);
     });
   }
 
@@ -949,6 +1335,12 @@ function bindEvents(): void {
     });
   }
 
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-ignore-pr-workflow"]')) {
+    button.addEventListener("click", () => {
+      armWatchAction(button.dataset.id || "", "ignore-pr-workflow");
+    });
+  }
+
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-rerun"]')) {
     button.addEventListener("click", () => {
       armWatchAction(button.dataset.id || "", "rerun");
@@ -959,6 +1351,13 @@ function bindEvents(): void {
     button.addEventListener("click", () => {
       pendingWatchAction = undefined;
       controller.remove(button.dataset.id || "");
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-ignore-pr-workflow"]')) {
+    button.addEventListener("click", () => {
+      pendingWatchAction = undefined;
+      controller.ignorePrWorkflow(button.dataset.id || "");
     });
   }
 
@@ -973,9 +1372,9 @@ function bindEvents(): void {
       event.preventDefault();
       event.stopPropagation();
 
-      const id = getClickedUnseenWatchId(controller.getWatches(), button.dataset.id);
+      const ids = getClickedUnseenWatchIds(controller.getWatches(), button.dataset.id, getTreeNodeRowIds(button));
 
-      if (id) {
+      for (const id of ids) {
         controller.markSeen(id);
       }
     });
@@ -990,6 +1389,7 @@ function bindEvents(): void {
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open"]')) {
     button.addEventListener("click", (event) => {
       const id = button.dataset.id || "";
+      const explicitUrl = button.dataset.url || "";
 
       if (id && consumeSuppressedWatchOpen(id)) {
         event.preventDefault();
@@ -1001,7 +1401,9 @@ function bindEvents(): void {
 
       if (watch) {
         controller.markSeen(watch.id);
-        void openUrl(watch.target.url);
+        void openUrl(explicitUrl || watch.target.url);
+      } else if (explicitUrl) {
+        void openUrl(explicitUrl);
       }
     });
   }
@@ -1062,6 +1464,15 @@ function renderCheckIcon(): string {
   `;
 }
 
+function renderOpenLinkIcon(): string {
+  return `
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M6.25 4.25h-2.5a1.5 1.5 0 0 0-1.5 1.5v6.5a1.5 1.5 0 0 0 1.5 1.5h6.5a1.5 1.5 0 0 0 1.5-1.5v-2.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
+      <path d="M8.5 2.25h5.25V7.5m-.5-4.75-6.5 6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
+    </svg>
+  `;
+}
+
 function bindRepoReorderEvents(): void {
   for (const header of app.querySelectorAll<HTMLElement>(".watch-group-header")) {
     header.addEventListener("pointerdown", (event) => {
@@ -1101,7 +1512,7 @@ function bindWatchReorderEvents(): void {
 
       const target = getWatchRowPressTarget(row, event);
 
-      if (!target || getVisibleWatchOrder(target.repoKey).length < 2) {
+      if (!target || getVisibleWatchReorderOrder(target.key).length < 2) {
         return;
       }
 
@@ -1109,11 +1520,42 @@ function bindWatchReorderEvents(): void {
       cancelRepoPointerDrag();
       watchPressState = {
         repoKey: target.repoKey,
-        sourceId: target.watchId,
+        sourceKey: target.key,
+        sourceIds: target.rowIds,
         startX: event.clientX,
         startY: event.clientY,
         timeoutId: window.setTimeout(() => {
-          startWatchPointerDrag(target.repoKey, target.watchId);
+          startWatchPointerDrag(target.repoKey, target.key, target.rowIds);
+        }, repoReorderLongPressMs),
+      };
+      document.addEventListener("pointermove", updateWatchPointerDrag);
+      document.addEventListener("pointerup", finishWatchPointerDrag, { once: true });
+      document.addEventListener("pointercancel", cancelWatchPointerDrag, { once: true });
+    });
+  }
+
+  for (const header of app.querySelectorAll<HTMLElement>(".watch-tree-header")) {
+    header.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const target = getWatchTreePressTarget(header, event);
+
+      if (!target || getVisibleWatchReorderOrder(target.key).length < 2) {
+        return;
+      }
+
+      cancelWatchPointerDrag();
+      cancelRepoPointerDrag();
+      watchPressState = {
+        repoKey: target.repoKey,
+        sourceKey: target.key,
+        sourceIds: target.rowIds,
+        startX: event.clientX,
+        startY: event.clientY,
+        timeoutId: window.setTimeout(() => {
+          startWatchPointerDrag(target.repoKey, target.key, target.rowIds);
         }, repoReorderLongPressMs),
       };
       document.addEventListener("pointermove", updateWatchPointerDrag);
@@ -1128,7 +1570,7 @@ function getRepoHeaderPressKey(header: HTMLElement, event: Event): string | unde
     return undefined;
   }
 
-  if (event.target.closest(".watch-group-star, .watch-group-actions, .repo-action-menu")) {
+  if (event.target.closest(".watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron")) {
     return undefined;
   }
 
@@ -1138,7 +1580,7 @@ function getRepoHeaderPressKey(header: HTMLElement, event: Event): string | unde
 function getWatchRowPressTarget(
   row: HTMLElement,
   event: Event,
-): { repoKey: string; watchId: string } | undefined {
+): WatchReorderTarget | undefined {
   if (!(event.target instanceof Element)) {
     return undefined;
   }
@@ -1147,10 +1589,38 @@ function getWatchRowPressTarget(
     return undefined;
   }
 
-  const watchId = row.dataset.id;
+  const key = row.dataset.reorderKey;
+  const rowIds = getWatchReorderRowIds(row);
   const repoKey = row.closest<HTMLElement>(".watch-group[data-repo]")?.dataset.repo;
 
-  return watchId && repoKey ? { repoKey, watchId } : undefined;
+  return key && repoKey && rowIds.length > 0 ? { repoKey, key, rowIds } : undefined;
+}
+
+function getWatchTreePressTarget(
+  header: HTMLElement,
+  event: Event,
+): WatchReorderTarget | undefined {
+  if (!(event.target instanceof Element)) {
+    return undefined;
+  }
+
+  if (event.target.closest('.watch-tree-actions, .watch-tree-chevron, [data-action="mark-seen"]')) {
+    return undefined;
+  }
+
+  const node = header.closest<HTMLElement>(".watch-tree-node[data-reorder-key]");
+  const key = node?.dataset.reorderKey;
+  const rowIds = node ? getWatchReorderRowIds(node) : [];
+  const repoKey = header.closest<HTMLElement>(".watch-group[data-repo]")?.dataset.repo;
+
+  return key && repoKey && rowIds.length > 0 ? { repoKey, key, rowIds } : undefined;
+}
+
+function getWatchReorderRowIds(element: HTMLElement): string[] {
+  return (element.dataset.rowIds || "")
+    .split("\n")
+    .map((rowId) => rowId.trim())
+    .filter((rowId) => rowId.length > 0);
 }
 
 function toggleRepoGroup(repoLabel: string): void {
@@ -1162,23 +1632,141 @@ function toggleRepoGroup(repoLabel: string): void {
 
   collapsedGroups.toggle(repoLabel);
   isClearMenuOpen = false;
+  pendingRepoAction = undefined;
   render();
 }
 
-function startWatchPointerDrag(repoKey: string, sourceId: string): void {
-  if (!watchPressState || watchPressState.repoKey !== repoKey || watchPressState.sourceId !== sourceId) {
+function toggleTreeNode(nodeId: string): void {
+  collapsedGroups.toggle(nodeId);
+  isClearMenuOpen = false;
+  pendingRepoAction = undefined;
+  activeWorkflowRunMenu = undefined;
+  favoritePrMenu = undefined;
+  render();
+}
+
+function armTreeNodeRemoval(nodeId: string, rowIds: string[], mode: WatchTreeNodeRemoveMode): void {
+  if (!nodeId || rowIds.length === 0) {
+    return;
+  }
+
+  pendingTreeAction = { mode, nodeId, rowIds };
+  pendingWatchAction = undefined;
+  pendingRepoAction = undefined;
+  isClearMenuOpen = false;
+  activeWorkflowRunMenu = undefined;
+  favoritePrMenu = undefined;
+  render();
+}
+
+function armRepoGroupRemoval(button: HTMLButtonElement): void {
+  const repoLabel = button.dataset.repoLabel || "";
+
+  if (!repoLabel) {
+    return;
+  }
+
+  pendingRepoAction = {
+    owner: button.dataset.owner || "",
+    repo: button.dataset.repo || "",
+    repoLabel,
+    rowIds: getTreeNodeRowIds(button),
+    removeFavorite: button.dataset.removeFavorite === "true",
+  };
+  pendingWatchAction = undefined;
+  pendingTreeAction = undefined;
+  isClearMenuOpen = false;
+  activeWorkflowRunMenu = undefined;
+  favoritePrMenu = undefined;
+  render();
+}
+
+function dismissTreeActionOnHeaderLeave(nodeId: string | undefined): void {
+  if (!shouldDismissPendingTreeActionOnHeaderLeave(pendingTreeAction, nodeId)) {
+    return;
+  }
+
+  pendingTreeAction = undefined;
+  render();
+}
+
+function dismissRepoActionOnHeaderLeave(repoLabel: string | undefined): void {
+  if (!pendingRepoAction || pendingRepoAction.repoLabel !== repoLabel) {
+    return;
+  }
+
+  pendingRepoAction = undefined;
+  render();
+}
+
+function removeTreeNodeWatches(rowIds: string[], mode: WatchTreeNodeRemoveMode): void {
+  pendingTreeAction = undefined;
+
+  if (mode === "ignore-pr-workflow") {
+    controller.ignorePrWorkflow(rowIds[0] || "");
+    return;
+  }
+
+  for (const rowId of rowIds) {
+    if (controller.getWatches().some((watch) => watch.id === rowId)) {
+      controller.remove(rowId);
+    }
+  }
+}
+
+function removeRepoGroupWatches(button: HTMLButtonElement): void {
+  pendingRepoAction = undefined;
+
+  for (const rowId of getTreeNodeRowIds(button)) {
+    if (controller.getWatches().some((watch) => watch.id === rowId)) {
+      controller.remove(rowId);
+    }
+  }
+
+  if (button.dataset.removeFavorite === "true") {
+    const repo = {
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+    };
+
+    if (isFavoriteRepo(settings.favoriteRepos, repo)) {
+      const repoKey = getFavoriteRepoKey(repo);
+
+      settings = {
+        ...settings,
+        favoriteRepos: settings.favoriteRepos.filter((favorite) => getFavoriteRepoKey(favorite) !== repoKey),
+      };
+      void saveSettings(settings);
+      render();
+    }
+  }
+}
+
+function getTreeNodeRemoveMode(button: HTMLButtonElement): WatchTreeNodeRemoveMode {
+  return button.dataset.removeMode === "ignore-pr-workflow" ? "ignore-pr-workflow" : "remove";
+}
+
+function getTreeNodeRowIds(button: HTMLButtonElement): string[] {
+  return (button.dataset.rowIds || "")
+    .split("\n")
+    .map((rowId) => rowId.trim())
+    .filter((rowId) => rowId.length > 0);
+}
+
+function startWatchPointerDrag(repoKey: string, sourceKey: string, sourceIds: string[]): void {
+  if (!watchPressState || watchPressState.repoKey !== repoKey || watchPressState.sourceKey !== sourceKey) {
     return;
   }
 
   watchPressState = undefined;
-  watchDragState = { repoKey, sourceId };
+  watchDragState = { repoKey, sourceKey, sourceIds };
   isClearMenuOpen = false;
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
 
   app.querySelector(".watch-list")?.classList.add("is-reordering-runs");
-  getWatchGroupListElement(repoKey)?.classList.add("is-reordering-runs");
-  getWatchRowElement(sourceId)?.classList.add("is-row-dragging");
+  getWatchReorderElement(sourceKey)?.parentElement?.classList.add("is-reordering-runs");
+  getWatchReorderElement(sourceKey)?.classList.add("is-row-dragging");
 }
 
 function startRepoPointerDrag(sourceKey: string): void {
@@ -1280,17 +1868,24 @@ function finishWatchPointerDrag(event: PointerEvent): void {
   }
 
   event.preventDefault();
-  const sourceId = watchDragState.sourceId;
+  const sourceKey = watchDragState.sourceKey;
+  const sourceIds = watchDragState.sourceIds;
   const target = getPointerWatchDropTarget(event.clientY);
+  const targetIds = target ? getWatchReorderTargetIds(target.targetKey) : [];
+  const sourceElement = getWatchReorderElement(sourceKey);
 
   watchDragState = undefined;
-  suppressNextWatchOpen(sourceId);
+  if (sourceElement?.classList.contains("watch-tree-node")) {
+    suppressNextTreeToggle(sourceKey);
+  } else {
+    suppressNextWatchOpen(sourceIds[0] || "");
+  }
   document.removeEventListener("pointermove", updateWatchPointerDrag);
   document.removeEventListener("pointercancel", cancelWatchPointerDrag);
   clearWatchDragStateClasses();
 
-  if (target) {
-    reorderWatchesWithinRepo(sourceId, target.targetKey, target.position);
+  if (target && targetIds.length > 0) {
+    reorderWatchesWithinRepo(sourceIds, targetIds, target.position);
   }
 }
 
@@ -1315,6 +1910,7 @@ function cancelWatchPointerDrag(): void {
 
   watchPressState = undefined;
   watchDragState = undefined;
+  clearSuppressedTreeToggle();
   clearSuppressedWatchOpen();
   document.removeEventListener("pointermove", updateWatchPointerDrag);
   document.removeEventListener("pointerup", finishWatchPointerDrag);
@@ -1325,6 +1921,11 @@ function cancelWatchPointerDrag(): void {
 function suppressNextRepoToggle(repoKey: string): void {
   suppressedRepoToggleKey = repoKey;
   suppressedRepoToggleUntilMs = window.performance.now() + repoReorderClickSuppressMs;
+}
+
+function suppressNextTreeToggle(nodeId: string): void {
+  suppressedTreeToggleKey = nodeId;
+  suppressedTreeToggleUntilMs = window.performance.now() + repoReorderClickSuppressMs;
 }
 
 function suppressNextWatchOpen(watchId: string): void {
@@ -1347,6 +1948,24 @@ function consumeSuppressedRepoToggle(repoKey: string): boolean {
   }
 
   clearSuppressedRepoToggle();
+  return true;
+}
+
+function consumeSuppressedTreeToggle(nodeId: string): boolean {
+  if (!suppressedTreeToggleKey) {
+    return false;
+  }
+
+  if (window.performance.now() > suppressedTreeToggleUntilMs) {
+    clearSuppressedTreeToggle();
+    return false;
+  }
+
+  if (suppressedTreeToggleKey !== nodeId) {
+    return false;
+  }
+
+  clearSuppressedTreeToggle();
   return true;
 }
 
@@ -1373,6 +1992,11 @@ function clearSuppressedRepoToggle(): void {
   suppressedRepoToggleUntilMs = 0;
 }
 
+function clearSuppressedTreeToggle(): void {
+  suppressedTreeToggleKey = undefined;
+  suppressedTreeToggleUntilMs = 0;
+}
+
 function clearSuppressedWatchOpen(): void {
   suppressedWatchOpenId = undefined;
   suppressedWatchOpenUntilMs = 0;
@@ -1392,8 +2016,8 @@ function getPointerWatchDropTarget(clientY: number): RepoDropTarget | undefined 
   }
 
   return getRepoDropTarget(
-    getVisibleWatchDropCandidates(watchDragState.repoKey),
-    watchDragState.sourceId,
+    getVisibleWatchDropCandidates(watchDragState.sourceKey),
+    watchDragState.sourceKey,
     clientY,
   );
 }
@@ -1415,17 +2039,18 @@ function getVisibleRepoDropCandidates(): RepoDropCandidate[] {
     .filter((candidate): candidate is RepoDropCandidate => Boolean(candidate));
 }
 
-function getVisibleWatchDropCandidates(repoKey: string): RepoDropCandidate[] {
-  const groupElement = getRepoGroupElement(repoKey);
+function getVisibleWatchDropCandidates(sourceKey: string): RepoDropCandidate[] {
+  const sourceElement = getWatchReorderElement(sourceKey);
+  const container = sourceElement?.parentElement;
 
-  if (!groupElement) {
+  if (!container) {
     return [];
   }
 
-  return Array.from(groupElement.querySelectorAll<HTMLElement>(".watch[data-id]"))
-    .map((rowElement) => {
-      const key = rowElement.dataset.id;
-      const rect = rowElement.getBoundingClientRect();
+  return getWatchReorderElements(container)
+    .map((element) => {
+      const key = element.dataset.reorderKey;
+      const rect = element.getBoundingClientRect();
 
       return key
         ? {
@@ -1457,7 +2082,7 @@ function showWatchDropIndicator(target: RepoDropTarget | undefined): void {
     return;
   }
 
-  getWatchRowElement(target.targetKey)?.classList.add(
+  getWatchReorderElement(target.targetKey)?.classList.add(
     target.position === "before" ? "is-row-drop-before" : "is-row-drop-after",
   );
 }
@@ -1472,6 +2097,10 @@ function clearWatchDropIndicators(): void {
   for (const rowElement of app.querySelectorAll(".watch")) {
     rowElement.classList.remove("is-row-drop-before", "is-row-drop-after");
   }
+
+  for (const treeElement of app.querySelectorAll(".watch-tree-node")) {
+    treeElement.classList.remove("is-row-drop-before", "is-row-drop-after");
+  }
 }
 
 function clearRepoDragStateClasses(): void {
@@ -1485,12 +2114,16 @@ function clearRepoDragStateClasses(): void {
 function clearWatchDragStateClasses(): void {
   app.querySelector(".watch-list")?.classList.remove("is-reordering-runs");
 
-  for (const groupList of app.querySelectorAll(".watch-group-list")) {
+  for (const groupList of app.querySelectorAll(".watch-group-list, .watch-tree-children")) {
     groupList.classList.remove("is-reordering-runs");
   }
 
   for (const rowElement of app.querySelectorAll(".watch")) {
     rowElement.classList.remove("is-row-dragging", "is-row-drop-before", "is-row-drop-after");
+  }
+
+  for (const treeElement of app.querySelectorAll(".watch-tree-node")) {
+    treeElement.classList.remove("is-row-dragging", "is-row-drop-before", "is-row-drop-after");
   }
 }
 
@@ -1510,8 +2143,8 @@ function reorderRepos(sourceKey: string, targetKey: string, position: RepoDropPo
   render();
 }
 
-function reorderWatchesWithinRepo(sourceId: string, targetId: string, position: RepoDropPosition): void {
-  controller.reorderWithinRepo(sourceId, targetId, position);
+function reorderWatchesWithinRepo(sourceIds: string[], targetIds: string[], position: RepoDropPosition): void {
+  controller.reorderGroupWithinRepo(sourceIds, targetIds, position);
 }
 
 function getVisibleRepoOrder(): string[] {
@@ -1520,16 +2153,17 @@ function getVisibleRepoOrder(): string[] {
     .filter((repoKey): repoKey is string => Boolean(repoKey));
 }
 
-function getVisibleWatchOrder(repoKey: string): string[] {
-  const groupElement = getRepoGroupElement(repoKey);
+function getVisibleWatchReorderOrder(sourceKey: string): string[] {
+  const sourceElement = getWatchReorderElement(sourceKey);
+  const container = sourceElement?.parentElement;
 
-  if (!groupElement) {
+  if (!container) {
     return [];
   }
 
-  return Array.from(groupElement.querySelectorAll<HTMLElement>(".watch[data-id]"))
-    .map((rowElement) => rowElement.dataset.id)
-    .filter((watchId): watchId is string => Boolean(watchId));
+  return getWatchReorderElements(container)
+    .map((element) => element.dataset.reorderKey)
+    .filter((key): key is string => Boolean(key));
 }
 
 function getRepoGroupElement(repoKey: string): HTMLElement | undefined {
@@ -1537,13 +2171,20 @@ function getRepoGroupElement(repoKey: string): HTMLElement | undefined {
     .find((groupElement) => groupElement.dataset.repo === repoKey);
 }
 
-function getWatchGroupListElement(repoKey: string): HTMLElement | undefined {
-  return getRepoGroupElement(repoKey)?.querySelector<HTMLElement>(".watch-group-list") ?? undefined;
+function getWatchReorderElements(container: Element): HTMLElement[] {
+  return Array.from(container.children).filter((element): element is HTMLElement => {
+    return element instanceof HTMLElement && Boolean(element.dataset.reorderKey);
+  });
 }
 
-function getWatchRowElement(watchId: string): HTMLElement | undefined {
-  return Array.from(app.querySelectorAll<HTMLElement>(".watch[data-id]"))
-    .find((rowElement) => rowElement.dataset.id === watchId);
+function getWatchReorderElement(key: string): HTMLElement | undefined {
+  return Array.from(app.querySelectorAll<HTMLElement>("[data-reorder-key]"))
+    .find((element) => element.dataset.reorderKey === key);
+}
+
+function getWatchReorderTargetIds(key: string): string[] {
+  const element = getWatchReorderElement(key);
+  return element ? getWatchReorderRowIds(element) : [];
 }
 
 function repoOrdersAreEqual(left: string[], right: string[]): boolean {
@@ -1755,6 +2396,8 @@ function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
   }
 
   pendingWatchAction = { id, kind };
+  pendingTreeAction = undefined;
+  pendingRepoAction = undefined;
   isClearMenuOpen = false;
   render();
 }
@@ -1978,14 +2621,20 @@ function loadInitialWatches(): WatchRecord[] {
   if (isDemoMode) {
     return [
       createDemoWatch("8", "CI: feat: auto-start", "completed", "success", false, {
+        runTitle: "feat: auto-start",
+        workflowName: "CI",
         prNumber: "8",
         sourceState: "merged",
       }),
       createDemoWatch("9", "CI: feat: slug", "completed", "success", false, {
+        runTitle: "feat: slug",
+        workflowName: "CI",
         prNumber: "9",
         sourceState: "merged",
       }),
       createDemoWatch("10", "CI: ci: add Rust cache", "completed", "success", false, {
+        runTitle: "ci: add Rust cache",
+        workflowName: "CI",
         timing: {
           startedAt: "2026-05-17T09:28:00Z",
           completedAt: "2026-05-17T09:31:00Z",
@@ -1993,6 +2642,8 @@ function loadInitialWatches(): WatchRecord[] {
       }),
       createDemoWatch("11", "Build / package app (macOS)", "in_progress", null, true, {
         jobId: "42",
+        jobName: "package app (macOS)",
+        workflowName: "Build",
         timing: {
           startedAt: "2026-05-17T11:56:00Z",
         },
@@ -2011,9 +2662,12 @@ function createDemoWatch(
   active: boolean,
   options: {
     jobId?: string;
+    jobName?: string;
     prNumber?: string;
+    runTitle?: string;
     sourceState?: WatchRecord["sourceState"];
     timing?: WatchRecord["timing"];
+    workflowName?: string;
   } = {},
 ): WatchRecord {
   const target = options.jobId
@@ -2051,6 +2705,11 @@ function createDemoWatch(
       : {}),
     ...(options.sourceState ? { sourceState: options.sourceState } : {}),
     label,
+    metadata: {
+      ...(options.workflowName ? { workflowName: options.workflowName } : {}),
+      ...(options.runTitle ? { runTitle: options.runTitle } : {}),
+      ...(options.jobName ? { jobName: options.jobName } : {}),
+    },
     status: conclusion ? `${status}:${conclusion}` : status,
     lastState: { status, conclusion },
     ...(options.timing ? { timing: options.timing } : {}),

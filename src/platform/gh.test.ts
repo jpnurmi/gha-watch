@@ -7,6 +7,7 @@ import {
   fetchWatchState,
   rerunFailedWatch,
   resolvePrWatchTargets,
+  resolveRunWatchTargets,
   type ShellExecutor,
 } from "./gh";
 
@@ -83,6 +84,10 @@ describe("fetchWatchState", () => {
       status: "in_progress",
       conclusion: null,
       title: "CI: Run tests",
+      metadata: {
+        workflowName: "CI",
+        runTitle: "Run tests",
+      },
       prNumber: "51",
       timing: {
         queuedAt: "2026-05-16T12:00:00Z",
@@ -131,6 +136,10 @@ describe("fetchWatchState", () => {
       status: "completed",
       conclusion: "failure",
       title: "CI: test (macos)",
+      metadata: {
+        workflowName: "CI",
+        jobName: "test (macos)",
+      },
       timing: {
         queuedAt: "2026-05-16T12:00:00Z",
         startedAt: "2026-05-16T12:02:00Z",
@@ -216,6 +225,76 @@ describe("fetchWatchState", () => {
         executor,
       ),
     ).rejects.toThrow("gh is not authenticated. Run `gh auth login` and try again.");
+  });
+});
+
+describe("resolveRunWatchTargets", () => {
+  it("resolves a workflow run into job targets", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        jobs: [
+          {
+            id: 456,
+            name: "Linux",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+          },
+          {
+            id: "789",
+            name: "Windows",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/123/job/789",
+          },
+        ],
+      }),
+      stderr: "",
+    });
+
+    await expect(
+      resolveRunWatchTargets(
+        {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "123",
+          url: "https://github.com/getsentry/sentry/actions/runs/123",
+        },
+        executor,
+      ),
+    ).resolves.toEqual({
+      targets: [
+        {
+          kind: "job",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "123",
+          jobId: "456",
+          url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+        },
+        {
+          kind: "job",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "123",
+          jobId: "789",
+          url: "https://github.com/getsentry/sentry/actions/runs/123/job/789",
+        },
+      ],
+      targetMetadata: {
+        "getsentry/sentry/job/456": {
+          jobName: "Linux",
+        },
+        "getsentry/sentry/job/789": {
+          jobName: "Windows",
+        },
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry/actions/runs/123/jobs?per_page=100"],
+      },
+    ]);
   });
 });
 
@@ -496,7 +575,7 @@ describe("fetchActiveWorkflowRuns", () => {
 });
 
 describe("resolvePrWatchTargets", () => {
-  it("resolves current pull request runs by head SHA", async () => {
+  it("resolves current pull request jobs by head SHA", async () => {
     const { executor, calls } = createSequenceExecutor([
       {
         code: 0,
@@ -506,6 +585,7 @@ describe("resolvePrWatchTargets", () => {
           isDraft: false,
           mergedAt: null,
           state: "OPEN",
+          title: "Fix flaky CI",
         }),
         stderr: "",
       },
@@ -517,12 +597,14 @@ describe("resolvePrWatchTargets", () => {
             event: "pull_request",
             headSha: "abc123",
             url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
+            workflowName: "CI",
           },
           {
             databaseId: 102,
             event: "pull_request",
             headSha: "abc123",
             url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102",
+            workflowName: "Lint",
           },
           {
             databaseId: 99,
@@ -531,6 +613,32 @@ describe("resolvePrWatchTargets", () => {
             url: "https://github.com/jpnurmi/sentry-qml/actions/runs/99",
           },
         ]),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              id: 1001,
+              name: "macOS",
+              html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101/job/1001",
+            },
+          ],
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              id: 1002,
+              name: "eslint",
+              html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102/job/1002",
+            },
+          ],
+        }),
         stderr: "",
       },
     ]);
@@ -548,22 +656,36 @@ describe("resolvePrWatchTargets", () => {
       ),
     ).resolves.toEqual({
       sourceState: "ready",
+      targetMetadata: {
+        "jpnurmi/sentry-qml/job/1001": {
+          prTitle: "Fix flaky CI",
+          workflowName: "CI",
+          jobName: "macOS",
+        },
+        "jpnurmi/sentry-qml/job/1002": {
+          prTitle: "Fix flaky CI",
+          workflowName: "Lint",
+          jobName: "eslint",
+        },
+      },
       targets: [
         {
-          kind: "run",
+          kind: "job",
           owner: "jpnurmi",
           repo: "sentry-qml",
           runId: "101",
+          jobId: "1001",
           prNumber: "51",
-          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
+          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101/job/1001",
         },
         {
-          kind: "run",
+          kind: "job",
           owner: "jpnurmi",
           repo: "sentry-qml",
           runId: "102",
+          jobId: "1002",
           prNumber: "51",
-          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102",
+          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102/job/1002",
         },
       ],
     });
@@ -578,7 +700,7 @@ describe("resolvePrWatchTargets", () => {
           "-R",
           "jpnurmi/sentry-qml",
           "--json",
-          "headRefName,headRefOid,isDraft,mergedAt,state",
+          "headRefName,headRefOid,isDraft,mergedAt,state,title",
         ],
       },
       {
@@ -595,8 +717,16 @@ describe("resolvePrWatchTargets", () => {
           "--limit",
           "50",
           "--json",
-          "databaseId,event,headSha,url",
+          "databaseId,event,headSha,url,workflowName",
         ],
+      },
+      {
+        program: "gh",
+        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/101/jobs?per_page=100"],
+      },
+      {
+        program: "gh",
+        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/102/jobs?per_page=100"],
       },
     ]);
   });
@@ -611,6 +741,7 @@ describe("resolvePrWatchTargets", () => {
           isDraft: true,
           mergedAt: null,
           state: "OPEN",
+          title: "Draft PR",
         }),
         stderr: "",
       },
@@ -624,6 +755,11 @@ describe("resolvePrWatchTargets", () => {
             url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
           },
         ]),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({ jobs: [] }),
         stderr: "",
       },
     ]);
@@ -687,7 +823,7 @@ describe("resolvePrWatchTargets", () => {
           "-R",
           "jpnurmi/sentry-qml",
           "--json",
-          "headRefName,headRefOid,isDraft,mergedAt,state",
+          "headRefName,headRefOid,isDraft,mergedAt,state,title",
         ],
       },
     ]);
