@@ -12,8 +12,16 @@ export function renderDragGripIcon(): string {
 }
 
 export function renderWatchLeadingSlot(iconHtml: string, overlayHtml = ""): string {
+  return renderLeadingSlot("watch-leading-slot", iconHtml, overlayHtml);
+}
+
+export function renderWatchTreeLeadingSlot(iconHtml: string, overlayHtml = ""): string {
+  return renderLeadingSlot("watch-tree-leading-slot", iconHtml, overlayHtml);
+}
+
+function renderLeadingSlot(slotClassName: string, iconHtml: string, overlayHtml = ""): string {
   return `
-    <span class="watch-leading-slot">
+    <span class="${slotClassName}">
       ${iconHtml}
       ${overlayHtml}
       <span class="watch-drag-glyph" aria-hidden="true">

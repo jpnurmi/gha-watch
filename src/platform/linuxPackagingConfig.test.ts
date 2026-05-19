@@ -6,6 +6,7 @@ describe("Linux packaging configuration", () => {
   it("uses a transparent popup window so CSS can round the panel", () => {
     expect(config.app.windows[0]).toMatchObject({
       label: "main",
+      width: 460,
       transparent: true,
       backgroundColor: "#00000000",
     });

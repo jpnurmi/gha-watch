@@ -113,4 +113,19 @@ describe("createWatchNotification", () => {
   it("uses natural transition wording for queued checks", () => {
     expect(createWatchNotification(watch(), { status: "queued", conclusion: null }).body).toContain("Previously queued");
   });
+
+  it("uses skipped wording for skipped check notifications", () => {
+    expect(
+      createWatchNotification(
+        watch({
+          status: "completed:skipped",
+          lastState: { status: "completed", conclusion: "skipped" },
+        }),
+        { status: "queued", conclusion: null },
+      ),
+    ).toMatchObject({
+      body: expect.stringContaining("Skipped - This check was skipped."),
+      persistent: true,
+    });
+  });
 });

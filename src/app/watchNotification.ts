@@ -46,7 +46,13 @@ function getNotificationRepoLabel(watch: WatchRecord): string {
 }
 
 function isPersistentNotification(tone: string): boolean {
-  return tone === "success" || tone === "failure" || tone === "cancelled" || tone === "error";
+  return (
+    tone === "success" ||
+    tone === "failure" ||
+    tone === "cancelled" ||
+    tone === "skipped" ||
+    tone === "error"
+  );
 }
 
 function formatPreviousStatus(state: WatchState): string {
@@ -57,6 +63,10 @@ function formatPreviousStatus(state: WatchState): string {
 
     if (state.conclusion === "cancelled") {
       return "cancelled";
+    }
+
+    if (state.conclusion === "skipped") {
+      return "skipped";
     }
 
     return "failed";

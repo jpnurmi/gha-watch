@@ -79,6 +79,23 @@ describe("createTrayState", () => {
     });
   });
 
+  it("does not treat skipped watches as failed issues", () => {
+    expect(
+      createTrayState([
+        watch({
+          active: false,
+          status: "completed:skipped",
+          lastState: { status: "completed", conclusion: "skipped" },
+        }),
+      ]),
+    ).toEqual({
+      status: "success",
+      hasUnseenChanges: false,
+      label: "All watches complete",
+      tooltip: "GHA Watch: all watches complete",
+    });
+  });
+
   it("uses a success tray icon when all watched checks completed successfully", () => {
     expect(
       createTrayState([

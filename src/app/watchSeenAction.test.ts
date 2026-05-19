@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WatchRecord } from "../domain/watches";
-import { getClickedUnseenWatchId } from "./watchSeenAction";
+import { getClickedUnseenWatchId, getClickedUnseenWatchIds } from "./watchSeenAction";
 
 const watch: WatchRecord = {
   id: "getsentry/sentry/run/123",
@@ -27,5 +27,28 @@ describe("getClickedUnseenWatchId", () => {
     ).toBeUndefined();
     expect(getClickedUnseenWatchId([watch], "getsentry/sentry/run/missing")).toBeUndefined();
     expect(getClickedUnseenWatchId([watch], undefined)).toBeUndefined();
+  });
+
+  it("returns clicked row ids that have unseen status changes", () => {
+    expect(
+      getClickedUnseenWatchIds(
+        [
+          watch,
+          {
+            ...watch,
+            id: "getsentry/sentry/run/456",
+            lastSeenStatus: "completed:success",
+          },
+          {
+            ...watch,
+            id: "getsentry/sentry/job/789",
+            lastSeenStatus: "queued",
+            status: "completed:failure",
+          },
+        ],
+        undefined,
+        ["getsentry/sentry/run/123", "getsentry/sentry/run/456", "getsentry/sentry/job/789"],
+      ),
+    ).toEqual(["getsentry/sentry/run/123", "getsentry/sentry/job/789"]);
   });
 });

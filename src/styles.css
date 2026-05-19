@@ -315,6 +315,13 @@ input {
 }
 
 .watch-list {
+  --tree-left-padding: 4px;
+  --tree-chevron-width: 12px;
+  --tree-leading-width: 22px;
+  --tree-column-gap: 4px;
+  --tree-actions-width: 63px;
+  --repo-actions-width: 72px;
+
   display: flex;
   min-height: 0;
   flex: 1;
@@ -348,16 +355,18 @@ input {
 .watch-group-header {
   display: grid;
   min-height: 28px;
-  grid-template-columns: 22px minmax(0, 1fr) 78px;
+  grid-template-columns: var(--tree-chevron-width) var(--tree-leading-width) minmax(0, 1fr) var(
+      --repo-actions-width
+    );
   align-items: center;
-  gap: 8px;
-  padding: 4px 16px;
-  background: rgb(255 255 255 / 3%);
+  gap: var(--tree-column-gap);
+  padding: 4px 6px 4px var(--tree-left-padding);
+  background: rgb(255 255 255 / 6%);
   touch-action: none;
 }
 
 .watch-group-header:hover {
-  background: rgb(255 255 255 / 5%);
+  background: rgb(255 255 255 / 8%);
 }
 
 .watch-list.is-reordering .watch-group-header {
@@ -389,18 +398,18 @@ input {
 .watch-group-actions {
   position: relative;
   display: flex;
-  width: 78px;
+  width: var(--repo-actions-width);
   box-sizing: border-box;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  padding-right: 5px;
+  gap: 6px;
+  padding-right: 0;
 }
 
 .watch-group-star,
 .watch-group-workflow-button,
 .watch-group-pr-button,
-.watch-group-chevron {
+.watch-group-remove-button {
   display: inline-grid;
   width: 18px;
   height: 18px;
@@ -413,24 +422,50 @@ input {
   cursor: pointer;
 }
 
+.watch-group-workflow-button,
+.watch-group-pr-button,
+.watch-group-remove-button {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.watch-group-header:hover .watch-group-workflow-button,
+.watch-group-header:hover .watch-group-pr-button,
+.watch-group-header:hover .watch-group-remove-button,
+.watch-group-header:focus-within .watch-group-workflow-button,
+.watch-group-header:focus-within .watch-group-pr-button,
+.watch-group-header:focus-within .watch-group-remove-button,
+.watch-group-workflow-button[aria-expanded="true"],
+.watch-group-pr-button[aria-expanded="true"] {
+  opacity: 0.6;
+  pointer-events: auto;
+  visibility: visible;
+}
+
 .watch-group-star {
   position: relative;
-  width: 22px;
-  height: 22px;
+  width: var(--tree-leading-width);
+  height: var(--tree-leading-width);
   justify-self: center;
 }
 
 .watch-group-star:hover,
 .watch-group-workflow-button:hover,
-.watch-group-pr-button:hover,
-.watch-group-chevron:hover:not([aria-disabled="true"]) {
+.watch-group-pr-button:hover {
   background: rgb(255 255 255 / 7%);
   color: rgb(238 241 245 / 78%);
 }
 
-.watch-group-chevron[aria-disabled="true"] {
-  cursor: default;
-  opacity: 0.45;
+.watch-group-remove-button:hover,
+.watch-group-remove-button:focus-visible {
+  background: rgb(248 81 73 / 12%);
+  color: #ff7b72;
+  opacity: 1;
+}
+
+.watch-group-confirm-button {
+  min-width: 56px;
 }
 
 .watch-group-star.is-favorite {
@@ -476,12 +511,6 @@ input {
 .watch-group-drag-glyph svg {
   width: 10px;
   height: 10px;
-}
-
-.watch-group-chevron svg {
-  width: 14px;
-  height: 14px;
-  display: block;
 }
 
 .watch-group-workflow-button svg,
@@ -586,22 +615,6 @@ input {
   object-fit: cover;
 }
 
-.watch-group-action {
-  display: inline-grid;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  place-items: center;
-  justify-self: center;
-  border-radius: 5px;
-  background: rgb(255 255 255 / 7%);
-  color: rgb(238 241 245 / 62%);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  line-height: 1;
-}
-
 .watch-group-meta {
   display: flex;
   min-width: 0;
@@ -613,8 +626,9 @@ input {
   min-width: 0;
   overflow: hidden;
   flex: 0 1 auto;
-  font-size: 11px;
-  font-weight: 650;
+  color: rgb(238 241 245 / 72%);
+  font-size: 12px;
+  font-weight: 750;
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -626,26 +640,222 @@ input {
   list-style: none;
 }
 
+.watch-tree-node,
+.watch-tree-children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:is(.watch-group-list, .watch-tree-children) > :is(.watch, .watch-tree-node) {
+  border-top: 1px solid rgb(255 255 255 / 8%);
+}
+
+.watch-tree-header {
+  --watch-row-bg: #161b22;
+
+  position: relative;
+  display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 52px;
+  grid-template-columns: var(--tree-chevron-width) var(--tree-leading-width) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--tree-column-gap);
+  padding: 8px 6px 8px calc(var(--tree-left-padding) + var(--tree-indent, 0px));
+  background: var(--watch-row-bg);
+  color: inherit;
+}
+
+.watch-tree-header.has-actions {
+  grid-template-columns: var(--tree-chevron-width) var(--tree-leading-width) minmax(0, 1fr) var(
+      --tree-actions-width
+    );
+}
+
+.watch-tree-chevron,
+.watch-tree-chevron-spacer {
+  display: inline-grid;
+  width: var(--tree-chevron-width);
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.watch-tree-chevron {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: rgb(238 241 245 / 50%);
+  cursor: pointer;
+}
+
+.watch-tree-chevron:hover:not([aria-disabled="true"]),
+.watch-tree-chevron:focus-visible:not([aria-disabled="true"]) {
+  color: rgb(238 241 245 / 80%);
+}
+
+.watch-group-header:hover .watch-tree-chevron:not([aria-disabled="true"]),
+.watch-group-header:focus-within .watch-tree-chevron:not([aria-disabled="true"]),
+.watch-tree-header:hover .watch-tree-chevron:not([aria-disabled="true"]),
+.watch-tree-header:focus-within .watch-tree-chevron:not([aria-disabled="true"]) {
+  color: rgb(238 241 245 / 80%);
+}
+
+.watch-tree-chevron[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.watch-tree-chevron svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.watch-tree-leading {
+  display: inline-grid;
+  width: var(--tree-leading-width);
+  height: var(--tree-leading-width);
+  place-items: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: rgb(238 241 245 / 46%);
+  cursor: pointer;
+}
+
+.watch-tree-leading-slot {
+  position: relative;
+  display: inline-grid;
+  width: var(--tree-leading-width);
+  height: var(--tree-leading-width);
+  place-items: center;
+}
+
+.watch-tree-leading-icon {
+  width: 18px;
+  height: 18px;
+  margin-top: 0;
+}
+
+.watch-tree-header:hover {
+  --watch-row-bg: #1a2028;
+}
+
+.watch-tree-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.watch-tree-node-workflow > .watch-tree-header .watch-label {
+  color: rgb(238 241 245 / 74%);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.watch-tree-actions {
+  display: flex;
+  width: var(--tree-actions-width);
+  height: 20px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: -3px;
+  padding-right: 0;
+}
+
+.watch-tree-action-button {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  padding: 0;
+  background: transparent;
+  color: #ff7b72;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.watch-tree-header.has-actions:hover .watch-tree-action-button,
+.watch-tree-header.has-actions:focus-within .watch-tree-action-button {
+  opacity: 0.6;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.watch-tree-action-button:hover,
+.watch-tree-action-button:focus-visible {
+  background: rgb(248 81 73 / 12%);
+  color: #ff7b72;
+  opacity: 1;
+}
+
+.watch-tree-action-button.open-link-button:hover,
+.watch-tree-action-button.open-link-button:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  color: rgb(238 241 245 / 82%);
+}
+
+.watch-tree-action-button svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.watch-tree-confirm-button {
+  min-width: 56px;
+  height: 20px;
+}
+
 .watch {
   --watch-row-bg: #161b22;
 
   display: grid;
-  min-height: 62px;
-  grid-template-columns: 22px minmax(0, 1fr) 43px;
+  min-height: 52px;
+  grid-template-columns: var(--tree-leading-width) minmax(0, 1fr) var(--tree-actions-width);
   align-items: start;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: var(--tree-column-gap);
+  padding: 8px 6px 8px
+    calc(
+      var(--tree-left-padding) + var(--tree-chevron-width) + var(--tree-column-gap) +
+        var(--watch-indent, 0px)
+    );
+  background: var(--watch-row-bg);
 }
 
-.watch.is-row-dragging {
+.watch:hover {
+  --watch-row-bg: #1a2028;
+}
+
+.watch.is-row-dragging,
+.watch-tree-node.is-row-dragging > .watch-tree-header {
   opacity: 0.48;
 }
 
-.watch.is-row-drop-before {
+.watch.is-row-drop-before,
+.watch-tree-node.is-row-drop-before > .watch-tree-header {
   box-shadow: inset 0 2px 0 #58a6ff;
 }
 
-.watch.is-row-drop-after {
+.watch.is-row-drop-after,
+.watch-tree-node.is-row-drop-after > .watch-tree-header {
   box-shadow: inset 0 -2px 0 #58a6ff;
 }
 
@@ -653,11 +863,15 @@ input {
   user-select: none;
 }
 
-.watch-group-list.is-reordering-runs .watch {
+.watch-group-list.is-reordering-runs .watch,
+.watch-group-list.is-reordering-runs .watch-tree-node > .watch-tree-header,
+.watch-tree-children.is-reordering-runs .watch,
+.watch-tree-children.is-reordering-runs .watch-tree-node > .watch-tree-header {
   background: rgb(88 166 255 / 5%);
 }
 
-.watch-list.is-reordering-runs .watch.is-row-dragging .watch-drag-glyph {
+.watch-list.is-reordering-runs .watch.is-row-dragging .watch-drag-glyph,
+.watch-list.is-reordering-runs .watch-tree-node.is-row-dragging > .watch-tree-header .watch-drag-glyph {
   display: inline-grid;
 }
 
@@ -665,14 +879,8 @@ input {
   display: none;
 }
 
-.watch-group-list .watch + .watch {
-  border-top: 1px solid rgb(255 255 255 / 8%);
-}
-
-.watch:hover {
-  --watch-row-bg: rgb(36 41 47);
-
-  background: rgb(255 255 255 / 6%);
+.watch-list.is-reordering-runs .watch-tree-node.is-row-dragging > .watch-tree-header .unseen-dot {
+  display: none;
 }
 
 .status-icon,
@@ -689,8 +897,8 @@ input {
 .watch-leading-slot {
   position: relative;
   display: inline-grid;
-  width: 22px;
-  height: 22px;
+  width: var(--tree-leading-width);
+  height: var(--tree-leading-width);
   justify-self: center;
 }
 
@@ -762,7 +970,8 @@ input {
   color: #f85149;
 }
 
-.status-icon-cancelled {
+.status-icon-cancelled,
+.status-icon-skipped {
   color: #8b949e;
 }
 
@@ -813,7 +1022,7 @@ input {
   padding: 0;
   background: transparent;
   color: inherit;
-  cursor: pointer;
+  cursor: default;
   text-align: left;
 }
 
@@ -893,15 +1102,15 @@ input {
 .watch-actions {
   position: relative;
   display: flex;
-  width: 43px;
+  width: var(--tree-actions-width);
   height: 20px;
   box-sizing: border-box;
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
   justify-self: end;
-  margin-top: 2px;
-  padding-right: 5px;
+  margin-top: -2px;
+  padding-right: 0;
 }
 
 .watch.has-confirmation .watch-actions::before {
@@ -932,6 +1141,25 @@ input {
   opacity: 0.6;
 }
 
+.watch .watch-action-button.rerun-button,
+.watch .watch-action-button.open-link-button,
+.watch .watch-action-button.remove-button {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.watch:hover .watch-action-button.rerun-button,
+.watch:focus-within .watch-action-button.rerun-button,
+.watch:hover .watch-action-button.open-link-button,
+.watch:focus-within .watch-action-button.open-link-button,
+.watch:hover .watch-action-button.remove-button,
+.watch:focus-within .watch-action-button.remove-button {
+  visibility: visible;
+  opacity: 0.6;
+  pointer-events: auto;
+}
+
 .watch-action-button:hover {
   opacity: 1;
 }
@@ -946,8 +1174,24 @@ input {
   color: #d29922;
 }
 
+.open-link-button {
+  color: rgb(238 241 245 / 58%);
+}
+
 .remove-button {
-  color: #aeb6c1;
+  color: #ff7b72;
+}
+
+.watch-action-button.open-link-button:hover,
+.watch-action-button.open-link-button:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  color: rgb(238 241 245 / 82%);
+}
+
+.watch-action-button.remove-button:hover,
+.watch-action-button.remove-button:focus-visible {
+  background: rgb(248 81 73 / 12%);
+  color: #ff7b72;
 }
 
 .confirm-button {

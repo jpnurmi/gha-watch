@@ -9,6 +9,8 @@ const maskedIconPaths: Partial<Record<RowTone, string>> = {
     '<path d="m5.25 5.25 5.5 5.5m0-5.5-5.5 5.5" fill="none" stroke="#000" stroke-linecap="round" stroke-width="1.8"/>',
   cancelled:
     '<path d="m4.75 11.25 6.5-6.5" fill="none" stroke="#000" stroke-linecap="round" stroke-width="1.8"/>',
+  skipped:
+    '<path d="M4.75 8h6.5" fill="none" stroke="#000" stroke-linecap="round" stroke-width="1.8"/>',
 };
 
 export function getStatusIconSvg(tone: RowTone, idSuffix = "default"): string {

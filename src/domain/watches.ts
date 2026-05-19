@@ -1,11 +1,17 @@
-import type { CheckWatchTarget, PrWatchTarget } from "./githubUrl";
+import type { CheckWatchTarget, JobWatchTarget, PrWatchTarget, RunWatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
 
 export type PrSourceState = "draft" | "ready" | "merged" | "closed";
 
 export type PrWatchResolution = {
   targets: CheckWatchTarget[];
+  targetMetadata?: Record<string, WatchMetadata>;
   sourceState: PrSourceState;
+};
+
+export type RunWatchResolution = {
+  targets: JobWatchTarget[];
+  targetMetadata?: Record<string, WatchMetadata>;
 };
 
 export type WatchTiming = {
@@ -14,12 +20,23 @@ export type WatchTiming = {
   completedAt?: string;
 };
 
+export type WatchMetadata = {
+  prTitle?: string;
+  workflowName?: string;
+  runTitle?: string;
+  jobName?: string;
+};
+
 export type WatchRecord = {
   id: string;
   target: CheckWatchTarget;
   source?: PrWatchTarget;
+  sourceRun?: RunWatchTarget;
   sourceState?: PrSourceState;
+  ignoredTargetIds?: string[];
+  ignoredWorkflowNames?: string[];
   label: string;
+  metadata?: WatchMetadata;
   repoIconUrl?: string;
   status: string;
   lastSeenStatus?: string;
@@ -52,6 +69,10 @@ export function addWatch(
   target: CheckWatchTarget,
   source?: PrWatchTarget,
   sourceState?: PrSourceState,
+  metadata?: WatchMetadata,
+  ignoredWorkflowNames?: string[],
+  ignoredTargetIds?: string[],
+  sourceRun?: RunWatchTarget,
 ): WatchRecord[] {
   const id = getWatchId(target);
 
@@ -65,8 +86,12 @@ export function addWatch(
       id,
       target,
       ...(source ? { source } : {}),
+      ...(sourceRun ? { sourceRun } : {}),
       ...(sourceState ? { sourceState } : {}),
+      ...(ignoredTargetIds?.length ? { ignoredTargetIds } : {}),
+      ...(ignoredWorkflowNames?.length ? { ignoredWorkflowNames } : {}),
       label: getWatchLabel(target),
+      ...(metadata ? { metadata } : {}),
       status: "pending",
       lastSeenStatus: "pending",
       lastState: undefined,
@@ -86,12 +111,24 @@ export function moveWatchWithinRepo(
   targetId: string,
   position: WatchDropPosition,
 ): WatchRecord[] {
-  if (draggedId === targetId) {
+  return moveWatchGroupWithinRepo(watches, [draggedId], [targetId], position);
+}
+
+export function moveWatchGroupWithinRepo(
+  watches: WatchRecord[],
+  draggedIds: string[],
+  targetIds: string[],
+  position: WatchDropPosition,
+): WatchRecord[] {
+  const draggedIdSet = toNonEmptyIdSet(draggedIds);
+  const targetIdSet = toNonEmptyIdSet(targetIds);
+
+  if (!draggedIdSet || !targetIdSet || setsOverlap(draggedIdSet, targetIdSet)) {
     return watches;
   }
 
-  const draggedWatch = watches.find((watch) => watch.id === draggedId);
-  const targetWatch = watches.find((watch) => watch.id === targetId);
+  const draggedWatch = watches.find((watch) => draggedIdSet.has(watch.id));
+  const targetWatch = watches.find((watch) => targetIdSet.has(watch.id));
 
   if (!draggedWatch || !targetWatch || !isSameWatchRepo(draggedWatch, targetWatch)) {
     return watches;
@@ -107,7 +144,11 @@ export function moveWatchWithinRepo(
     }
   });
 
-  const reorderedRepoWatches = moveWatchInList(repoWatches, draggedId, targetId, position);
+  if (!allIdsAreInRepo(draggedIdSet, repoWatches) || !allIdsAreInRepo(targetIdSet, repoWatches)) {
+    return watches;
+  }
+
+  const reorderedRepoWatches = moveWatchGroupInList(repoWatches, draggedIdSet, targetIdSet, position);
 
   if (reorderedRepoWatches === repoWatches) {
     return watches;
@@ -146,28 +187,53 @@ export function hasUnseenStatusChange(watch: WatchRecord): boolean {
   return Boolean(watch.lastSeenStatus && watch.status !== watch.lastSeenStatus);
 }
 
-function moveWatchInList(
+function moveWatchGroupInList(
   watches: WatchRecord[],
-  draggedId: string,
-  targetId: string,
+  draggedIdSet: Set<string>,
+  targetIdSet: Set<string>,
   position: WatchDropPosition,
 ): WatchRecord[] {
-  const draggedWatch = watches.find((watch) => watch.id === draggedId);
-  const targetIndex = watches.findIndex((watch) => watch.id === targetId);
+  const draggedWatches = watches.filter((watch) => draggedIdSet.has(watch.id));
+  const nextWatches = watches.filter((watch) => !draggedIdSet.has(watch.id));
+  const targetIndexes = nextWatches
+    .map((watch, index) => (targetIdSet.has(watch.id) ? index : undefined))
+    .filter((index): index is number => index !== undefined);
 
-  if (!draggedWatch || targetIndex === -1) {
+  if (draggedWatches.length !== draggedIdSet.size || targetIndexes.length !== targetIdSet.size) {
     return watches;
   }
 
-  const nextWatches = watches.filter((watch) => watch.id !== draggedId);
-  const nextTargetIndex = nextWatches.findIndex((watch) => watch.id === targetId);
-
-  if (nextTargetIndex === -1) {
-    return watches;
-  }
-
-  nextWatches.splice(position === "after" ? nextTargetIndex + 1 : nextTargetIndex, 0, draggedWatch);
+  const insertionIndex =
+    position === "after" ? Math.max(...targetIndexes) + 1 : Math.min(...targetIndexes);
+  nextWatches.splice(insertionIndex, 0, ...draggedWatches);
   return watchIdsAreEqual(nextWatches, watches) ? watches : nextWatches;
+}
+
+function toNonEmptyIdSet(ids: string[]): Set<string> | undefined {
+  const cleanIds = ids.map((id) => id.trim()).filter((id) => id.length > 0);
+  return cleanIds.length > 0 ? new Set(cleanIds) : undefined;
+}
+
+function setsOverlap(left: Set<string>, right: Set<string>): boolean {
+  for (const item of left) {
+    if (right.has(item)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function allIdsAreInRepo(ids: Set<string>, repoWatches: WatchRecord[]): boolean {
+  const repoIds = new Set(repoWatches.map((watch) => watch.id));
+
+  for (const id of ids) {
+    if (!repoIds.has(id)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function isSameWatchRepo(left: WatchRecord, right: WatchRecord): boolean {

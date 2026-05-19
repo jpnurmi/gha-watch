@@ -1,4 +1,4 @@
-export const popupWidth = 420;
+export const popupWidth = 460;
 export const popupMinHeight = 360;
 export const popupMaxHeight = 560;
 
