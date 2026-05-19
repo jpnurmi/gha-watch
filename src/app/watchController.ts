@@ -19,8 +19,11 @@ import type { WatchSnapshot } from "../platform/gh";
 import type { ActiveWorkflowRun, OpenPullRequest } from "../platform/gh";
 import {
   createPullRequestNotification,
+  createWorkflowNotification,
   createWatchNotification,
   getPullRequestNotificationId,
+  getPullRequestNotificationStatus,
+  getWorkflowNotificationStatus,
   type WatchNotification,
 } from "./watchNotification";
 
@@ -566,9 +569,13 @@ export function createWatchController(
     async pollNow() {
       await refreshPrSourceWatches();
       await refreshRunSourceWatches();
+      const previousWatches = watches;
       const activeWatches = watches.filter((watch) => watch.active);
+      const notificationTime = deps.now?.() ?? new Date();
       const rowNotifications: WatchNotification[] = [];
       const changedPrSources = new Map<string, PrWatchTarget>();
+      const changedRunSources = new Map<string, RunWatchTarget>();
+      const rowNotificationRunSources = new Set<string>();
 
       for (const watch of activeWatches) {
         const snapshot = await deps.fetchState(watch.target);
@@ -610,8 +617,15 @@ export function createWatchController(
           continue;
         }
 
-        if (!watch.sourceRun) {
-          rowNotifications.push(createWatchNotification(changedWatch, watch.lastState, deps.now?.() ?? new Date()));
+        if (watch.sourceRun) {
+          changedRunSources.set(getRunSourceKey(watch.sourceRun), watch.sourceRun);
+          continue;
+        }
+
+        rowNotifications.push(createWatchNotification(changedWatch, watch.lastState, notificationTime));
+
+        if (watch.target.kind === "run") {
+          rowNotificationRunSources.add(getRunSourceKey(watch.target));
         }
       }
 
@@ -620,10 +634,40 @@ export function createWatchController(
       }
 
       for (const source of changedPrSources.values()) {
+        if (
+          getPullRequestNotificationStatus(source, watchesForSource(previousWatches, source), notificationTime) ===
+          getPullRequestNotificationStatus(source, watchesForSource(watches, source), notificationTime)
+        ) {
+          continue;
+        }
+
         const notification = createPullRequestNotification(
           source,
-          watches.filter((watch) => isSamePrSource(watch.source, source)),
-          deps.now?.() ?? new Date(),
+          watchesForSource(watches, source),
+          notificationTime,
+        );
+
+        if (notification) {
+          await deps.notify(notification);
+        }
+      }
+
+      for (const sourceRun of changedRunSources.values()) {
+        if (rowNotificationRunSources.has(getRunSourceKey(sourceRun))) {
+          continue;
+        }
+
+        if (
+          getWorkflowNotificationStatus(sourceRun, watchesForRunSource(previousWatches, sourceRun), notificationTime) ===
+          getWorkflowNotificationStatus(sourceRun, watchesForRunSource(watches, sourceRun), notificationTime)
+        ) {
+          continue;
+        }
+
+        const notification = createWorkflowNotification(
+          sourceRun,
+          watchesForRunSource(watches, sourceRun),
+          notificationTime,
         );
 
         if (notification) {
@@ -694,6 +738,10 @@ function getIgnoredRunTargetIds(watches: WatchRecord[], sourceRun: RunWatchTarge
 
 function watchesForSource(watches: WatchRecord[], source: PrWatchTarget): WatchRecord[] {
   return watches.filter((watch) => isSamePrSource(watch.source, source));
+}
+
+function watchesForRunSource(watches: WatchRecord[], sourceRun: RunWatchTarget): WatchRecord[] {
+  return watches.filter((watch) => isDirectRunWatch(watch, sourceRun) || isSameRunSource(watch.sourceRun, sourceRun));
 }
 
 function getWatchWorkflowName(watch: WatchRecord): string | undefined {

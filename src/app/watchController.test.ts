@@ -876,6 +876,105 @@ describe("watchController", () => {
     ]);
   });
 
+  it("does not notify PR-sourced child changes when the PR status is unchanged", async () => {
+    const linuxJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "789",
+      jobId: "456",
+      prNumber: "51",
+      url: "https://github.com/getsentry/sentry/actions/runs/789/job/456",
+    };
+    const windowsJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "789",
+      jobId: "789",
+      prNumber: "51",
+      url: "https://github.com/getsentry/sentry/actions/runs/789/job/789",
+    };
+    const { deps, notificationRecords } = createDeps(
+      [
+        {
+          status: "completed",
+          conclusion: "success",
+          title: "CI: Linux",
+          metadata: { workflowName: "CI", jobName: "Linux" },
+          prNumber: "51",
+          url: linuxJobTarget.url,
+        },
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: Windows",
+          metadata: { workflowName: "CI", jobName: "Windows" },
+          prNumber: "51",
+          url: windowsJobTarget.url,
+        },
+      ],
+      [
+        {
+          targets: [linuxJobTarget, windowsJobTarget],
+          targetMetadata: {
+            [getWatchId(linuxJobTarget)]: {
+              prTitle: "Fix flaky CI",
+              workflowName: "CI",
+              jobName: "Linux",
+            },
+            [getWatchId(windowsJobTarget)]: {
+              prTitle: "Fix flaky CI",
+              workflowName: "CI",
+              jobName: "Windows",
+            },
+          },
+          sourceState: "ready",
+        },
+      ],
+    );
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry/job/456",
+        target: linuxJobTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "CI: Linux",
+        metadata: {
+          prTitle: "Fix flaky CI",
+          workflowName: "CI",
+          jobName: "Linux",
+        },
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+        error: undefined,
+      },
+      {
+        id: "getsentry/sentry/job/789",
+        target: windowsJobTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "CI: Windows",
+        metadata: {
+          prTitle: "Fix flaky CI",
+          workflowName: "CI",
+          jobName: "Windows",
+        },
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+        error: undefined,
+      },
+    ]);
+
+    await controller.pollNow();
+
+    expect(notificationRecords).toEqual([]);
+  });
+
   it("emits one pull-request notification for PR-sourced child status changes", async () => {
     const linuxJobTarget: JobWatchTarget = {
       kind: "job",
@@ -1043,6 +1142,76 @@ describe("watchController", () => {
     await controller.pollNow();
 
     expect(notificationRecords).toEqual([]);
+  });
+
+  it("emits one workflow notification for workflow-owned child changes that change the workflow status", async () => {
+    const linuxJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      jobId: "456",
+      url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+    };
+    const { deps, notificationRecords } = createDeps(
+      [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: Fix tests",
+          metadata: { workflowName: "CI", runTitle: "Fix tests" },
+          url: runTarget.url,
+        },
+        {
+          status: "completed",
+          conclusion: "failure",
+          title: "CI: Linux",
+          metadata: { workflowName: "CI", jobName: "Linux" },
+          url: linuxJobTarget.url,
+        },
+      ],
+      [],
+      [{ targets: [linuxJobTarget] }],
+    );
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry/run/123",
+        target: runTarget,
+        label: "CI: Fix tests",
+        metadata: { workflowName: "CI", runTitle: "Fix tests" },
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+        error: undefined,
+      },
+      {
+        id: "getsentry/sentry/job/456",
+        target: linuxJobTarget,
+        sourceRun: runTarget,
+        label: "CI: Linux",
+        metadata: { workflowName: "CI", jobName: "Linux" },
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+        error: undefined,
+      },
+    ]);
+
+    await controller.pollNow();
+
+    expect(notificationRecords).toEqual([
+      expect.objectContaining({
+        watchId: "getsentry/sentry/run/123",
+        title: "CI: Fix tests",
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
+        body: "getsentry/sentry\nFailed - 1 check",
+        summary: "getsentry/sentry",
+        group: "getsentry/sentry",
+        persistent: true,
+      }),
+    ]);
   });
 
   it("still notifies status changes for directly watched jobs", async () => {
