@@ -109,6 +109,7 @@ type PrViewResponse = {
 };
 
 type RunListResponse = {
+  attempt?: number | string;
   databaseId?: number | string;
   event?: string;
   headSha?: string;
@@ -282,7 +283,7 @@ export async function resolvePrWatchTargets(
       "--limit",
       "50",
       "--json",
-      "databaseId,event,headSha,url,workflowName",
+      "attempt,databaseId,event,headSha,url,workflowName",
     ]);
     assertSuccessfulGhResult(runsResult);
 
@@ -300,7 +301,13 @@ export async function resolvePrWatchTargets(
         continue;
       }
 
-      const jobs = await resolvePrRunJobTargets(runTarget, run.workflowName, prTitle, executor);
+      const jobs = await resolvePrRunJobTargets(
+        runTarget,
+        run.workflowName,
+        prTitle,
+        executor,
+        getRunAttempt(run.attempt),
+      );
 
       if (jobs.length > 0) {
         for (const { target: jobTarget, metadata } of jobs) {
@@ -441,9 +448,15 @@ async function resolvePrRunJobTargets(
   workflowName: string | undefined,
   prTitle: string | undefined,
   executor: ShellExecutor,
+  runAttempt?: string,
 ): Promise<Array<{ target: JobWatchTarget; metadata?: WatchMetadata }>> {
   try {
-    const resolution = await resolveRunJobTargets(runTarget, executor, { prTitle, workflowName });
+    const resolution = await resolveRunJobTargets(
+      runTarget,
+      executor,
+      { prTitle, workflowName },
+      runAttempt,
+    );
 
     return resolution.targets.map((target) => ({
       target,
@@ -460,10 +473,11 @@ async function resolveRunJobTargets(
   runTarget: RunWatchTarget,
   executor: ShellExecutor,
   metadataDefaults: Pick<WatchMetadata, "prTitle" | "workflowName"> = {},
+  runAttempt?: string,
 ): Promise<RunWatchResolution> {
   const result = await executor.execute("gh", [
     "api",
-    `repos/${runTarget.owner}/${runTarget.repo}/actions/runs/${runTarget.runId}/jobs?per_page=100`,
+    getRunJobsPath(runTarget, runAttempt),
   ]);
 
   assertSuccessfulGhResult(result);
@@ -527,6 +541,20 @@ function getRunDatabaseId(value: number | string | undefined): string | undefine
   }
 
   return undefined;
+}
+
+function getRunAttempt(value: number | string | undefined): string | undefined {
+  return getRunDatabaseId(value);
+}
+
+function getRunJobsPath(runTarget: RunWatchTarget, runAttempt: string | undefined): string {
+  const runPath = `repos/${runTarget.owner}/${runTarget.repo}/actions/runs/${runTarget.runId}`;
+
+  if (runAttempt) {
+    return `${runPath}/attempts/${runAttempt}/jobs?per_page=100`;
+  }
+
+  return `${runPath}/jobs?filter=latest&per_page=100`;
 }
 
 export async function rerunFailedWatch(
