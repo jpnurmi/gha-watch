@@ -1,3 +1,4 @@
+import type { PrWatchTarget } from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
 import type { WatchRecord } from "../domain/watches";
 import { createPopupViewModel } from "./viewModel";
@@ -40,9 +41,48 @@ export function createWatchNotification(
   };
 }
 
+export function createPullRequestNotification(
+  source: PrWatchTarget,
+  sourceWatches: WatchRecord[],
+  now = new Date(),
+): WatchNotification | undefined {
+  const repoLabel = `${source.owner}/${source.repo}`;
+  const summary = `${repoLabel} #${source.prNumber}`;
+  const node = createPopupViewModel(sourceWatches, now)
+    .groups.find((group) => group.repoLabel === repoLabel)
+    ?.tree.find((item) => item.kind === "pull-request" && item.referenceLabel === `#${source.prNumber}`);
+
+  if (!node) {
+    return undefined;
+  }
+
+  const statusLine = [node.statusLabel, node.detailLabel].filter(isString).join(" - ");
+  const body = [summary, statusLine, node.timingText].filter(isString).join("\n");
+
+  return {
+    watchId: getPullRequestNotificationId(source),
+    title: getPullRequestNotificationTitle(source, node.label),
+    url: source.url,
+    body,
+    largeBody: body,
+    persistent: isPersistentNotification(node.tone),
+    summary,
+    group: summary,
+  };
+}
+
+export function getPullRequestNotificationId(source: PrWatchTarget): string {
+  return `${source.owner}/${source.repo}/pull/${source.prNumber}`;
+}
+
 function getNotificationRepoLabel(watch: WatchRecord): string {
   const repoLabel = `${watch.target.owner}/${watch.target.repo}`;
   return watch.target.prNumber ? `${repoLabel} #${watch.target.prNumber}` : repoLabel;
+}
+
+function getPullRequestNotificationTitle(source: PrWatchTarget, label: string): string {
+  const reference = `#${source.prNumber}`;
+  return label && label !== "Pull request" ? `${reference}: ${label}` : reference;
 }
 
 function isPersistentNotification(tone: string): boolean {
