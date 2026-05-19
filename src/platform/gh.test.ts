@@ -292,7 +292,7 @@ describe("resolveRunWatchTargets", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: ["api", "repos/getsentry/sentry/actions/runs/123/jobs?per_page=100"],
+        args: ["api", "repos/getsentry/sentry/actions/runs/123/jobs?filter=latest&per_page=100"],
       },
     ]);
   });
@@ -593,6 +593,7 @@ describe("resolvePrWatchTargets", () => {
         code: 0,
         stdout: JSON.stringify([
           {
+            attempt: 2,
             databaseId: 101,
             event: "pull_request",
             headSha: "abc123",
@@ -600,6 +601,7 @@ describe("resolvePrWatchTargets", () => {
             workflowName: "CI",
           },
           {
+            attempt: 1,
             databaseId: 102,
             event: "pull_request",
             headSha: "abc123",
@@ -717,16 +719,16 @@ describe("resolvePrWatchTargets", () => {
           "--limit",
           "50",
           "--json",
-          "databaseId,event,headSha,url,workflowName",
+          "attempt,databaseId,event,headSha,url,workflowName",
         ],
       },
       {
         program: "gh",
-        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/101/jobs?per_page=100"],
+        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/101/attempts/2/jobs?per_page=100"],
       },
       {
         program: "gh",
-        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/102/jobs?per_page=100"],
+        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/102/attempts/1/jobs?per_page=100"],
       },
     ]);
   });

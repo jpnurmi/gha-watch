@@ -1225,6 +1225,164 @@ describe("watchController", () => {
     expect(controller.getWatches()).toEqual([]);
   });
 
+  it("replaces stale failed PR jobs with rerun jobs from the latest run attempt", async () => {
+    const oldJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "789",
+      prNumber: "51",
+      jobId: "456",
+      url: "https://github.com/getsentry/sentry/actions/runs/789/job/456",
+    };
+    const rerunJobTarget: JobWatchTarget = {
+      ...oldJobTarget,
+      jobId: "654",
+      url: "https://github.com/getsentry/sentry/actions/runs/789/job/654",
+    };
+    const { deps, fetches } = createDeps(
+      [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: macOS",
+          metadata: {
+            prTitle: "Fix flaky CI",
+            workflowName: "CI",
+            jobName: "macOS",
+          },
+          prNumber: "51",
+          url: rerunJobTarget.url,
+        },
+      ],
+      [
+        {
+          sourceState: "ready",
+          targets: [rerunJobTarget],
+          targetMetadata: {
+            [getWatchId(rerunJobTarget)]: {
+              prTitle: "Fix flaky CI",
+              workflowName: "CI",
+              jobName: "macOS",
+            },
+          },
+        },
+      ],
+    );
+    const controller = createWatchController(deps, [
+      {
+        id: getWatchId(oldJobTarget),
+        target: oldJobTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "CI: macOS",
+        metadata: {
+          prTitle: "Fix flaky CI",
+          workflowName: "CI",
+          jobName: "macOS",
+        },
+        status: "completed:failure",
+        lastSeenStatus: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    await controller.pollNow();
+
+    expect(fetches).toEqual([rerunJobTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: getWatchId(rerunJobTarget),
+        target: rerunJobTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "CI: macOS",
+        metadata: {
+          prTitle: "Fix flaky CI",
+          workflowName: "CI",
+          jobName: "macOS",
+        },
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+    ]);
+  });
+
+  it("rechecks stale failed PR jobs when the latest run attempt keeps the same job id", async () => {
+    const prJobTarget: JobWatchTarget = {
+      kind: "job",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "789",
+      prNumber: "51",
+      jobId: "456",
+      url: "https://github.com/getsentry/sentry/actions/runs/789/job/456",
+    };
+    const { deps, fetches } = createDeps(
+      [
+        {
+          status: "in_progress",
+          conclusion: null,
+          title: "CI: macOS",
+          metadata: {
+            prTitle: "Fix flaky CI",
+            workflowName: "CI",
+            jobName: "macOS",
+          },
+          prNumber: "51",
+          url: prJobTarget.url,
+        },
+      ],
+      [
+        {
+          sourceState: "ready",
+          targets: [prJobTarget],
+          targetMetadata: {
+            [getWatchId(prJobTarget)]: {
+              prTitle: "Fix flaky CI",
+              workflowName: "CI",
+              jobName: "macOS",
+            },
+          },
+        },
+      ],
+    );
+    const controller = createWatchController(deps, [
+      {
+        id: getWatchId(prJobTarget),
+        target: prJobTarget,
+        source: prTarget,
+        sourceState: "ready",
+        label: "CI: macOS",
+        metadata: {
+          prTitle: "Fix flaky CI",
+          workflowName: "CI",
+          jobName: "macOS",
+        },
+        status: "completed:failure",
+        lastSeenStatus: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    await controller.pollNow();
+
+    expect(fetches).toEqual([prJobTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: getWatchId(prJobTarget),
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+    ]);
+  });
+
   it("hides one direct workflow job while keeping the remaining jobs attached to the workflow", async () => {
     const linuxJobTarget: JobWatchTarget = {
       kind: "job",

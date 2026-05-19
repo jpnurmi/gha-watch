@@ -272,7 +272,14 @@ export function createWatchController(
         next = next.map((watch) =>
           watch.id === id
             ? withIgnoredPrExclusions(
-                { ...watch, target, source, sourceState, ...(metadata ? { metadata } : {}) },
+                {
+                  ...watch,
+                  target,
+                  source,
+                  sourceState,
+                  ...(metadata ? { metadata } : {}),
+                  ...(shouldRecheckResolvedPrWatch(watch) ? { active: true, error: undefined } : {}),
+                },
                 ignoredWorkflowNames,
                 ignoredTargetIds,
               )
@@ -699,6 +706,17 @@ function getWatchWorkflowName(watch: WatchRecord): string | undefined {
   const separatorIndex = watch.label.indexOf(": ");
 
   return (separatorIndex > 0 ? watch.label.slice(0, separatorIndex) : watch.label).trim() || undefined;
+}
+
+function shouldRecheckResolvedPrWatch(watch: WatchRecord): boolean {
+  return (
+    Boolean(watch.source) &&
+    !watch.active &&
+    watch.lastState?.status === "completed" &&
+    watch.lastState.conclusion !== "success" &&
+    watch.lastState.conclusion !== "cancelled" &&
+    watch.lastState.conclusion !== "skipped"
+  );
 }
 
 function getWorkflowNameFromMetadata(metadata: WatchRecord["metadata"]): string | undefined {
