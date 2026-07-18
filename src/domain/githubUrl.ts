@@ -33,7 +33,8 @@ export type RepoTarget = {
 };
 
 export type CheckWatchTarget = RunWatchTarget | JobWatchTarget;
-export type ParsedWatchTarget = CheckWatchTarget | PrWatchTarget;
+export type WatchTarget = CheckWatchTarget | PrWatchTarget;
+export type ParsedWatchTarget = WatchTarget;
 export type ParsedGitHubTarget = ParsedWatchTarget | RepoTarget;
 
 export type ParseGitHubActionsUrlOptions = {

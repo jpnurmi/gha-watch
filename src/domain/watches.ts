@@ -1,18 +1,7 @@
-import type { CheckWatchTarget, JobWatchTarget, PrWatchTarget, RunWatchTarget } from "./githubUrl";
+import type { PrWatchTarget, RunWatchTarget, WatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
 
 export type PrSourceState = "draft" | "ready" | "merged" | "closed";
-
-export type PrWatchResolution = {
-  targets: CheckWatchTarget[];
-  targetMetadata?: Record<string, WatchMetadata>;
-  sourceState: PrSourceState;
-};
-
-export type RunWatchResolution = {
-  targets: JobWatchTarget[];
-  targetMetadata?: Record<string, WatchMetadata>;
-};
 
 export type WatchTiming = {
   queuedAt?: string;
@@ -29,7 +18,7 @@ export type WatchMetadata = {
 
 export type WatchRecord = {
   id: string;
-  target: CheckWatchTarget;
+  target: WatchTarget;
   source?: PrWatchTarget;
   sourceRun?: RunWatchTarget;
   sourceState?: PrSourceState;
@@ -48,7 +37,11 @@ export type WatchRecord = {
 
 export type WatchDropPosition = "before" | "after";
 
-export function getWatchId(target: CheckWatchTarget): string {
+export function getWatchId(target: WatchTarget): string {
+  if (target.kind === "pr") {
+    return `${target.owner}/${target.repo}/pull/${target.prNumber}`;
+  }
+
   if (target.kind === "run") {
     return `${target.owner}/${target.repo}/run/${target.runId}`;
   }
@@ -56,7 +49,11 @@ export function getWatchId(target: CheckWatchTarget): string {
   return `${target.owner}/${target.repo}/job/${target.jobId}`;
 }
 
-export function getWatchLabel(target: CheckWatchTarget): string {
+export function getWatchLabel(target: WatchTarget): string {
+  if (target.kind === "pr") {
+    return `${target.owner}/${target.repo}#${target.prNumber}`;
+  }
+
   if (target.kind === "run") {
     return `${target.owner}/${target.repo}#${target.runId}`;
   }
@@ -66,7 +63,7 @@ export function getWatchLabel(target: CheckWatchTarget): string {
 
 export function addWatch(
   watches: WatchRecord[],
-  target: CheckWatchTarget,
+  target: WatchTarget,
   source?: PrWatchTarget,
   sourceState?: PrSourceState,
   metadata?: WatchMetadata,
