@@ -313,7 +313,7 @@ export function createWatchController(
           continue;
         }
 
-        rowNotifications.push(createWatchNotification(changedWatch, watch.lastState, notificationTime));
+        rowNotifications.push(createWatchNotification(changedWatch, notificationTime));
       }
 
       if (deps.notificationsPaused?.()) {

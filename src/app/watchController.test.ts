@@ -448,7 +448,7 @@ describe("watchController", () => {
     expect(notifications).toEqual([]);
   });
 
-  it("notifies only when a watched status changes", async () => {
+  it("does not notify when a watched status changes to in progress", async () => {
     const { deps, notifications } = createDeps([
       {
         status: "queued",
@@ -468,9 +468,7 @@ describe("watchController", () => {
     await controller.add(runTarget);
     await controller.pollNow();
 
-    expect(notifications).toEqual([
-      "CI: tests: getsentry/sentry\nIn progress - This check has started...\nPreviously queued",
-    ]);
+    expect(notifications).toEqual([]);
   });
 
   it("does not notify status changes while notifications are paused", async () => {
@@ -544,13 +542,11 @@ describe("watchController", () => {
         body:
           "getsentry/sentry\n" +
           "Successful - This check was successful.\n" +
-          "Completed 1m ago · 7m\n" +
-          "Previously in progress",
+          "Completed 1m ago · 7m",
         largeBody:
           "getsentry/sentry\n" +
           "Successful - This check was successful.\n" +
-          "Completed 1m ago · 7m\n" +
-          "Previously in progress",
+          "Completed 1m ago · 7m",
         persistent: true,
         summary: "getsentry/sentry",
         group: "getsentry/sentry",

@@ -11,7 +11,7 @@ describe("getStatusTransition", () => {
     ).toEqual({ changed: false, notify: false });
   });
 
-  it("notifies when a run starts progressing", () => {
+  it("tracks but does not notify when a run starts progressing", () => {
     expect(
       getStatusTransition(
         { status: "queued", conclusion: null },
@@ -19,8 +19,7 @@ describe("getStatusTransition", () => {
       ),
     ).toEqual({
       changed: true,
-      notify: true,
-      message: "queued -> in_progress",
+      notify: false,
     });
   });
 
@@ -33,7 +32,30 @@ describe("getStatusTransition", () => {
     ).toEqual({
       changed: true,
       notify: true,
-      message: "in_progress -> completed:success",
+    });
+  });
+
+  it("notifies when a run completes unsuccessfully", () => {
+    expect(
+      getStatusTransition(
+        { status: "in_progress", conclusion: null },
+        { status: "completed", conclusion: "failure" },
+      ),
+    ).toEqual({
+      changed: true,
+      notify: true,
+    });
+  });
+
+  it.each(["cancelled", "skipped"] as const)("does not notify for %s conclusions", (conclusion) => {
+    expect(
+      getStatusTransition(
+        { status: "in_progress", conclusion: null },
+        { status: "completed", conclusion },
+      ),
+    ).toEqual({
+      changed: true,
+      notify: false,
     });
   });
 

@@ -10,8 +10,7 @@ export type StatusTransition =
     }
   | {
       changed: true;
-      notify: true;
-      message: string;
+      notify: boolean;
     };
 
 export function formatWatchState(state: WatchState): string {
@@ -39,11 +38,22 @@ export function getStatusTransition(
 
   return {
     changed: true,
-    notify: true,
-    message: `${previousLabel} -> ${nextLabel}`,
+    notify: isInterestingNotificationState(next),
   };
 }
 
 export function isTerminalStatus(state: WatchState): boolean {
   return state.status === "completed";
+}
+
+function isInterestingNotificationState(state: WatchState): boolean {
+  if (state.status !== "completed") {
+    return false;
+  }
+
+  return state.conclusion === "success" || isFailureConclusion(state.conclusion);
+}
+
+function isFailureConclusion(conclusion: string | null): boolean {
+  return Boolean(conclusion && conclusion !== "cancelled" && conclusion !== "skipped");
 }
