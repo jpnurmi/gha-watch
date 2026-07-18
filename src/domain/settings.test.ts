@@ -4,7 +4,7 @@ import { defaultAppSettings, normalizeAppSettings } from "./settings";
 describe("normalizeAppSettings", () => {
   it("includes favorite repos in default settings", () => {
     expect(defaultAppSettings).toEqual({
-      autoClearMergedPrWatches: false,
+      autoClearFinishedWatches: false,
       favoriteRepos: [],
       repoOrder: [],
     });
@@ -13,7 +13,7 @@ describe("normalizeAppSettings", () => {
   it("normalizes favorite repos from saved settings", () => {
     expect(
       normalizeAppSettings({
-        autoClearMergedPrWatches: true,
+        autoClearFinishedWatches: true,
         favoriteRepos: [
           { owner: "getsentry", repo: "sentry" },
           { owner: "getsentry", repo: "sentry" },
@@ -27,12 +27,22 @@ describe("normalizeAppSettings", () => {
         ],
       }),
     ).toEqual({
-      autoClearMergedPrWatches: true,
+      autoClearFinishedWatches: true,
       favoriteRepos: [
         { owner: "getsentry", repo: "sentry" },
         { owner: "jpnurmi", repo: "gha-watch" },
       ],
       repoOrder: ["jpnurmi/gha-watch", "getsentry/sentry"],
+    });
+  });
+
+  it("keeps reading the old auto-clear setting key", () => {
+    expect(
+      normalizeAppSettings({
+        autoClearMergedPrWatches: true,
+      }),
+    ).toMatchObject({
+      autoClearFinishedWatches: true,
     });
   });
 });

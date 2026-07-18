@@ -684,6 +684,37 @@ describe("watchController", () => {
     ]);
   });
 
+  it("auto-clears completed watches after polling when auto-clear is enabled", async () => {
+    const { deps, notificationRecords } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [], {
+      autoClearFinishedWatches: true,
+    });
+
+    await controller.add(runTarget);
+    await controller.pollNow();
+
+    expect(notificationRecords).toMatchObject([
+      {
+        watchId: "getsentry/sentry/run/123",
+        title: "CI: tests",
+      },
+    ]);
+    expect(controller.getWatches()).toEqual([]);
+  });
+
   it("marks a status change seen when requested", async () => {
     const { deps } = createDeps([
       {

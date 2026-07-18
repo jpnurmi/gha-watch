@@ -1,6 +1,6 @@
 export type OverflowMenuItem =
   | {
-      action: "toggle-auto-clear-merged-prs" | "toggle-autostart";
+      action: "toggle-auto-clear-finished" | "toggle-autostart";
       checked: boolean;
       checkbox: "checked" | "empty";
       disabled: boolean;
@@ -15,7 +15,7 @@ export type OverflowMenuItem =
     };
 
 export type OverflowMenuOptions = {
-  autoClearMergedPrWatches: boolean;
+  autoClearFinishedWatches: boolean;
   autoStartEnabled: boolean;
   autoStartBusy: boolean;
   hasWatches: boolean;
@@ -37,9 +37,9 @@ export function getOverflowMenuItems(options: OverflowMenuOptions): OverflowMenu
       label: "Clear finished",
     },
     {
-      action: "toggle-auto-clear-merged-prs",
-      checked: options.autoClearMergedPrWatches,
-      checkbox: options.autoClearMergedPrWatches ? "checked" : "empty",
+      action: "toggle-auto-clear-finished",
+      checked: options.autoClearFinishedWatches,
+      checkbox: options.autoClearFinishedWatches ? "checked" : "empty",
       disabled: false,
       kind: "checkbox",
       label: "Auto-clear",

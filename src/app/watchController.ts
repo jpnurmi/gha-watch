@@ -18,7 +18,7 @@ import type { ActiveWorkflowRun, OpenPullRequest } from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
 export type WatchControllerOptions = {
-  autoClearMergedPrWatches?: boolean;
+  autoClearFinishedWatches?: boolean;
 };
 
 export type WatchControllerDeps = {
@@ -147,6 +147,18 @@ export function createWatchController(
 
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
     await addWatchTarget(source, "ready");
+  }
+
+  function applyAutoClearFinishedWatches(): void {
+    if (!options.autoClearFinishedWatches) {
+      return;
+    }
+
+    const nextWatches = watches.filter((watch) => watch.active);
+
+    if (nextWatches.length !== watches.length) {
+      setWatches(nextWatches);
+    }
   }
 
   return {
@@ -317,12 +329,15 @@ export function createWatchController(
       }
 
       if (deps.notificationsPaused?.()) {
+        applyAutoClearFinishedWatches();
         return;
       }
 
       for (const notification of rowNotifications) {
         await deps.notify(notification);
       }
+
+      applyAutoClearFinishedWatches();
     },
 
     getWatches() {
