@@ -203,7 +203,7 @@ const controller = createWatchController(
   },
   loadInitialWatches(),
   {
-    autoClearMergedPrWatches: settings.autoClearMergedPrWatches,
+    autoClearFinishedWatches: settings.autoClearFinishedWatches,
   },
 );
 
@@ -1264,15 +1264,15 @@ function bindEvents(): void {
     },
   );
 
-  app.querySelector<HTMLButtonElement>('[data-action="toggle-auto-clear-merged-prs"]')?.addEventListener(
+  app.querySelector<HTMLButtonElement>('[data-action="toggle-auto-clear-finished"]')?.addEventListener(
     "click",
     () => {
       settings = {
         ...settings,
-        autoClearMergedPrWatches: !settings.autoClearMergedPrWatches,
+        autoClearFinishedWatches: !settings.autoClearFinishedWatches,
       };
       controller.setOptions({
-        autoClearMergedPrWatches: settings.autoClearMergedPrWatches,
+        autoClearFinishedWatches: settings.autoClearFinishedWatches,
       });
       isClearMenuOpen = false;
       void saveSettings(settings);
@@ -1416,7 +1416,7 @@ function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): stri
   return `
     <div class="clear-menu-popover" role="menu">
       ${getOverflowMenuItems({
-        autoClearMergedPrWatches: settings.autoClearMergedPrWatches,
+        autoClearFinishedWatches: settings.autoClearFinishedWatches,
         autoStartEnabled,
         autoStartBusy,
         hasWatches,

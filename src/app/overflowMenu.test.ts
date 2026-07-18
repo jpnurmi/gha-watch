@@ -5,19 +5,19 @@ describe("getOverflowMenuItems", () => {
   it("places clear actions before lower-frequency settings", () => {
     expect(
       getOverflowMenuItems({
-        autoClearMergedPrWatches: true,
+        autoClearFinishedWatches: true,
         autoStartEnabled: true,
         autoStartBusy: false,
         hasWatches: true,
         hasFinishedWatches: true,
       }).map((item) => item.action),
-    ).toEqual(["clear-all", "clear-finished", "toggle-auto-clear-merged-prs", "toggle-autostart"]);
+    ).toEqual(["clear-all", "clear-finished", "toggle-auto-clear-finished", "toggle-autostart"]);
   });
 
   it("shows Auto-clear and Auto-start as checkable menu items", () => {
     expect(
       getOverflowMenuItems({
-        autoClearMergedPrWatches: true,
+        autoClearFinishedWatches: true,
         autoStartEnabled: false,
         autoStartBusy: false,
         hasWatches: true,
@@ -25,7 +25,7 @@ describe("getOverflowMenuItems", () => {
       }).slice(2),
     ).toEqual([
       {
-        action: "toggle-auto-clear-merged-prs",
+        action: "toggle-auto-clear-finished",
         checked: true,
         checkbox: "checked",
         disabled: false,
@@ -46,7 +46,7 @@ describe("getOverflowMenuItems", () => {
   it("keeps clear actions disabled until they apply and disables Auto-start while loading", () => {
     expect(
       getOverflowMenuItems({
-        autoClearMergedPrWatches: false,
+        autoClearFinishedWatches: false,
         autoStartEnabled: false,
         autoStartBusy: true,
         hasWatches: false,
@@ -66,7 +66,7 @@ describe("getOverflowMenuItems", () => {
         label: "Clear finished",
       },
       {
-        action: "toggle-auto-clear-merged-prs",
+        action: "toggle-auto-clear-finished",
         checked: false,
         checkbox: "empty",
         disabled: false,
