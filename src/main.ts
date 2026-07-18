@@ -71,8 +71,6 @@ import {
   type ActiveWorkflowRun,
   type OpenPullRequest,
   rerunFailedWatch,
-  resolvePrWatchTargets,
-  resolveRunWatchTargets,
 } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
@@ -200,8 +198,6 @@ const controller = createWatchController(
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     notificationsPaused: () => isPopupOpen,
     notify: notifyStatusChange,
-    resolvePrWatchTargets: isDemoMode ? async () => ({ targets: [], sourceState: "ready" }) : resolvePrWatchTargets,
-    resolveRunWatchTargets: isDemoMode ? async () => ({ targets: [] }) : resolveRunWatchTargets,
     rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
     save: saveWatches,
   },
@@ -985,6 +981,10 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
 
 function renderLeadingIcon(row: WatchRowViewModel): string {
   const markSeenOverlay = row.unseenStatusChange ? renderWatchSeenOverlay(row) : "";
+
+  if (row.subject === "pull-request") {
+    return renderWatchLeadingSlot(getPrStateIconSvg(row.prState?.tone ?? "ready"), markSeenOverlay);
+  }
 
   if (row.subject === "job") {
     return renderWatchLeadingSlot(renderWatchSubjectIcon("job"), markSeenOverlay);

@@ -196,6 +196,10 @@ function getPullRequestReference(watch: WatchRecord): string | undefined {
 }
 
 function getWatchSubject(watch: WatchRecord): WatchSubject {
+  if (watch.target.kind === "pr") {
+    return "pull-request";
+  }
+
   return watch.target.kind === "job" ? "job" : "workflow";
 }
 
@@ -222,6 +226,10 @@ function getPullRequestStateLabel(sourceState: PrSourceState): string {
 }
 
 function canRerun(watch: WatchRecord): boolean {
+  if (watch.target.kind === "pr") {
+    return false;
+  }
+
   return watch.lastState?.status === "completed" &&
     watch.lastState.conclusion !== "success" &&
     watch.lastState.conclusion !== "cancelled" &&
@@ -229,7 +237,7 @@ function canRerun(watch: WatchRecord): boolean {
 }
 
 function getWatchRemoveMode(watch: WatchRecord): WatchRemoveMode {
-  return watch.source ? "ignore-pr-workflow" : "remove";
+  return "remove";
 }
 
 function groupRowsByRepo(
@@ -261,7 +269,7 @@ function groupRowsByRepo(
     }
 
     group.rows.push(row);
-    addRowToTree(group, watch, row);
+    group.items.push({ kind: "row", row });
   });
 
   return groups;

@@ -1,13 +1,11 @@
-import type { CheckWatchTarget, JobWatchTarget, ParsedWatchTarget, PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
+import type {
+  CheckWatchTarget,
+  ParsedWatchTarget,
+  PrWatchTarget,
+  WatchTarget,
+} from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
-import {
-  getWatchId,
-  type PrSourceState,
-  type PrWatchResolution,
-  type RunWatchResolution,
-  type WatchMetadata,
-  type WatchTiming,
-} from "../domain/watches";
+import type { WatchMetadata, WatchTiming } from "../domain/watches";
 
 export type ShellResult = {
   code: number;
@@ -48,6 +46,12 @@ type JobViewResponse = {
   started_at?: string | null;
   workflow_name?: string;
   html_url?: string;
+};
+
+type PrCheckResponse = {
+  bucket?: string;
+  completedAt?: string | null;
+  startedAt?: string | null;
 };
 
 type RepositoryViewResponse = {
@@ -99,39 +103,26 @@ type PullRequestReference = {
   number?: number | string;
 };
 
-type PrViewResponse = {
-  headRefName?: string;
-  headRefOid?: string;
-  isDraft?: boolean;
-  mergedAt?: string | null;
-  state?: string;
-  title?: string;
-};
-
-type RunListResponse = {
-  attempt?: number | string;
-  databaseId?: number | string;
-  event?: string;
-  headSha?: string;
-  url?: string;
-  workflowName?: string;
-};
-
-type RunJobsResponse = {
-  jobs?: RunJobResponse[];
-};
-
-type RunJobResponse = {
-  html_url?: string;
-  id?: number | string;
-  name?: string;
-};
-
 export async function fetchWatchState(
-  target: CheckWatchTarget,
+  target: WatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<WatchSnapshot> {
   try {
+    if (target.kind === "pr") {
+      const result = await executor.execute("gh", [
+        "pr",
+        "checks",
+        target.prNumber,
+        "-R",
+        `${target.owner}/${target.repo}`,
+        "--json",
+        "bucket,completedAt,startedAt",
+      ]);
+
+      assertSuccessfulGhResult(result, result.stdout.trim() ? [1, 8] : [8]);
+      return toPrSnapshot(target, parseJson<PrCheckResponse[]>(result.stdout));
+    }
+
     if (target.kind === "run") {
       const result = await executor.execute("gh", [
         "api",
@@ -245,110 +236,6 @@ export async function fetchActiveWorkflowRuns(
   }
 }
 
-export async function resolvePrWatchTargets(
-  target: PrWatchTarget,
-  executor: ShellExecutor = createTauriShellExecutor(),
-): Promise<PrWatchResolution> {
-  try {
-    const prResult = await executor.execute("gh", [
-      "pr",
-      "view",
-      target.prNumber,
-      "-R",
-      `${target.owner}/${target.repo}`,
-      "--json",
-      "headRefName,headRefOid,isDraft,mergedAt,state,title",
-    ]);
-    assertSuccessfulGhResult(prResult);
-
-    const pr = parseJson<PrViewResponse>(prResult.stdout);
-    const sourceState = getPrSourceState(pr);
-    const prTitle = pr.title?.trim();
-
-    if (sourceState === "merged" || sourceState === "closed") {
-      return { targets: [], sourceState };
-    }
-
-    const headRefName = requiredString(pr.headRefName, "pull request head branch");
-    const headRefOid = requiredString(pr.headRefOid, "pull request head SHA");
-    const runsResult = await executor.execute("gh", [
-      "run",
-      "list",
-      "-R",
-      `${target.owner}/${target.repo}`,
-      "--event",
-      "pull_request",
-      "--branch",
-      headRefName,
-      "--limit",
-      "50",
-      "--json",
-      "attempt,databaseId,event,headSha,url,workflowName",
-    ]);
-    assertSuccessfulGhResult(runsResult);
-
-    const targets: CheckWatchTarget[] = [];
-    const targetMetadata: Record<string, WatchMetadata> = {};
-
-    for (const run of parseJson<RunListResponse[]>(runsResult.stdout)) {
-      if (run.event !== "pull_request" || run.headSha !== headRefOid) {
-        continue;
-      }
-
-      const runTarget = toPrRunTarget(target, run);
-
-      if (!runTarget) {
-        continue;
-      }
-
-      const jobs = await resolvePrRunJobTargets(
-        runTarget,
-        run.workflowName,
-        prTitle,
-        executor,
-        getRunAttempt(run.attempt),
-      );
-
-      if (jobs.length > 0) {
-        for (const { target: jobTarget, metadata } of jobs) {
-          targets.push(jobTarget);
-
-          if (metadata) {
-            targetMetadata[getWatchId(jobTarget)] = metadata;
-          }
-        }
-      } else {
-        targets.push(runTarget);
-
-        const metadata = compactMetadata({ prTitle, workflowName: run.workflowName });
-
-        if (metadata) {
-          targetMetadata[getWatchId(runTarget)] = metadata;
-        }
-      }
-    }
-
-    return {
-      targets,
-      ...(Object.keys(targetMetadata).length ? { targetMetadata } : {}),
-      sourceState,
-    };
-  } catch (error) {
-    throw normalizeGhError(error);
-  }
-}
-
-export async function resolveRunWatchTargets(
-  target: RunWatchTarget,
-  executor: ShellExecutor = createTauriShellExecutor(),
-): Promise<RunWatchResolution> {
-  try {
-    return await resolveRunJobTargets(target, executor);
-  } catch (error) {
-    throw normalizeGhError(error);
-  }
-}
-
 function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWorkflowRun | undefined {
   const runId = getRunDatabaseId(response.databaseId);
   const title = joinTitle(response.workflowName, response.displayTitle);
@@ -412,125 +299,6 @@ function getSortTimestamp(value: string | undefined): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-function getPrSourceState(pr: PrViewResponse): PrSourceState {
-  const state = pr.state?.toUpperCase();
-
-  if (pr.mergedAt || state === "MERGED") {
-    return "merged";
-  }
-
-  if (state === "CLOSED") {
-    return "closed";
-  }
-
-  return pr.isDraft ? "draft" : "ready";
-}
-
-function toPrRunTarget(source: PrWatchTarget, run: RunListResponse): RunWatchTarget | undefined {
-  const runId = getRunDatabaseId(run.databaseId);
-
-  if (!runId) {
-    return undefined;
-  }
-
-  return {
-    kind: "run",
-    owner: source.owner,
-    repo: source.repo,
-    runId,
-    prNumber: source.prNumber,
-    url: run.url || `https://github.com/${source.owner}/${source.repo}/actions/runs/${runId}`,
-  };
-}
-
-async function resolvePrRunJobTargets(
-  runTarget: RunWatchTarget,
-  workflowName: string | undefined,
-  prTitle: string | undefined,
-  executor: ShellExecutor,
-  runAttempt?: string,
-): Promise<Array<{ target: JobWatchTarget; metadata?: WatchMetadata }>> {
-  try {
-    const resolution = await resolveRunJobTargets(
-      runTarget,
-      executor,
-      { prTitle, workflowName },
-      runAttempt,
-    );
-
-    return resolution.targets.map((target) => ({
-      target,
-      ...(resolution.targetMetadata?.[getWatchId(target)]
-        ? { metadata: resolution.targetMetadata[getWatchId(target)] }
-        : {}),
-    }));
-  } catch {
-    return [];
-  }
-}
-
-async function resolveRunJobTargets(
-  runTarget: RunWatchTarget,
-  executor: ShellExecutor,
-  metadataDefaults: Pick<WatchMetadata, "prTitle" | "workflowName"> = {},
-  runAttempt?: string,
-): Promise<RunWatchResolution> {
-  const result = await executor.execute("gh", [
-    "api",
-    getRunJobsPath(runTarget, runAttempt),
-  ]);
-
-  assertSuccessfulGhResult(result);
-
-  const targets: JobWatchTarget[] = [];
-  const targetMetadata: Record<string, WatchMetadata> = {};
-
-  for (const job of parseJson<RunJobsResponse>(result.stdout).jobs ?? []) {
-    const target = toRunJobTarget(runTarget, job);
-
-    if (!target) {
-      continue;
-    }
-
-    targets.push(target);
-
-    const metadata = compactMetadata({
-      ...metadataDefaults,
-      jobName: job.name,
-    });
-
-    if (metadata) {
-      targetMetadata[getWatchId(target)] = metadata;
-    }
-  }
-
-  return {
-    targets,
-    ...(Object.keys(targetMetadata).length ? { targetMetadata } : {}),
-  };
-}
-
-function toRunJobTarget(
-  runTarget: RunWatchTarget,
-  job: RunJobResponse,
-): JobWatchTarget | undefined {
-  const jobId = getRunDatabaseId(job.id);
-
-  if (!jobId) {
-    return undefined;
-  }
-
-  return {
-    kind: "job",
-    owner: runTarget.owner,
-    repo: runTarget.repo,
-    runId: runTarget.runId,
-    jobId,
-    ...(runTarget.prNumber ? { prNumber: runTarget.prNumber } : {}),
-    url: job.html_url || `https://github.com/${runTarget.owner}/${runTarget.repo}/actions/runs/${runTarget.runId}/job/${jobId}`,
-  };
-}
-
 function getRunDatabaseId(value: number | string | undefined): string | undefined {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) {
     return String(value);
@@ -541,20 +309,6 @@ function getRunDatabaseId(value: number | string | undefined): string | undefine
   }
 
   return undefined;
-}
-
-function getRunAttempt(value: number | string | undefined): string | undefined {
-  return getRunDatabaseId(value);
-}
-
-function getRunJobsPath(runTarget: RunWatchTarget, runAttempt: string | undefined): string {
-  const runPath = `repos/${runTarget.owner}/${runTarget.repo}/actions/runs/${runTarget.runId}`;
-
-  if (runAttempt) {
-    return `${runPath}/attempts/${runAttempt}/jobs?per_page=100`;
-  }
-
-  return `${runPath}/jobs?filter=latest&per_page=100`;
 }
 
 export async function rerunFailedWatch(
@@ -666,6 +420,84 @@ function toJobSnapshot(fallbackUrl: string, response: JobViewResponse): WatchSna
   };
 }
 
+function toPrSnapshot(target: PrWatchTarget, checks: PrCheckResponse[]): WatchSnapshot {
+  const timing = compactTiming({
+    startedAt: getEarliestTimestamp(checks.map((check) => check.startedAt ?? undefined)),
+    completedAt: prChecksAreCompleted(checks)
+      ? getLatestTimestamp(checks.map((check) => check.completedAt ?? undefined))
+      : undefined,
+  });
+  const state = getPrChecksState(checks);
+
+  return {
+    ...state,
+    title: `Pull request #${target.prNumber}`,
+    metadata: {
+      prTitle: `Pull request #${target.prNumber}`,
+    },
+    prNumber: target.prNumber,
+    ...(timing ? { timing } : {}),
+    url: target.url,
+  };
+}
+
+function getPrChecksState(checks: PrCheckResponse[]): WatchState {
+  const buckets = checks.map((check) => check.bucket?.trim()).filter((bucket): bucket is string => Boolean(bucket));
+
+  if (buckets.length === 0) {
+    return { status: "pending", conclusion: null };
+  }
+
+  if (buckets.includes("fail")) {
+    return { status: "completed", conclusion: "failure" };
+  }
+
+  if (buckets.includes("cancel")) {
+    return { status: "completed", conclusion: "cancelled" };
+  }
+
+  if (buckets.includes("pending")) {
+    return { status: "in_progress", conclusion: null };
+  }
+
+  if (buckets.every((bucket) => bucket === "skipping")) {
+    return { status: "completed", conclusion: "skipped" };
+  }
+
+  if (buckets.every((bucket) => bucket === "pass" || bucket === "skipping")) {
+    return { status: "completed", conclusion: "success" };
+  }
+
+  return { status: "pending", conclusion: null };
+}
+
+function prChecksAreCompleted(checks: PrCheckResponse[]): boolean {
+  return checks.length > 0 && !checks.some((check) => check.bucket?.trim() === "pending");
+}
+
+function getEarliestTimestamp(values: Array<string | undefined>): string | undefined {
+  return getExtremeTimestamp(values, Math.min);
+}
+
+function getLatestTimestamp(values: Array<string | undefined>): string | undefined {
+  return getExtremeTimestamp(values, Math.max);
+}
+
+function getExtremeTimestamp(
+  values: Array<string | undefined>,
+  select: (...values: number[]) => number,
+): string | undefined {
+  const timestamps = values
+    .map((value) => (value ? Date.parse(value) : Number.NaN))
+    .filter((timestamp) => Number.isFinite(timestamp));
+
+  if (timestamps.length === 0) {
+    return undefined;
+  }
+
+  return new Date(select(...timestamps)).toISOString();
+}
+
 function compactMetadata(metadata: WatchMetadata): WatchMetadata | undefined {
   const entries = Object.entries(metadata)
     .map(([key, value]) => [key, value?.trim()] as const)
@@ -735,8 +567,8 @@ function parseJson<T>(stdout: string): T {
   }
 }
 
-function assertSuccessfulGhResult(result: ShellResult): void {
-  if (result.code === 0) {
+function assertSuccessfulGhResult(result: ShellResult, additionalSuccessCodes: number[] = []): void {
+  if (result.code === 0 || additionalSuccessCodes.includes(result.code)) {
     return;
   }
 

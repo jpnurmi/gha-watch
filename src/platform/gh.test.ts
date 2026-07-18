@@ -6,8 +6,6 @@ import {
   fetchRepositoryIconUrl,
   fetchWatchState,
   rerunFailedWatch,
-  resolvePrWatchTargets,
-  resolveRunWatchTargets,
   type ShellExecutor,
 } from "./gh";
 
@@ -156,6 +154,89 @@ describe("fetchWatchState", () => {
     ]);
   });
 
+  it("fetches pull request check state with one gh pr checks call", async () => {
+    const { executor, calls } = createExecutor({
+      code: 8,
+      stdout: JSON.stringify([
+        {
+          bucket: "pass",
+          startedAt: "2026-05-16T12:00:00Z",
+          completedAt: "2026-05-16T12:02:00Z",
+        },
+        {
+          bucket: "pending",
+          startedAt: "2026-05-16T12:03:00Z",
+          completedAt: null,
+        },
+      ]),
+      stderr: "",
+    });
+
+    await expect(
+      fetchWatchState(
+        {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+        executor,
+      ),
+    ).resolves.toEqual({
+      status: "in_progress",
+      conclusion: null,
+      title: "Pull request #51",
+      metadata: {
+        prTitle: "Pull request #51",
+      },
+      prNumber: "51",
+      timing: {
+        startedAt: "2026-05-16T12:00:00.000Z",
+      },
+      url: "https://github.com/getsentry/sentry/pull/51",
+    });
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "pr",
+          "checks",
+          "51",
+          "-R",
+          "getsentry/sentry",
+          "--json",
+          "bucket,completedAt,startedAt",
+        ],
+      },
+    ]);
+  });
+
+  it("treats failed pull request checks as a parsed watch state", async () => {
+    const { executor } = createExecutor({
+      code: 1,
+      stdout: JSON.stringify([{ bucket: "fail" }]),
+      stderr: "",
+    });
+
+    await expect(
+      fetchWatchState(
+        {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+        executor,
+      ),
+    ).resolves.toMatchObject({
+      status: "completed",
+      conclusion: "failure",
+    });
+  });
+
   it("does not duplicate matching workflow and run titles", async () => {
     const { executor } = createExecutor({
       code: 0,
@@ -225,76 +306,6 @@ describe("fetchWatchState", () => {
         executor,
       ),
     ).rejects.toThrow("gh is not authenticated. Run `gh auth login` and try again.");
-  });
-});
-
-describe("resolveRunWatchTargets", () => {
-  it("resolves a workflow run into job targets", async () => {
-    const { executor, calls } = createExecutor({
-      code: 0,
-      stdout: JSON.stringify({
-        jobs: [
-          {
-            id: 456,
-            name: "Linux",
-            html_url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
-          },
-          {
-            id: "789",
-            name: "Windows",
-            html_url: "https://github.com/getsentry/sentry/actions/runs/123/job/789",
-          },
-        ],
-      }),
-      stderr: "",
-    });
-
-    await expect(
-      resolveRunWatchTargets(
-        {
-          kind: "run",
-          owner: "getsentry",
-          repo: "sentry",
-          runId: "123",
-          url: "https://github.com/getsentry/sentry/actions/runs/123",
-        },
-        executor,
-      ),
-    ).resolves.toEqual({
-      targets: [
-        {
-          kind: "job",
-          owner: "getsentry",
-          repo: "sentry",
-          runId: "123",
-          jobId: "456",
-          url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
-        },
-        {
-          kind: "job",
-          owner: "getsentry",
-          repo: "sentry",
-          runId: "123",
-          jobId: "789",
-          url: "https://github.com/getsentry/sentry/actions/runs/123/job/789",
-        },
-      ],
-      targetMetadata: {
-        "getsentry/sentry/job/456": {
-          jobName: "Linux",
-        },
-        "getsentry/sentry/job/789": {
-          jobName: "Windows",
-        },
-      },
-    });
-
-    expect(calls).toEqual([
-      {
-        program: "gh",
-        args: ["api", "repos/getsentry/sentry/actions/runs/123/jobs?filter=latest&per_page=100"],
-      },
-    ]);
   });
 });
 
@@ -569,264 +580,6 @@ describe("fetchActiveWorkflowRuns", () => {
         title: "CI: Valid run",
         status: "queued",
         url: "https://github.com/getsentry/sentry/actions/runs/101",
-      },
-    ]);
-  });
-});
-
-describe("resolvePrWatchTargets", () => {
-  it("resolves current pull request jobs by head SHA", async () => {
-    const { executor, calls } = createSequenceExecutor([
-      {
-        code: 0,
-        stdout: JSON.stringify({
-          headRefName: "ci/ios",
-          headRefOid: "abc123",
-          isDraft: false,
-          mergedAt: null,
-          state: "OPEN",
-          title: "Fix flaky CI",
-        }),
-        stderr: "",
-      },
-      {
-        code: 0,
-        stdout: JSON.stringify([
-          {
-            attempt: 2,
-            databaseId: 101,
-            event: "pull_request",
-            headSha: "abc123",
-            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
-            workflowName: "CI",
-          },
-          {
-            attempt: 1,
-            databaseId: 102,
-            event: "pull_request",
-            headSha: "abc123",
-            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102",
-            workflowName: "Lint",
-          },
-          {
-            databaseId: 99,
-            event: "pull_request",
-            headSha: "old",
-            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/99",
-          },
-        ]),
-        stderr: "",
-      },
-      {
-        code: 0,
-        stdout: JSON.stringify({
-          jobs: [
-            {
-              id: 1001,
-              name: "macOS",
-              html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101/job/1001",
-            },
-          ],
-        }),
-        stderr: "",
-      },
-      {
-        code: 0,
-        stdout: JSON.stringify({
-          jobs: [
-            {
-              id: 1002,
-              name: "eslint",
-              html_url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102/job/1002",
-            },
-          ],
-        }),
-        stderr: "",
-      },
-    ]);
-
-    await expect(
-      resolvePrWatchTargets(
-        {
-          kind: "pr",
-          owner: "jpnurmi",
-          repo: "sentry-qml",
-          prNumber: "51",
-          url: "https://github.com/jpnurmi/sentry-qml/pull/51",
-        },
-        executor,
-      ),
-    ).resolves.toEqual({
-      sourceState: "ready",
-      targetMetadata: {
-        "jpnurmi/sentry-qml/job/1001": {
-          prTitle: "Fix flaky CI",
-          workflowName: "CI",
-          jobName: "macOS",
-        },
-        "jpnurmi/sentry-qml/job/1002": {
-          prTitle: "Fix flaky CI",
-          workflowName: "Lint",
-          jobName: "eslint",
-        },
-      },
-      targets: [
-        {
-          kind: "job",
-          owner: "jpnurmi",
-          repo: "sentry-qml",
-          runId: "101",
-          jobId: "1001",
-          prNumber: "51",
-          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101/job/1001",
-        },
-        {
-          kind: "job",
-          owner: "jpnurmi",
-          repo: "sentry-qml",
-          runId: "102",
-          jobId: "1002",
-          prNumber: "51",
-          url: "https://github.com/jpnurmi/sentry-qml/actions/runs/102/job/1002",
-        },
-      ],
-    });
-
-    expect(calls).toEqual([
-      {
-        program: "gh",
-        args: [
-          "pr",
-          "view",
-          "51",
-          "-R",
-          "jpnurmi/sentry-qml",
-          "--json",
-          "headRefName,headRefOid,isDraft,mergedAt,state,title",
-        ],
-      },
-      {
-        program: "gh",
-        args: [
-          "run",
-          "list",
-          "-R",
-          "jpnurmi/sentry-qml",
-          "--event",
-          "pull_request",
-          "--branch",
-          "ci/ios",
-          "--limit",
-          "50",
-          "--json",
-          "attempt,databaseId,event,headSha,url,workflowName",
-        ],
-      },
-      {
-        program: "gh",
-        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/101/attempts/2/jobs?per_page=100"],
-      },
-      {
-        program: "gh",
-        args: ["api", "repos/jpnurmi/sentry-qml/actions/runs/102/attempts/1/jobs?per_page=100"],
-      },
-    ]);
-  });
-
-  it("resolves draft pull request runs with a draft source state", async () => {
-    const { executor } = createSequenceExecutor([
-      {
-        code: 0,
-        stdout: JSON.stringify({
-          headRefName: "ci/ios",
-          headRefOid: "abc123",
-          isDraft: true,
-          mergedAt: null,
-          state: "OPEN",
-          title: "Draft PR",
-        }),
-        stderr: "",
-      },
-      {
-        code: 0,
-        stdout: JSON.stringify([
-          {
-            databaseId: 101,
-            event: "pull_request",
-            headSha: "abc123",
-            url: "https://github.com/jpnurmi/sentry-qml/actions/runs/101",
-          },
-        ]),
-        stderr: "",
-      },
-      {
-        code: 0,
-        stdout: JSON.stringify({ jobs: [] }),
-        stderr: "",
-      },
-    ]);
-
-    await expect(
-      resolvePrWatchTargets(
-        {
-          kind: "pr",
-          owner: "jpnurmi",
-          repo: "sentry-qml",
-          prNumber: "51",
-          url: "https://github.com/jpnurmi/sentry-qml/pull/51",
-        },
-        executor,
-      ),
-    ).resolves.toMatchObject({
-      sourceState: "draft",
-      targets: [
-        {
-          runId: "101",
-        },
-      ],
-    });
-  });
-
-  it.each([
-    ["merged", { mergedAt: "2026-05-17T10:15:00Z", state: "MERGED" }],
-    ["closed", { mergedAt: null, state: "CLOSED" }],
-  ] as const)("resolves %s pull requests without fetching workflow runs", async (sourceState, prResponse) => {
-    const { executor, calls } = createSequenceExecutor([
-      {
-        code: 0,
-        stdout: JSON.stringify(prResponse),
-        stderr: "",
-      },
-    ]);
-
-    await expect(
-      resolvePrWatchTargets(
-        {
-          kind: "pr",
-          owner: "jpnurmi",
-          repo: "sentry-qml",
-          prNumber: "51",
-          url: "https://github.com/jpnurmi/sentry-qml/pull/51",
-        },
-        executor,
-      ),
-    ).resolves.toEqual({
-      sourceState,
-      targets: [],
-    });
-
-    expect(calls).toEqual([
-      {
-        program: "gh",
-        args: [
-          "pr",
-          "view",
-          "51",
-          "-R",
-          "jpnurmi/sentry-qml",
-          "--json",
-          "headRefName,headRefOid,isDraft,mergedAt,state,title",
-        ],
       },
     ]);
   });
