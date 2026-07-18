@@ -28,26 +28,18 @@ function watch(overrides: Partial<WatchRecord> = {}): WatchRecord {
 
 describe("createWatchNotification", () => {
   it("formats notification content like a watch item", () => {
-    expect(
-      createWatchNotification(
-        watch(),
-        { status: "in_progress", conclusion: null },
-        new Date("2026-05-16T12:10:00Z"),
-      ),
-    ).toEqual({
+    expect(createWatchNotification(watch(), new Date("2026-05-16T12:10:00Z"))).toEqual({
       watchId: "getsentry/sentry/run/123",
       title: "CI: tests",
       url: "https://github.com/getsentry/sentry/actions/runs/123",
       body:
         "getsentry/sentry\n" +
         "Successful - This check was successful.\n" +
-        "Completed 1m ago · 7m\n" +
-        "Previously in progress",
+        "Completed 1m ago · 7m",
       largeBody:
         "getsentry/sentry\n" +
         "Successful - This check was successful.\n" +
-        "Completed 1m ago · 7m\n" +
-        "Previously in progress",
+        "Completed 1m ago · 7m",
       summary: "getsentry/sentry",
       group: "getsentry/sentry",
       persistent: true,
@@ -67,7 +59,6 @@ describe("createWatchNotification", () => {
             url: "https://github.com/getsentry/sentry/actions/runs/123",
           },
         }),
-        { status: "in_progress", conclusion: null },
       ),
     ).toMatchObject({
       body: expect.stringContaining("getsentry/sentry #51"),
@@ -87,7 +78,6 @@ describe("createWatchNotification", () => {
             startedAt: "2026-05-16T12:02:00Z",
           },
         }),
-        { status: "queued", conclusion: null },
       ).persistent,
     ).toBe(false);
   });
@@ -105,13 +95,8 @@ describe("createWatchNotification", () => {
             url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
           },
         }),
-        { status: "in_progress", conclusion: null },
       ).url,
     ).toBe("https://github.com/getsentry/sentry/actions/runs/123/job/456");
-  });
-
-  it("uses natural transition wording for queued checks", () => {
-    expect(createWatchNotification(watch(), { status: "queued", conclusion: null }).body).toContain("Previously queued");
   });
 
   it("uses skipped wording for skipped check notifications", () => {
@@ -121,7 +106,6 @@ describe("createWatchNotification", () => {
           status: "completed:skipped",
           lastState: { status: "completed", conclusion: "skipped" },
         }),
-        { status: "queued", conclusion: null },
       ),
     ).toMatchObject({
       body: expect.stringContaining("Skipped - This check was skipped."),

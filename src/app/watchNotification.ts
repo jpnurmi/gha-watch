@@ -1,5 +1,4 @@
 import type { PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
-import type { WatchState } from "../domain/status";
 import { getWatchId, type WatchRecord } from "../domain/watches";
 import { createPopupViewModel } from "./viewModel";
 
@@ -16,7 +15,6 @@ export type WatchNotification = {
 
 export function createWatchNotification(
   watch: WatchRecord,
-  previousState: WatchState | undefined,
   now = new Date(),
 ): WatchNotification {
   const row = createPopupViewModel([watch], now).rows[0];
@@ -25,7 +23,6 @@ export function createWatchNotification(
     repoLabel,
     `${row.statusLabel} - ${row.description}`,
     row.timingText,
-    previousState ? `Previously ${formatPreviousStatus(previousState)}` : undefined,
   ].filter(isString);
   const body = lines.join("\n");
 
@@ -159,36 +156,6 @@ function isPersistentNotification(tone: string): boolean {
     tone === "skipped" ||
     tone === "error"
   );
-}
-
-function formatPreviousStatus(state: WatchState): string {
-  if (state.status === "completed") {
-    if (state.conclusion === "success") {
-      return "successful";
-    }
-
-    if (state.conclusion === "cancelled") {
-      return "cancelled";
-    }
-
-    if (state.conclusion === "skipped") {
-      return "skipped";
-    }
-
-    return "failed";
-  }
-
-  if (state.status === "in_progress") {
-    return "in progress";
-  }
-
-  if (state.status === "queued" || state.status === "pending" || state.status === "requested" || state.status === "waiting") {
-    return "queued";
-  }
-
-  return state.status
-    .split("_")
-    .join(" ");
 }
 
 function isString(value: string | undefined): value is string {
