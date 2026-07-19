@@ -6,6 +6,7 @@ import {
   getWatchId,
   markAllWatchesSeen,
   markWatchSeen,
+  hasUnseenStatusChange,
   moveWatchGroupWithinRepo,
   moveWatchWithinRepo,
   normalizeWatchSeenStatus,
@@ -154,7 +155,7 @@ export function createWatchController(
       return;
     }
 
-    const nextWatches = watches.filter((watch) => watch.active);
+    const nextWatches = watches.filter((watch) => watch.active || hasUnseenStatusChange(watch));
 
     if (nextWatches.length !== watches.length) {
       setWatches(nextWatches);
@@ -202,10 +203,12 @@ export function createWatchController(
 
     markSeen(id) {
       setWatches(markWatchSeen(watches, id));
+      applyAutoClearFinishedWatches();
     },
 
     markAllSeen() {
       setWatches(markAllWatchesSeen(watches));
+      applyAutoClearFinishedWatches();
     },
 
     clearAll() {
