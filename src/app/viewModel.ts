@@ -27,6 +27,7 @@ export type WatchRowViewModel = {
   subject: WatchSubject;
   prReference?: string;
   prState?: PrStateViewModel;
+  branchName?: string;
   statusLabel: string;
   description: string;
   tone: RowTone;
@@ -48,6 +49,7 @@ export type WatchTreeNodeViewModel = {
   referenceLabel?: string;
   detailLabel?: string;
   prState?: PrStateViewModel;
+  branchName?: string;
   rowCount: number;
   rowIds: string[];
   primaryRowId?: string;
@@ -126,6 +128,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
       subject: getWatchSubject(watch),
       prReference: getPullRequestReference(watch),
       prState: getPullRequestState(watch),
+      branchName: getBranchName(watch),
       statusLabel: "Errored",
       description: watch.error,
       tone: "error",
@@ -180,6 +183,7 @@ function createRow(
     subject: getWatchSubject(watch),
     prReference: getPullRequestReference(watch),
     prState: getPullRequestState(watch),
+    branchName: getBranchName(watch),
     statusLabel,
     description,
     tone,
@@ -193,6 +197,10 @@ function createRow(
 
 function getPullRequestReference(watch: WatchRecord): string | undefined {
   return watch.target.prNumber ? `#${watch.target.prNumber}` : undefined;
+}
+
+function getBranchName(watch: WatchRecord): string | undefined {
+  return watch.metadata?.branchName?.trim() || undefined;
 }
 
 function getWatchSubject(watch: WatchRecord): WatchSubject {
@@ -294,10 +302,16 @@ function addRowToTree(group: WatchGroupViewModel, watch: WatchRecord, row: Watch
   let workflowNode = workflowContainer.find((node) => node.id === workflowId);
 
   if (!workflowNode) {
-    workflowNode = createTreeNode(workflowId, "workflow", workflowLabel, row.tone, undefined, undefined, row.url);
+    workflowNode = createTreeNode(workflowId, "workflow", workflowLabel, row.tone, undefined, undefined, row.url, row.branchName);
     workflowContainer.push(workflowNode);
-  } else if (!workflowNode.url) {
-    workflowNode.url = row.url;
+  } else {
+    if (!workflowNode.url) {
+      workflowNode.url = row.url;
+    }
+
+    if (!workflowNode.branchName && row.branchName) {
+      workflowNode.branchName = row.branchName;
+    }
   }
 
   parentNode.rowCount += 1;
@@ -353,7 +367,7 @@ function getDirectWorkflowTreeNode(
   let node = group.tree.find((item) => item.id === nodeId);
 
   if (!node) {
-    node = createTreeNode(nodeId, "workflow", getDirectWorkflowNodeLabel(watch, row), row.tone, undefined, undefined, sourceRun.url);
+    node = createTreeNode(nodeId, "workflow", getDirectWorkflowNodeLabel(watch, row), row.tone, undefined, undefined, sourceRun.url, row.branchName);
     group.tree.push(node);
     group.items.push({ kind: "tree", node });
   }
@@ -366,6 +380,7 @@ function updateDirectWorkflowParentNode(node: WatchTreeNodeViewModel, row: Watch
   node.primaryRowId = row.id;
   node.url = row.url;
   node.timingText = row.timingText;
+  node.branchName = row.branchName;
   addUniqueRowId(node, row.id);
   node.tone = combineTones(node.tone, row.tone);
   node.unseenStatusChange ||= row.unseenStatusChange;
@@ -394,15 +409,25 @@ function getPullRequestTreeNode(
   let parentNode = group.tree.find((node) => node.id === parentId);
 
   if (!parentNode) {
-    parentNode = createTreeNode(parentId, "pull-request", parent.label, row.tone, parent.reference, row.prState, parent.url);
+    parentNode = createTreeNode(parentId, "pull-request", parent.label, row.tone, parent.reference, row.prState, parent.url, row.branchName);
     group.tree.push(parentNode);
     group.items.push({ kind: "tree", node: parentNode });
-  } else if (shouldUsePullRequestNodeLabel(parentNode.label, parent.label)) {
-    parentNode.label = parent.label;
-  } else if (!parentNode.prState && row.prState) {
-    parentNode.prState = row.prState;
-  } else if (!parentNode.url) {
-    parentNode.url = parent.url;
+  } else {
+    if (shouldUsePullRequestNodeLabel(parentNode.label, parent.label)) {
+      parentNode.label = parent.label;
+    }
+
+    if (!parentNode.prState && row.prState) {
+      parentNode.prState = row.prState;
+    }
+
+    if (!parentNode.url) {
+      parentNode.url = parent.url;
+    }
+
+    if (!parentNode.branchName && row.branchName) {
+      parentNode.branchName = row.branchName;
+    }
   }
 
   return parentNode;
@@ -416,6 +441,7 @@ function createTreeNode(
   referenceLabel?: string,
   prState?: PrStateViewModel,
   url?: string,
+  branchName?: string,
 ): WatchTreeNodeViewModel {
   return {
     id,
@@ -423,6 +449,7 @@ function createTreeNode(
     label,
     ...(referenceLabel ? { referenceLabel } : {}),
     ...(prState ? { prState } : {}),
+    ...(branchName ? { branchName } : {}),
     rowCount: 0,
     rowIds: [],
     statusLabel: getTreeStatusLabel(tone),

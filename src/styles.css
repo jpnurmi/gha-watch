@@ -1057,6 +1057,27 @@ input {
   font-weight: 750;
 }
 
+.watch-branch-badge {
+  display: inline-block;
+  max-width: 68px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 1px solid rgb(88 166 255 / 24%);
+  border-radius: 999px;
+  padding: 0 4px 1px;
+  background: rgb(88 166 255 / 8%);
+  color: rgb(188 216 255 / 72%);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-pr-item .watch-branch-badge {
+  justify-self: end;
+}
+
 .watch-meta {
   display: flex;
   min-width: 0;

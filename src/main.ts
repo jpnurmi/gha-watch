@@ -630,12 +630,27 @@ function renderActiveWorkflowRunItem(group: WatchGroupViewModel, run: ActiveWork
       data-repo="${escapeHtml(group.repo)}"
       data-run="${escapeHtml(run.runId)}"
       data-url="${escapeHtml(run.url)}"
-      title="${escapeHtml(run.title)}"
+      title="${escapeHtml(getActiveWorkflowRunTitle(run))}"
     >
       <span class="favorite-pr-number">${escapeHtml(formatWorkflowRunStatus(run.status))}</span>
       <span class="favorite-pr-title">${escapeHtml(run.title)}</span>
+      ${renderBranchBadge(run.branchName)}
     </button>
   `;
+}
+
+function getActiveWorkflowRunTitle(run: ActiveWorkflowRun): string {
+  return run.branchName ? `${run.title} · ${run.branchName}` : run.title;
+}
+
+function renderBranchBadge(branchName: string | undefined): string {
+  const cleanBranchName = branchName?.trim();
+
+  if (!cleanBranchName) {
+    return "";
+  }
+
+  return `<span class="watch-branch-badge" title="${escapeHtml(cleanBranchName)}">${escapeHtml(cleanBranchName)}</span>`;
 }
 
 function formatWorkflowRunStatus(status: string): string {
@@ -771,6 +786,7 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
           <span class="watch-label">
             <span class="watch-title-text">${escapeHtml(node.label)}</span>
             ${node.referenceLabel ? `<span class="watch-title-reference">${escapeHtml(node.referenceLabel)}</span>` : ""}
+            ${renderBranchBadge(node.branchName)}
           </span>
           ${renderWatchTreeMetadata(node)}
         </button>
@@ -971,6 +987,7 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
         <span class="watch-label">
           <span class="watch-title-text">${escapeHtml(row.label)}</span>
           ${row.prReference ? `<span class="watch-title-reference">${escapeHtml(row.prReference)}</span>` : ""}
+          ${renderBranchBadge(row.branchName)}
         </span>
         ${renderMetadata(row)}
       </div>
@@ -2604,6 +2621,7 @@ async function fetchDemoActiveWorkflowRuns(): Promise<ActiveWorkflowRun[]> {
       runId: "21",
       title: "CI: Build and test",
       status: "in_progress",
+      branchName: "feat/tray-badges",
       updatedAt: "2026-05-17T12:50:00Z",
       url: "https://github.com/getsentry/sentry/actions/runs/21",
     },
@@ -2611,6 +2629,7 @@ async function fetchDemoActiveWorkflowRuns(): Promise<ActiveWorkflowRun[]> {
       runId: "22",
       title: "Release: Package app",
       status: "queued",
+      branchName: "release/0.2",
       updatedAt: "2026-05-17T12:45:00Z",
       url: "https://github.com/getsentry/sentry/actions/runs/22",
     },
@@ -2623,18 +2642,21 @@ function loadInitialWatches(): WatchRecord[] {
       createDemoWatch("8", "CI: feat: auto-start", "completed", "success", false, {
         runTitle: "feat: auto-start",
         workflowName: "CI",
+        branchName: "feat/auto-start",
         prNumber: "8",
         sourceState: "merged",
       }),
       createDemoWatch("9", "CI: feat: slug", "completed", "success", false, {
         runTitle: "feat: slug",
         workflowName: "CI",
+        branchName: "feat/slug",
         prNumber: "9",
         sourceState: "merged",
       }),
       createDemoWatch("10", "CI: ci: add Rust cache", "completed", "success", false, {
         runTitle: "ci: add Rust cache",
         workflowName: "CI",
+        branchName: "ci/rust-cache",
         timing: {
           startedAt: "2026-05-17T09:28:00Z",
           completedAt: "2026-05-17T09:31:00Z",
@@ -2644,6 +2666,7 @@ function loadInitialWatches(): WatchRecord[] {
         jobId: "42",
         jobName: "package app (macOS)",
         workflowName: "Build",
+        branchName: "main",
         timing: {
           startedAt: "2026-05-17T11:56:00Z",
         },
@@ -2661,6 +2684,7 @@ function createDemoWatch(
   conclusion: string | null,
   active: boolean,
   options: {
+    branchName?: string;
     jobId?: string;
     jobName?: string;
     prNumber?: string;
@@ -2709,6 +2733,7 @@ function createDemoWatch(
       ...(options.workflowName ? { workflowName: options.workflowName } : {}),
       ...(options.runTitle ? { runTitle: options.runTitle } : {}),
       ...(options.jobName ? { jobName: options.jobName } : {}),
+      ...(options.branchName ? { branchName: options.branchName } : {}),
     },
     status: conclusion ? `${status}:${conclusion}` : status,
     lastState: { status, conclusion },

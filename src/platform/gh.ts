@@ -30,6 +30,7 @@ type RunViewResponse = {
   conclusion?: string | null;
   created_at?: string;
   display_title?: string;
+  head_branch?: string | null;
   html_url?: string;
   name?: string;
   pull_requests?: PullRequestReference[];
@@ -42,6 +43,8 @@ type JobViewResponse = {
   conclusion?: string | null;
   completed_at?: string | null;
   created_at?: string;
+  head_branch?: string | null;
+  headBranch?: string | null;
   name?: string;
   started_at?: string | null;
   workflow_name?: string;
@@ -76,6 +79,7 @@ export type ActiveWorkflowRun = {
   runId: string;
   title: string;
   status: string;
+  branchName?: string;
   createdAt?: string;
   updatedAt?: string;
   url: string;
@@ -93,6 +97,7 @@ type WorkflowRunListResponse = {
   createdAt?: string;
   databaseId?: number | string;
   displayTitle?: string;
+  headBranch?: string | null;
   status?: string;
   updatedAt?: string;
   url?: string;
@@ -218,7 +223,7 @@ export async function fetchActiveWorkflowRuns(
           "--limit",
           "20",
           "--json",
-          "databaseId,displayTitle,workflowName,status,createdAt,updatedAt,url",
+          "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
         ]);
 
         assertSuccessfulGhResult(result);
@@ -246,10 +251,13 @@ function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWo
     return undefined;
   }
 
+  const branchName = response.headBranch?.trim();
+
   return {
     runId,
     title,
     status,
+    ...(branchName ? { branchName } : {}),
     ...(response.createdAt ? { createdAt: response.createdAt } : {}),
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
     url,
@@ -393,6 +401,7 @@ function toRunSnapshot(fallbackUrl: string, response: RunViewResponse): WatchSna
     metadata: compactMetadata({
       workflowName: response.name,
       runTitle: response.display_title,
+      branchName: response.head_branch ?? undefined,
     }),
     ...(prNumber ? { prNumber } : {}),
     ...(timing ? { timing } : {}),
@@ -414,6 +423,7 @@ function toJobSnapshot(fallbackUrl: string, response: JobViewResponse): WatchSna
     metadata: compactMetadata({
       workflowName: response.workflow_name,
       jobName: response.name,
+      branchName: response.head_branch ?? response.headBranch ?? undefined,
     }),
     ...(timing ? { timing } : {}),
     url: response.html_url || fallbackUrl,

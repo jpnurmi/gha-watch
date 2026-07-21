@@ -14,6 +14,7 @@ export type WatchMetadata = {
   workflowName?: string;
   runTitle?: string;
   jobName?: string;
+  branchName?: string;
 };
 
 export type WatchRecord = {
