@@ -37,7 +37,7 @@ build:
 	@set -eu; \
 	case "$$(uname -s)" in \
 		Linux*) \
-			$(NPM) run tauri -- build --config src-tauri/tauri.linux.conf.json; \
+			$(NPM) run tauri -- build --config src-tauri/tauri.linux.conf.json --bundles deb; \
 			;; \
 		MINGW*|MSYS*|CYGWIN*) \
 			$(NPM) run tauri -- build --config src-tauri/tauri.windows.conf.json; \
