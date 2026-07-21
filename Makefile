@@ -72,12 +72,17 @@ install: build
 				printf '%s\n' 'Missing Linux .deb package under src-tauri/target/release/bundle/deb/' >&2; \
 				exit 1; \
 			fi; \
+			deb_install_path=$$deb; \
+			case "$$deb_install_path" in \
+				/*|./*|../*) ;; \
+				*) deb_install_path=./$$deb_install_path ;; \
+			esac; \
 			if command -v apt >/dev/null 2>&1; then \
-				sudo apt install "$$deb"; \
+				sudo apt install "$$deb_install_path"; \
 			elif command -v apt-get >/dev/null 2>&1; then \
-				sudo apt-get install "$$deb"; \
+				sudo apt-get install "$$deb_install_path"; \
 			elif command -v dpkg >/dev/null 2>&1; then \
-				sudo dpkg -i "$$deb"; \
+				sudo dpkg -i "$$deb_install_path"; \
 			else \
 				printf '%s\n' 'No apt, apt-get, or dpkg command found for installing the .deb package.' >&2; \
 				exit 1; \
