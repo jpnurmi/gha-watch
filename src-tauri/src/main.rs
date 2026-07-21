@@ -1,10 +1,12 @@
+use std::sync::Mutex;
+
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, PhysicalPosition, Rect, WindowEvent,
+    AppHandle, Manager, PhysicalPosition, Rect, State, WindowEvent,
 };
 #[cfg(any(target_os = "macos", test))]
 use tauri::{LogicalPosition, Monitor, PhysicalRect, PhysicalSize};
@@ -13,6 +15,19 @@ use tauri_plugin_notification::NotificationExt;
 
 #[cfg(target_os = "macos")]
 const DESKTOP_NOTIFICATION_CLICKED_EVENT: &str = "desktop-notification-clicked";
+
+const TRAY_ID: &str = "gha-watch";
+
+#[derive(Default)]
+struct TrayIndicatorState {
+    icon: Mutex<Option<TrayIndicatorIconKey>>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct TrayIndicatorIconKey {
+    status: String,
+    has_unseen_changes: bool,
+}
 
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,18 +52,43 @@ struct DesktopNotificationClick {
 #[tauri::command]
 fn set_tray_indicator(
     app: AppHandle,
+    state: State<'_, TrayIndicatorState>,
     status: String,
     tooltip: String,
     has_unseen_changes: bool,
 ) -> Result<(), String> {
-    if let Some(tray) = app.tray_by_id("main") {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        #[cfg(target_os = "macos")]
         tray.set_title(None::<&str>)
             .map_err(|error| error.to_string())?;
-        tray.set_icon_with_as_template(
-            Some(tray_icon_for_status(&status, has_unseen_changes)?),
-            false,
-        )
-        .map_err(|error| error.to_string())?;
+
+        // Avoid resetting the AppIndicator label on Linux: an empty label can be
+        // rendered by GNOME shell extensions as an ellipsis that crowds out the icon.
+        let next_icon = TrayIndicatorIconKey {
+            status,
+            has_unseen_changes,
+        };
+        let should_update_icon = {
+            let current_icon = state.icon.lock().map_err(|error| error.to_string())?;
+            current_icon.as_ref() != Some(&next_icon)
+        };
+
+        // Linux tray icons are rewritten to disk on every native icon update;
+        // skip redundant writes to avoid transient missing-icon fallbacks.
+        if should_update_icon {
+            tray.set_icon_with_as_template(
+                Some(tray_icon_for_status(
+                    &next_icon.status,
+                    next_icon.has_unseen_changes,
+                )?),
+                false,
+            )
+            .map_err(|error| error.to_string())?;
+
+            let mut current_icon = state.icon.lock().map_err(|error| error.to_string())?;
+            *current_icon = Some(next_icon);
+        }
+
         tray.set_tooltip(Some(&tooltip))
             .map_err(|error| error.to_string())?;
     }
@@ -471,6 +511,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .manage(TrayIndicatorState::default())
         .invoke_handler(tauri::generate_handler![
             set_tray_indicator,
             show_desktop_notification
@@ -484,7 +525,7 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            let tray_builder = TrayIconBuilder::with_id("main")
+            let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(tray_icon_for_status("idle", false)?)
                 .icon_as_template(false)
                 .tooltip("GHA Watch")
@@ -500,6 +541,15 @@ fn main() {
                         toggle_main_window(tray.app_handle(), rect);
                     }
                 });
+
+            #[cfg(target_os = "linux")]
+            let tray_builder = match app.path().app_cache_dir() {
+                Ok(cache_dir) => tray_builder.temp_dir_path(cache_dir.join("tray-icons")),
+                Err(error) => {
+                    eprintln!("Could not resolve tray icon cache dir: {error}");
+                    tray_builder
+                }
+            };
 
             let tray_builder = {
                 let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
