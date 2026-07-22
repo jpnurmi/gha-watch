@@ -173,21 +173,23 @@ describe("watch tree group actions", () => {
     );
   });
 
-  it("uses explicit hover-only open-link actions instead of overloading row clicks", () => {
+  it("opens watches from row clicks instead of hover-only open-link actions", () => {
     expect(mainSource).toContain("const hasVisibleChildren = node.children.length > 0 || node.rows.length > 0;");
-    expect(mainSource).toContain("renderOpenLinkButton(\"watch-tree-action-button open-link-button\"");
-    expect(mainSource).toContain("renderOpenLinkButton(\"watch-action-button open-link-button\"");
-    expect(mainSource).toContain('data-url="${escapeHtml(url)}"');
+    expect(mainSource).toContain('data-url="${escapeHtml(row.url)}"');
+    expect(mainSource).toContain('role="button"');
+    expect(mainSource).toContain('tabindex="0"');
     expect(mainSource).toContain('class="watch-main"');
-    expect(mainSource).not.toContain('<button class="watch-main" type="button" data-action="open"');
+    expect(mainSource).toContain("openWatchRow(row, event)");
+    expect(mainSource).not.toContain("renderOpenLinkButton");
+    expect(mainSource).not.toContain('data-action="open"');
     expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*63px;/s);
     expect(styles).toMatch(
-      /\.watch \.watch-action-button\.rerun-button,[^{]*\.watch \.watch-action-button\.open-link-button,[^{]*\.watch \.watch-action-button\.remove-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
+      /\.watch \.watch-action-button\.rerun-button,[^{]*\.watch \.watch-action-button\.remove-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
     );
     expect(styles).toMatch(
-      /\.watch:hover \.watch-action-button\.rerun-button,[^{]*\.watch:focus-within \.watch-action-button\.rerun-button,[^{]*\.watch:hover \.watch-action-button\.open-link-button/s,
+      /\.watch:hover \.watch-action-button\.rerun-button,[^{]*\.watch:focus-within \.watch-action-button\.rerun-button,[^{]*\.watch:hover \.watch-action-button\.remove-button/s,
     );
-    expect(styles).not.toMatch(/\.watch:hover\s*\{[^}]*background:\s*rgb\(255 255 255 \/ 6%\);/s);
+    expect(styles).not.toContain("open-link-button");
   });
 
   it("lets long-press reorder operate on tree groups and leaf rows", () => {
@@ -218,11 +220,10 @@ describe("watch tree group actions", () => {
   });
 
   it("keeps action tooltips short while preserving descriptive accessible labels", () => {
-    expect(mainSource).toContain('title="Open"');
     expect(mainSource).toContain('title="Remove"');
-    expect(mainSource).toContain('aria-label="Open ${escapeHtml(label)} in GitHub"');
+    expect(mainSource).toContain('aria-label="Open ${escapeHtml(row.label)} in GitHub"');
     expect(mainSource).toContain('aria-label="Remove ${escapeHtml(node.label)}"');
-    expect(mainSource).not.toContain('title="Open ${escapeHtml(label)} in GitHub"');
+    expect(mainSource).not.toContain('title="Open ${escapeHtml(row.label)} in GitHub"');
     expect(mainSource).not.toContain('title="Remove ${escapeHtml(node.label)}"');
     expect(mainSource).not.toContain('title="Remove ${escapeHtml(group.repoLabel)}"');
   });

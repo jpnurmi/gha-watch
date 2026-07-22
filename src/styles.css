@@ -807,12 +807,6 @@ input {
   opacity: 1;
 }
 
-.watch-tree-action-button.open-link-button:hover,
-.watch-tree-action-button.open-link-button:focus-visible {
-  background: rgb(255 255 255 / 7%);
-  color: rgb(238 241 245 / 82%);
-}
-
 .watch-tree-action-button svg {
   width: 12px;
   height: 12px;
@@ -838,10 +832,16 @@ input {
         var(--watch-indent, 0px)
     );
   background: var(--watch-row-bg);
+  cursor: pointer;
 }
 
 .watch:hover {
   --watch-row-bg: #1a2028;
+}
+
+.watch:focus-visible {
+  outline: 1px solid rgb(88 166 255 / 55%);
+  outline-offset: -1px;
 }
 
 .watch.is-row-dragging,
@@ -1022,7 +1022,7 @@ input {
   padding: 0;
   background: transparent;
   color: inherit;
-  cursor: default;
+  cursor: pointer;
   text-align: left;
 }
 
@@ -1163,7 +1163,6 @@ input {
 }
 
 .watch .watch-action-button.rerun-button,
-.watch .watch-action-button.open-link-button,
 .watch .watch-action-button.remove-button {
   visibility: hidden;
   opacity: 0;
@@ -1172,8 +1171,6 @@ input {
 
 .watch:hover .watch-action-button.rerun-button,
 .watch:focus-within .watch-action-button.rerun-button,
-.watch:hover .watch-action-button.open-link-button,
-.watch:focus-within .watch-action-button.open-link-button,
 .watch:hover .watch-action-button.remove-button,
 .watch:focus-within .watch-action-button.remove-button {
   visibility: visible;
@@ -1195,18 +1192,8 @@ input {
   color: #d29922;
 }
 
-.open-link-button {
-  color: rgb(238 241 245 / 58%);
-}
-
 .remove-button {
   color: #ff7b72;
-}
-
-.watch-action-button.open-link-button:hover,
-.watch-action-button.open-link-button:focus-visible {
-  background: rgb(255 255 255 / 7%);
-  color: rgb(238 241 245 / 82%);
 }
 
 .watch-action-button.remove-button:hover,

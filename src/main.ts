@@ -755,7 +755,7 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
           aria-expanded="${isCollapsed ? "false" : "true"}"`
     : "";
   const canRemove = canRemoveWatchTreeNode(node, depth);
-  const hasActions = canRemove || Boolean(node.url);
+  const hasActions = canRemove;
   const children = !hasVisibleChildren || isCollapsed
     ? ""
     : `
@@ -909,7 +909,7 @@ function renderWatchTreeMetadata(node: WatchTreeNodeViewModel): string {
 function renderWatchTreeActions(node: WatchTreeNodeViewModel, depth: number): string {
   const canRemove = canRemoveWatchTreeNode(node, depth);
 
-  if (!canRemove && !node.url) {
+  if (!canRemove) {
     return "";
   }
 
@@ -934,40 +934,19 @@ function renderWatchTreeActions(node: WatchTreeNodeViewModel, depth: number): st
 
   return `
     <div class="watch-tree-actions">
-      ${node.url ? renderOpenLinkButton("watch-tree-action-button open-link-button", node.label, node.url, node.kind === "workflow" ? node.primaryRowId : undefined) : ""}
-      ${
-        canRemove
-          ? `<button
-              class="watch-tree-action-button remove-button"
-              type="button"
-              data-action="arm-remove-group"
-              data-tree-node="${escapeHtml(node.id)}"
-              data-remove-mode="${removeMode ?? "remove"}"
-              data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
-              title="Remove"
-              aria-label="Remove ${escapeHtml(node.label)}"
-            >
-              <span class="remove-icon" aria-hidden="true">&times;</span>
-            </button>`
-          : ""
-      }
+      <button
+        class="watch-tree-action-button remove-button"
+        type="button"
+        data-action="arm-remove-group"
+        data-tree-node="${escapeHtml(node.id)}"
+        data-remove-mode="${removeMode ?? "remove"}"
+        data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
+        title="Remove"
+        aria-label="Remove ${escapeHtml(node.label)}"
+      >
+        <span class="remove-icon" aria-hidden="true">&times;</span>
+      </button>
     </div>
-  `;
-}
-
-function renderOpenLinkButton(className: string, label: string, url: string, id?: string): string {
-  return `
-    <button
-      class="${className}"
-      type="button"
-      data-action="open"
-      ${id ? `data-id="${escapeHtml(id)}"` : ""}
-      data-url="${escapeHtml(url)}"
-      title="Open"
-      aria-label="Open ${escapeHtml(label)} in GitHub"
-    >
-      ${renderOpenLinkIcon()}
-    </button>
   `;
 }
 
@@ -980,6 +959,10 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
       data-id="${escapeHtml(row.id)}"
       data-reorder-key="${escapeHtml(row.id)}"
       data-row-ids="${escapeHtml(row.id)}"
+      data-url="${escapeHtml(row.url)}"
+      role="button"
+      tabindex="0"
+      aria-label="Open ${escapeHtml(row.label)} in GitHub"
       style="--watch-indent: ${depth * treeIndentStepPx}px;"
     >
       ${renderLeadingIcon(row)}
@@ -1087,7 +1070,6 @@ function renderWatchActions(row: WatchRowViewModel): string {
             </button>`
           : ""
       }
-      ${renderOpenLinkButton("watch-action-button open-link-button", row.label, row.url, row.id)}
       <button class="watch-action-button remove-button" type="button" data-action="${row.removeMode === "ignore-pr-workflow" ? "arm-ignore-pr-workflow" : "arm-remove"}" data-id="${escapeHtml(row.id)}" title="Remove" aria-label="Remove ${escapeHtml(row.label)}">
         <span class="remove-icon" aria-hidden="true">&times;</span>
       </button>
@@ -1401,32 +1383,51 @@ function bindEvents(): void {
     row.addEventListener("mouseleave", () => {
       dismissWatchActionOnRowLeave(row.dataset.id);
     });
-  }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open"]')) {
-    button.addEventListener("click", (event) => {
-      const id = button.dataset.id || "";
-      const explicitUrl = button.dataset.url || "";
-
-      if (id && consumeSuppressedWatchOpen(id)) {
-        event.preventDefault();
-        event.stopPropagation();
+    row.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest("button")) {
         return;
       }
 
-      const watch = controller.getWatches().find((item) => item.id === id);
+      openWatchRow(row, event);
+    });
 
-      if (watch) {
-        controller.markSeen(watch.id);
-        void openUrl(explicitUrl || watch.target.url);
-      } else if (explicitUrl) {
-        void openUrl(explicitUrl);
+    row.addEventListener("keydown", (event) => {
+      if (event.target instanceof Element && event.target.closest("button")) {
+        return;
       }
+
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      openWatchRow(row, event);
     });
   }
 
   bindRepoReorderEvents();
   bindWatchReorderEvents();
+}
+
+function openWatchRow(row: HTMLElement, event: Event): void {
+  const id = row.dataset.id || "";
+
+  if (id && consumeSuppressedWatchOpen(id)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  const watch = controller.getWatches().find((item) => item.id === id);
+
+  event.preventDefault();
+
+  if (watch) {
+    controller.markSeen(watch.id);
+    void openUrl(watch.target.url);
+  } else if (row.dataset.url) {
+    void openUrl(row.dataset.url);
+  }
 }
 
 function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): string {
@@ -1477,15 +1478,6 @@ function renderCheckIcon(): string {
   return `
     <svg viewBox="0 0 16 16">
       <path d="m3.5 8.2 2.8 2.8 6.2-6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-    </svg>
-  `;
-}
-
-function renderOpenLinkIcon(): string {
-  return `
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M6.25 4.25h-2.5a1.5 1.5 0 0 0-1.5 1.5v6.5a1.5 1.5 0 0 0 1.5 1.5h6.5a1.5 1.5 0 0 0 1.5-1.5v-2.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
-      <path d="M8.5 2.25h5.25V7.5m-.5-4.75-6.5 6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
     </svg>
   `;
 }
