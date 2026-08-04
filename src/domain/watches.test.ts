@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { addWatch, moveWatchGroupWithinRepo, moveWatchWithinRepo, removeWatch, type WatchRecord } from "./watches";
+import {
+  addWatch,
+  moveWatchGroupWithinRepo,
+  moveWatchWithinRepo,
+  normalizeWatchSeenStatus,
+  removeWatch,
+  type WatchRecord,
+} from "./watches";
 
 function watch(overrides: Partial<WatchRecord>): WatchRecord {
   const target = overrides.target ?? {
@@ -76,6 +83,26 @@ describe("watch operations", () => {
     });
 
     expect(addWatch(first, first[0].target)).toBe(first);
+  });
+
+  it("restores terminal state from saved status labels", () => {
+    expect(
+      normalizeWatchSeenStatus(
+        watch({
+          active: false,
+          status: "completed:cancelled",
+          lastSeenStatus: undefined,
+          lastState: undefined,
+        }),
+      ),
+    ).toMatchObject({
+      status: "completed:cancelled",
+      lastSeenStatus: "completed:cancelled",
+      lastState: {
+        status: "completed",
+        conclusion: "cancelled",
+      },
+    });
   });
 
   it("stores the source PR when adding a resolved PR run watch", () => {

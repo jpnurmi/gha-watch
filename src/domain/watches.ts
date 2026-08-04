@@ -175,14 +175,34 @@ export function markAllWatchesSeen(watches: WatchRecord[]): WatchRecord[] {
 }
 
 export function normalizeWatchSeenStatus(watch: WatchRecord): WatchRecord {
+  const lastState = getWatchState(watch);
+
   return {
     ...watch,
+    ...(lastState ? { lastState } : {}),
     lastSeenStatus: watch.lastSeenStatus ?? watch.status,
   };
 }
 
 export function hasUnseenStatusChange(watch: WatchRecord): boolean {
   return Boolean(watch.lastSeenStatus && watch.status !== watch.lastSeenStatus);
+}
+
+export function getWatchState(watch: Pick<WatchRecord, "lastState" | "status">): WatchState | undefined {
+  return watch.lastState ?? parseTerminalWatchStatus(watch.status);
+}
+
+function parseTerminalWatchStatus(status: string): WatchState | undefined {
+  const parts = status.split(":");
+
+  if (parts.length > 2 || parts[0] !== "completed") {
+    return undefined;
+  }
+
+  return {
+    status: "completed",
+    conclusion: parts[1] || null,
+  };
 }
 
 function moveWatchGroupInList(

@@ -79,6 +79,23 @@ describe("createTrayState", () => {
     });
   });
 
+  it("uses a cancelled tray icon for a saved cancelled job without last state", () => {
+    expect(
+      createTrayState([
+        watch({
+          active: false,
+          status: "completed:cancelled",
+          lastState: undefined,
+        }),
+      ]),
+    ).toEqual({
+      status: "cancelled",
+      hasUnseenChanges: false,
+      label: "1 cancelled watch",
+      tooltip: "GHA Watch has cancelled watches",
+    });
+  });
+
   it("does not treat skipped watches as failed issues", () => {
     expect(
       createTrayState([

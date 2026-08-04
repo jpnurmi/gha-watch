@@ -1,5 +1,5 @@
 import type { FavoriteRepo } from "../domain/favorites";
-import { getWatchId, hasUnseenStatusChange, type PrSourceState, type WatchRecord } from "../domain/watches";
+import { getWatchId, getWatchState, hasUnseenStatusChange, type PrSourceState, type WatchRecord } from "../domain/watches";
 
 export type RowTone =
   | "pending"
@@ -140,8 +140,9 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
     };
   }
 
-  const status = watch.lastState?.status || watch.status;
-  const conclusion = watch.lastState?.conclusion || null;
+  const state = getWatchState(watch);
+  const status = state?.status || watch.status;
+  const conclusion = state?.conclusion || null;
 
   if (status === "completed") {
     if (conclusion === "success") {
@@ -238,10 +239,12 @@ function canRerun(watch: WatchRecord): boolean {
     return false;
   }
 
-  return watch.lastState?.status === "completed" &&
-    watch.lastState.conclusion !== "success" &&
-    watch.lastState.conclusion !== "cancelled" &&
-    watch.lastState.conclusion !== "skipped";
+  const state = getWatchState(watch);
+
+  return state?.status === "completed" &&
+    state.conclusion !== "success" &&
+    state.conclusion !== "cancelled" &&
+    state.conclusion !== "skipped";
 }
 
 function getWatchRemoveMode(watch: WatchRecord): WatchRemoveMode {
