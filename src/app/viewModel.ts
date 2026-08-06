@@ -31,6 +31,7 @@ export type WatchRowViewModel = {
   statusLabel: string;
   description: string;
   tone: RowTone;
+  hasFailedChildren: boolean;
   timingText?: string;
   unseenStatusChange: boolean;
   canRerun: boolean;
@@ -55,6 +56,7 @@ export type WatchTreeNodeViewModel = {
   primaryRowId?: string;
   statusLabel: string;
   tone: RowTone;
+  hasFailedChildren: boolean;
   timingText?: string;
   unseenStatusChange: boolean;
   url?: string;
@@ -132,6 +134,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
       statusLabel: "Errored",
       description: watch.error,
       tone: "error",
+      hasFailedChildren: false,
       timingText: getTimingText(watch, "error", now),
       unseenStatusChange: hasUnseenStatusChange(watch),
       canRerun: canRerun(watch),
@@ -165,7 +168,13 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
   }
 
   if (status === "in_progress") {
-    return createRow(watch, "In progress", "This check has started...", "in-progress", now);
+    return createRow(
+      watch,
+      "In progress",
+      state?.hasFailedChildren ? "This check is still running, but at least one job has failed." : "This check has started...",
+      "in-progress",
+      now,
+    );
   }
 
   return createRow(watch, titleCase(status), "Waiting for the next status update...", "pending", now);
@@ -188,6 +197,7 @@ function createRow(
     statusLabel,
     description,
     tone,
+    hasFailedChildren: Boolean(getWatchState(watch)?.hasFailedChildren),
     timingText: getTimingText(watch, tone, now),
     unseenStatusChange: hasUnseenStatusChange(watch),
     canRerun: canRerun(watch),
@@ -320,6 +330,7 @@ function addRowToTree(group: WatchGroupViewModel, watch: WatchRecord, row: Watch
   parentNode.rowCount += 1;
   parentNode.rowIds.push(row.id);
   parentNode.tone = combineTones(parentNode.tone, row.tone);
+  parentNode.hasFailedChildren ||= row.hasFailedChildren;
   parentNode.unseenStatusChange ||= row.unseenStatusChange;
   parentNode.statusLabel = getTreeStatusLabel(parentNode.tone);
   parentNode.detailLabel = getPullRequestNodeDetailLabel(parentNode, row);
@@ -330,6 +341,7 @@ function addRowToTree(group: WatchGroupViewModel, watch: WatchRecord, row: Watch
     workflowNode.primaryRowId = row.id;
   }
   workflowNode.tone = combineTones(workflowNode.tone, row.tone);
+  workflowNode.hasFailedChildren ||= row.hasFailedChildren;
   workflowNode.unseenStatusChange ||= row.unseenStatusChange;
   workflowNode.statusLabel = getTreeStatusLabel(workflowNode.tone);
   workflowNode.detailLabel = getWorkflowNodeDetailLabel(workflowNode);
@@ -354,6 +366,7 @@ function addDirectWorkflowRowToTree(group: WatchGroupViewModel, watch: WatchReco
   workflowNode.rowCount += 1;
   addUniqueRowId(workflowNode, row.id);
   workflowNode.tone = combineTones(workflowNode.tone, row.tone);
+  workflowNode.hasFailedChildren ||= row.hasFailedChildren;
   workflowNode.unseenStatusChange ||= row.unseenStatusChange;
   workflowNode.statusLabel = getTreeStatusLabel(workflowNode.tone);
   workflowNode.detailLabel = getWorkflowNodeDetailLabel(workflowNode);
@@ -386,6 +399,7 @@ function updateDirectWorkflowParentNode(node: WatchTreeNodeViewModel, row: Watch
   node.branchName = row.branchName;
   addUniqueRowId(node, row.id);
   node.tone = combineTones(node.tone, row.tone);
+  node.hasFailedChildren ||= row.hasFailedChildren;
   node.unseenStatusChange ||= row.unseenStatusChange;
   node.statusLabel = getTreeStatusLabel(node.tone);
   node.detailLabel = node.rowCount > 0 ? getWorkflowNodeDetailLabel(node) : undefined;
@@ -457,6 +471,7 @@ function createTreeNode(
     rowIds: [],
     statusLabel: getTreeStatusLabel(tone),
     tone,
+    hasFailedChildren: false,
     unseenStatusChange: false,
     ...(url ? { url } : {}),
     rows: [],

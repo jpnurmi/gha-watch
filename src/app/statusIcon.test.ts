@@ -12,4 +12,11 @@ describe("getStatusIconSvg", () => {
       expect(svg).not.toContain('stroke="#fff"');
     },
   );
+
+  it("uses the standard spinner group for busy icons", () => {
+    const svg = getStatusIconSvg("in-progress", "mixed");
+
+    expect(svg).toContain('class="status-spinner"');
+    expect(svg).not.toContain("status-failed-overlay");
+  });
 });

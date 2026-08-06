@@ -107,6 +107,68 @@ describe("fetchWatchState", () => {
     ]);
   });
 
+  it("marks in-progress run state when a child job has already failed", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          status: "in_progress",
+          conclusion: "",
+          display_title: "Run tests",
+          name: "CI",
+          jobs_url: "https://api.github.com/repos/getsentry/sentry/actions/runs/123/jobs",
+          html_url: "https://github.com/getsentry/sentry/actions/runs/123",
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              status: "completed",
+              conclusion: "failure",
+            },
+            {
+              status: "in_progress",
+              conclusion: null,
+            },
+          ],
+        }),
+        stderr: "",
+      },
+    ]);
+
+    await expect(
+      fetchWatchState(
+        {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "123",
+          url: "https://github.com/getsentry/sentry/actions/runs/123",
+        },
+        executor,
+      ),
+    ).resolves.toMatchObject({
+      status: "in_progress",
+      conclusion: null,
+      hasFailedChildren: true,
+      title: "CI: Run tests",
+    });
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry/actions/runs/123"],
+      },
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry/actions/runs/123/jobs?per_page=100"],
+      },
+    ]);
+  });
+
   it("fetches job state via gh api", async () => {
     const { executor, calls } = createExecutor({
       code: 0,

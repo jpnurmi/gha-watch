@@ -1,6 +1,7 @@
 export type WatchState = {
   status: string;
   conclusion: string | null;
+  hasFailedChildren?: boolean;
 };
 
 export type StatusTransition =
@@ -16,6 +17,10 @@ export type StatusTransition =
 export function formatWatchState(state: WatchState): string {
   if (state.status === "completed" && state.conclusion) {
     return `${state.status}:${state.conclusion}`;
+  }
+
+  if (state.hasFailedChildren) {
+    return `${state.status}:failure`;
   }
 
   return state.status;

@@ -40,8 +40,10 @@ export function getStatusIconSvg(tone: RowTone, idSuffix = "default"): string {
 
   return `
     <svg viewBox="0 0 16 16">
-      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.25" opacity="0.45"/>
-      <path d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.25"/>
+      <g class="status-spinner">
+        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.25" opacity="0.45"/>
+        <path d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.25"/>
+      </g>
     </svg>
   `;
 }

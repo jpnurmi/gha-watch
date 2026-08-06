@@ -1082,7 +1082,7 @@ function renderWatchTreeLeadingIcon(node: WatchTreeNodeViewModel): string {
 }
 
 function renderWatchTreeMetadata(node: WatchTreeNodeViewModel): string {
-  const items = [renderWorkflowStatusIcon(node.id, node.tone, node.statusLabel)];
+  const items = [renderWorkflowStatusIcon(node.id, node.tone, node.statusLabel, node.hasFailedChildren)];
   const detail = [node.timingText, node.detailLabel].filter((item): item is string => Boolean(item)).join(" · ");
 
   if (detail) {
@@ -1210,12 +1210,12 @@ function renderMetaSeparator(): string {
 }
 
 function renderWorkflowStatus(row: WatchRowViewModel): string {
-  return renderWorkflowStatusIcon(row.id, row.tone, row.statusLabel);
+  return renderWorkflowStatusIcon(row.id, row.tone, row.statusLabel, row.hasFailedChildren);
 }
 
-function renderWorkflowStatusIcon(id: string, tone: RowTone, statusLabel: string): string {
+function renderWorkflowStatusIcon(id: string, tone: RowTone, statusLabel: string, hasFailedChildren = false): string {
   return `
-    <span class="watch-workflow-status status-icon-${tone}">
+    <span class="watch-workflow-status status-icon-${tone}${hasFailedChildren ? " has-failed-children" : ""}">
       ${getStatusIconSvg(tone, `${id}-workflow`)}
       <span>${escapeHtml(statusLabel)}</span>
     </span>

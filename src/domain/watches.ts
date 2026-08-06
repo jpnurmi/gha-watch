@@ -195,8 +195,18 @@ export function getWatchState(watch: Pick<WatchRecord, "lastState" | "status">):
 function parseTerminalWatchStatus(status: string): WatchState | undefined {
   const parts = status.split(":");
 
-  if (parts.length > 2 || parts[0] !== "completed") {
+  if (parts.length > 2) {
     return undefined;
+  }
+
+  if (parts[0] !== "completed") {
+    return parts[1] === "failure"
+      ? {
+          status: parts[0],
+          conclusion: null,
+          hasFailedChildren: true,
+        }
+      : undefined;
   }
 
   return {

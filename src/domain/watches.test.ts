@@ -105,6 +105,26 @@ describe("watch operations", () => {
     });
   });
 
+  it("restores active failed-child state from saved status labels", () => {
+    expect(
+      normalizeWatchSeenStatus(
+        watch({
+          status: "in_progress:failure",
+          lastSeenStatus: undefined,
+          lastState: undefined,
+        }),
+      ),
+    ).toMatchObject({
+      status: "in_progress:failure",
+      lastSeenStatus: "in_progress:failure",
+      lastState: {
+        status: "in_progress",
+        conclusion: null,
+        hasFailedChildren: true,
+      },
+    });
+  });
+
   it("stores the source PR when adding a resolved PR run watch", () => {
     const watches = addWatch(
       [],

@@ -121,6 +121,7 @@ export function createWatchController(
         lastState: {
           status: snapshot.status,
           conclusion: snapshot.conclusion,
+          ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
         },
         timing: snapshot.timing,
         active: !isTerminalStatus(snapshot),
@@ -301,6 +302,7 @@ export function createWatchController(
           const nextState = {
             status: snapshot.status,
             conclusion: snapshot.conclusion,
+            ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
           };
           const status = formatWatchState(nextState);
 
@@ -381,6 +383,7 @@ export function createWatchController(
         const nextState = {
           status: snapshot.status,
           conclusion: snapshot.conclusion,
+          ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
         };
         const status = formatWatchState(nextState);
         const transition = getStatusTransition(watch.lastState, nextState);

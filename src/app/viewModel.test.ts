@@ -480,6 +480,26 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("keeps failed-child workflow runs busy while exposing a failure overlay signal", () => {
+    const model = createPopupViewModel([
+      watch({
+        status: "in_progress:failure",
+        lastState: { status: "in_progress", conclusion: null, hasFailedChildren: true },
+      }),
+    ]);
+
+    expect(model.rows.map((row) => [row.statusLabel, row.description, row.tone, row.hasFailedChildren])).toEqual([
+      [
+        "In progress",
+        "This check is still running, but at least one job has failed.",
+        "in-progress",
+        true,
+      ],
+    ]);
+    expect(model.title).toBe("Some checks haven't completed yet");
+    expect(model.subtitle).toBe("1 in progress check");
+  });
+
   it("keeps workflow status separate from pull request source state", () => {
     const model = createPopupViewModel([
       watch({

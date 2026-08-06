@@ -32,10 +32,20 @@ type RunViewResponse = {
   display_title?: string;
   head_branch?: string | null;
   html_url?: string;
+  jobs_url?: string;
   name?: string;
   pull_requests?: PullRequestReference[];
   run_started_at?: string;
   updated_at?: string;
+};
+
+type RunJobsResponse = {
+  jobs?: RunJobResponse[];
+};
+
+type RunJobResponse = {
+  conclusion?: string | null;
+  status?: string;
 };
 
 type JobViewResponse = {
@@ -151,7 +161,12 @@ export async function fetchWatchState(
       ]);
 
       assertSuccessfulGhResult(result);
-      return toRunSnapshot(target.url, parseJson<RunViewResponse>(result.stdout));
+      const response = parseJson<RunViewResponse>(result.stdout);
+      const failedChildren = shouldFetchRunJobs(response)
+        ? await fetchRunFailedChildren(target, executor)
+        : undefined;
+
+      return toRunSnapshot(target.url, response, failedChildren);
     }
 
     const result = await executor.execute("gh", [
@@ -503,7 +518,28 @@ export function createTauriShellExecutor(): ShellExecutor {
   };
 }
 
-function toRunSnapshot(fallbackUrl: string, response: RunViewResponse): WatchSnapshot {
+async function fetchRunFailedChildren(
+  target: Extract<WatchTarget, { kind: "run" }>,
+  executor: ShellExecutor,
+): Promise<boolean> {
+  const result = await executor.execute("gh", [
+    "api",
+    `repos/${target.owner}/${target.repo}/actions/runs/${target.runId}/jobs?per_page=100`,
+  ]);
+
+  assertSuccessfulGhResult(result);
+  return runJobsHaveFailures(parseJson<RunJobsResponse>(result.stdout));
+}
+
+function shouldFetchRunJobs(response: RunViewResponse): boolean {
+  return response.status === "in_progress" && Boolean(response.jobs_url);
+}
+
+function runJobsHaveFailures(response: RunJobsResponse): boolean {
+  return Boolean(response.jobs?.some((job) => job.status === "completed" && isFailureConclusion(job.conclusion)));
+}
+
+function toRunSnapshot(fallbackUrl: string, response: RunViewResponse, failedChildren = false): WatchSnapshot {
   const status = requiredString(response.status, "run status");
   const timing = compactTiming({
     queuedAt: response.created_at,
@@ -521,6 +557,7 @@ function toRunSnapshot(fallbackUrl: string, response: RunViewResponse): WatchSna
       runTitle: response.display_title,
       branchName: response.head_branch ?? undefined,
     }),
+    ...(failedChildren ? { hasFailedChildren: true } : {}),
     ...(prNumber ? { prNumber } : {}),
     ...(timing ? { timing } : {}),
     url: response.html_url || fallbackUrl,
@@ -677,6 +714,10 @@ function getPullRequestNumber(pullRequests: PullRequestReference[] | undefined):
 
 function normalizeConclusion(conclusion: string | null | undefined): string | null {
   return conclusion ? conclusion : null;
+}
+
+function isFailureConclusion(conclusion: string | null | undefined): boolean {
+  return Boolean(conclusion && conclusion !== "success" && conclusion !== "cancelled" && conclusion !== "skipped");
 }
 
 function requiredString(value: string | undefined, label: string): string {

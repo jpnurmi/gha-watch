@@ -1057,6 +1057,10 @@ input {
   color: #f85149;
 }
 
+.watch-workflow-status.status-icon-in-progress.has-failed-children {
+  color: #f85149;
+}
+
 .status-icon-cancelled,
 .status-icon-skipped {
   color: #8b949e;
@@ -1082,9 +1086,10 @@ input {
   color: #8b949e;
 }
 
-.status-icon-pending svg,
-.status-icon-in-progress svg {
+.status-icon-pending .status-spinner,
+.status-icon-in-progress .status-spinner {
   animation: status-spin 900ms linear infinite;
+  transform-origin: center;
 }
 
 @keyframes status-spin {
@@ -1094,8 +1099,8 @@ input {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .status-icon-pending svg,
-  .status-icon-in-progress svg {
+  .status-icon-pending .status-spinner,
+  .status-icon-in-progress .status-spinner {
     animation: none;
   }
 }

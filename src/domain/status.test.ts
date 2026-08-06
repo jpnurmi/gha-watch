@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { getStatusTransition, isTerminalStatus } from "./status";
+import { formatWatchState, getStatusTransition, isTerminalStatus } from "./status";
+
+describe("formatWatchState", () => {
+  it("keeps active failed-child states distinct from plain in-progress states", () => {
+    expect(formatWatchState({ status: "in_progress", conclusion: null, hasFailedChildren: true })).toBe(
+      "in_progress:failure",
+    );
+  });
+});
 
 describe("getStatusTransition", () => {
   it("does not notify for the initial baseline state", () => {
@@ -66,6 +74,18 @@ describe("getStatusTransition", () => {
         { status: "in_progress", conclusion: null },
       ),
     ).toEqual({ changed: false, notify: false });
+  });
+
+  it("tracks but does not notify when an active run gains failed children", () => {
+    expect(
+      getStatusTransition(
+        { status: "in_progress", conclusion: null },
+        { status: "in_progress", conclusion: null, hasFailedChildren: true },
+      ),
+    ).toEqual({
+      changed: true,
+      notify: false,
+    });
   });
 });
 
