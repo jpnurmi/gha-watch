@@ -91,10 +91,22 @@ import "./styles.css";
 const pollIntervalMs = 30_000;
 const treeIndentStepPx = 26;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
-document.documentElement.dataset.platform = /\bWindows\b/i.test(navigator.userAgent) ? "windows" : "default";
+document.documentElement.dataset.platform = getUiPlatform(navigator.userAgent);
 
 if (!appRoot) {
   throw new Error("App root was not found.");
+}
+
+function getUiPlatform(userAgent: string): string {
+  if (/\bWindows\b/i.test(userAgent)) {
+    return "windows";
+  }
+
+  if (/\bLinux\b/i.test(userAgent)) {
+    return "linux";
+  }
+
+  return "default";
 }
 
 const app = appRoot;

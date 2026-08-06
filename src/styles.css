@@ -52,6 +52,10 @@ input {
   box-shadow: none;
 }
 
+:root[data-platform="linux"] .shell {
+  border-radius: 12px 12px 0 0;
+}
+
 .header {
   display: flex;
   min-height: 92px;
