@@ -67,6 +67,16 @@ type PrCheckResponse = {
   startedAt?: string | null;
 };
 
+type CommitCheckRunsResponse = {
+  check_runs?: CommitCheckRunResponse[];
+};
+
+type CommitCheckRunResponse = {
+  completed_at?: string | null;
+  conclusion?: string | null;
+  status?: string;
+};
+
 type RepositoryViewResponse = {
   default_branch?: string;
   owner?: {
@@ -96,6 +106,16 @@ export type ActiveWorkflowRun = {
   createdAt?: string;
   updatedAt?: string;
   url: string;
+};
+
+export type RepositoryCiStatusTone = "success" | "pending" | "failure";
+
+export type RepositoryCiStatus = {
+  tone: RepositoryCiStatusTone;
+  label: string;
+  description: string;
+  defaultBranch: string;
+  updatedAt?: string;
 };
 
 export type WorkflowDefinition = {
@@ -204,6 +224,25 @@ export async function fetchRepositoryDefaultBranch(
 
     assertSuccessfulGhResult(result);
     return requiredString(parseJson<RepositoryViewResponse>(result.stdout).default_branch, "repository default branch");
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function fetchRepositoryDefaultBranchCiStatus(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<RepositoryCiStatus> {
+  try {
+    const defaultBranch = await fetchRepositoryDefaultBranch(target, executor);
+    const result = await executor.execute("gh", [
+      "api",
+      `repos/${target.owner}/${target.repo}/commits/${encodeURIComponent(defaultBranch)}/check-runs?per_page=100`,
+    ]);
+
+    assertSuccessfulGhResult(result);
+
+    return summarizeRepositoryCiStatus(defaultBranch, parseJson<CommitCheckRunsResponse>(result.stdout));
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -417,6 +456,62 @@ function dedupeWorkflowDefinitionNames(): (workflow: WorkflowDefinition) => bool
 
 function compareWorkflowDefinitionsByName(left: WorkflowDefinition, right: WorkflowDefinition): number {
   return left.name.localeCompare(right.name);
+}
+
+function summarizeRepositoryCiStatus(defaultBranch: string, response: CommitCheckRunsResponse): RepositoryCiStatus {
+  const checks = (response.check_runs ?? []).filter((check) => check.status?.trim() || check.conclusion?.trim());
+  const updatedAt = getLatestTimestamp(checks.map((check) => check.completed_at ?? undefined));
+
+  if (checks.length === 0) {
+    return {
+      tone: "pending",
+      label: "Unknown",
+      description: `${defaultBranch}: no default branch check runs found`,
+      defaultBranch,
+      ...(updatedAt ? { updatedAt } : {}),
+    };
+  }
+
+  const incompleteCount = checks.filter((check) => check.status?.trim() !== "completed").length;
+
+  if (incompleteCount > 0) {
+    return {
+      tone: "pending",
+      label: "Pending",
+      description: `${defaultBranch}: ${formatCheckCount(incompleteCount)} still running or queued`,
+      defaultBranch,
+      ...(updatedAt ? { updatedAt } : {}),
+    };
+  }
+
+  const failedCount = checks.filter((check) => isFailingRepositoryConclusion(check.conclusion)).length;
+
+  if (failedCount > 0) {
+    return {
+      tone: "failure",
+      label: "Failing",
+      description: `${defaultBranch}: ${formatCheckCount(failedCount)} not successful`,
+      defaultBranch,
+      ...(updatedAt ? { updatedAt } : {}),
+    };
+  }
+
+  return {
+    tone: "success",
+    label: "Passing",
+    description: `${defaultBranch}: latest check runs passed`,
+    defaultBranch,
+    ...(updatedAt ? { updatedAt } : {}),
+  };
+}
+
+function formatCheckCount(count: number): string {
+  return `${count} check${count === 1 ? "" : "s"}`;
+}
+
+function isFailingRepositoryConclusion(conclusion: string | null | undefined): boolean {
+  const cleanConclusion = conclusion?.trim();
+  return Boolean(cleanConclusion && cleanConclusion !== "success" && cleanConclusion !== "neutral" && cleanConclusion !== "skipped");
 }
 
 function getPullRequestListNumber(value: number | string | undefined): string | undefined {

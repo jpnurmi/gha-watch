@@ -79,10 +79,19 @@ export type WatchGroupViewModel = {
   repo: string;
   repoLabel: string;
   repoIconUrl?: string;
+  ciStatus?: RepoCiStatusViewModel;
   favorite: boolean;
   rows: WatchRowViewModel[];
   tree: WatchTreeNodeViewModel[];
   items: WatchGroupItemViewModel[];
+};
+
+export type RepoCiStatusTone = "success" | "pending" | "failure";
+
+export type RepoCiStatusViewModel = {
+  tone: RepoCiStatusTone;
+  label: string;
+  description: string;
 };
 
 export type PopupViewModel = {
@@ -109,6 +118,7 @@ export function createPopupViewModel(
   now = new Date(),
   favoriteRepos: FavoriteRepo[] = [],
   repoOrder: string[] = [],
+  repoCiStatuses: Record<string, RepoCiStatusViewModel> = {},
 ): PopupViewModel {
   const rows = watches.map((watch) => createWatchRowViewModel(watch, now));
   const counts = countRows(rows);
@@ -117,7 +127,7 @@ export function createPopupViewModel(
     title: getTitle(counts, rows.length),
     subtitle: getSubtitle(counts, rows.length),
     headerTone: getHeaderTone(counts, rows.length),
-    groups: orderGroups(groupRowsByRepo(watches, rows, favoriteRepos), repoOrder),
+    groups: orderGroups(groupRowsByRepo(watches, rows, favoriteRepos, repoCiStatuses), repoOrder),
     rows,
   };
 }
@@ -265,13 +275,14 @@ function groupRowsByRepo(
   watches: WatchRecord[],
   rows: WatchRowViewModel[],
   favoriteRepos: FavoriteRepo[],
+  repoCiStatuses: Record<string, RepoCiStatusViewModel>,
 ): WatchGroupViewModel[] {
   const groups: WatchGroupViewModel[] = [];
   const groupByRepo = new Map<string, WatchGroupViewModel>();
 
   for (const favorite of favoriteRepos) {
     const repoLabel = getRepoLabel(favorite);
-    const group = createWatchGroup(favorite.owner, favorite.repo, favorite.repoIconUrl, true);
+    const group = createWatchGroup(favorite.owner, favorite.repo, favorite.repoIconUrl, true, repoCiStatuses[repoLabel]);
     groupByRepo.set(repoLabel, group);
     groups.push(group);
   }
@@ -282,7 +293,7 @@ function groupRowsByRepo(
     let group = groupByRepo.get(repoLabel);
 
     if (!group) {
-      group = createWatchGroup(watch.target.owner, watch.target.repo, watch.repoIconUrl, false);
+      group = createWatchGroup(watch.target.owner, watch.target.repo, watch.repoIconUrl, false, repoCiStatuses[repoLabel]);
       groupByRepo.set(repoLabel, group);
       groups.push(group);
     } else if (!group.repoIconUrl && watch.repoIconUrl) {
@@ -740,12 +751,14 @@ function createWatchGroup(
   repo: string,
   repoIconUrl: string | undefined,
   favorite: boolean,
+  ciStatus?: RepoCiStatusViewModel,
 ): WatchGroupViewModel {
   return {
     owner,
     repo,
     repoLabel: `${owner}/${repo}`,
     ...(repoIconUrl ? { repoIconUrl } : {}),
+    ...(ciStatus ? { ciStatus } : {}),
     favorite,
     rows: [],
     tree: [],

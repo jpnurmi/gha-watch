@@ -3,6 +3,7 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
   fetchRepositoryIconUrl,
   fetchUserActiveWorkflowRuns,
@@ -433,6 +434,129 @@ describe("fetchRepositoryDefaultBranch", () => {
         args: ["api", "repos/getsentry/sentry-native"],
       },
     ]);
+  });
+});
+
+describe("fetchRepositoryDefaultBranchCiStatus", () => {
+  it("aggregates passing default branch check runs", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          default_branch: "main",
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          check_runs: [
+            {
+              status: "completed",
+              conclusion: "success",
+              completed_at: "2026-05-17T12:00:00Z",
+            },
+            {
+              status: "completed",
+              conclusion: "skipped",
+              completed_at: "2026-05-17T12:05:00Z",
+            },
+          ],
+        }),
+        stderr: "",
+      },
+    ]);
+
+    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toEqual({
+      tone: "success",
+      label: "Passing",
+      description: "main: latest check runs passed",
+      defaultBranch: "main",
+      updatedAt: "2026-05-17T12:05:00.000Z",
+    });
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry"],
+      },
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry/commits/main/check-runs?per_page=100"],
+      },
+    ]);
+  });
+
+  it("marks default branch CI pending when any check run has not completed", async () => {
+    const { executor } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          default_branch: "main",
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          check_runs: [
+            {
+              status: "in_progress",
+              conclusion: "",
+              completed_at: null,
+            },
+            {
+              status: "completed",
+              conclusion: "failure",
+              completed_at: "2026-05-17T12:00:00Z",
+            },
+          ],
+        }),
+        stderr: "",
+      },
+    ]);
+
+    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toMatchObject({
+      tone: "pending",
+      label: "Pending",
+      description: "main: 1 check still running or queued",
+    });
+  });
+
+  it("marks default branch CI failing when completed check runs are not successful", async () => {
+    const { executor } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          default_branch: "main",
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          check_runs: [
+            {
+              status: "completed",
+              conclusion: "failure",
+              completed_at: "2026-05-17T12:05:00Z",
+            },
+            {
+              status: "completed",
+              conclusion: "success",
+              completed_at: "2026-05-17T12:00:00Z",
+            },
+          ],
+        }),
+        stderr: "",
+      },
+    ]);
+
+    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toMatchObject({
+      tone: "failure",
+      label: "Failing",
+      description: "main: 1 check not successful",
+    });
   });
 });
 

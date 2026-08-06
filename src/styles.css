@@ -707,7 +707,7 @@ input {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
 }
 
 .watch-group-title {
@@ -720,6 +720,40 @@ input {
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.repo-ci-status {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+}
+
+.repo-ci-status svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.repo-ci-status.is-success {
+  color: #3fb950;
+}
+
+.repo-ci-status.is-pending {
+  color: #d29922;
+}
+
+.repo-ci-status.is-failure {
+  color: #f85149;
+}
+
+.repo-ci-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .watch-group-list {

@@ -337,6 +337,52 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("attaches CI status summaries to repository groups", () => {
+    const model = createPopupViewModel(
+      [
+        watch({
+          status: "completed:success",
+          active: false,
+          lastState: { status: "completed", conclusion: "success" },
+        }),
+      ],
+      new Date(),
+      [{ owner: "jpnurmi", repo: "gha-watch" }],
+      [],
+      {
+        "getsentry/sentry": {
+          tone: "success",
+          label: "Passing",
+          description: "main: latest check runs passed",
+        },
+        "jpnurmi/gha-watch": {
+          tone: "failure",
+          label: "Failing",
+          description: "main: 1 check not successful",
+        },
+      },
+    );
+
+    expect(model.groups.map((group) => [group.repoLabel, group.ciStatus])).toEqual([
+      [
+        "jpnurmi/gha-watch",
+        {
+          tone: "failure",
+          label: "Failing",
+          description: "main: 1 check not successful",
+        },
+      ],
+      [
+        "getsentry/sentry",
+        {
+          tone: "success",
+          label: "Passing",
+          description: "main: latest check runs passed",
+        },
+      ],
+    ]);
+  });
+
   it("keeps favorite repos visible even when they have no watches", () => {
     const model = createPopupViewModel(
       [

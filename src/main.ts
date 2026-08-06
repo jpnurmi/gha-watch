@@ -33,6 +33,7 @@ import {
 import { createTrayState } from "./app/trayState";
 import {
   createPopupViewModel,
+  type RepoCiStatusViewModel,
   type RowTone,
   type WatchGroupViewModel,
   type WatchRowViewModel,
@@ -69,6 +70,7 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
   fetchRepositoryIconUrl,
   fetchUserActiveWorkflowRuns,
@@ -76,6 +78,7 @@ import {
   fetchWorkflowDefinitions,
   type ActiveWorkflowRun,
   type OpenPullRequest,
+  type RepositoryCiStatus,
   type WorkflowDefinition,
   rerunFailedWatch,
 } from "./platform/gh";
@@ -124,6 +127,8 @@ let suppressedTreeToggleUntilMs = 0;
 let suppressedWatchOpenId: string | undefined;
 let suppressedWatchOpenUntilMs = 0;
 let settings = loadSettings();
+let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
+const repoCiStatusRefreshes = new Set<string>();
 
 type RepoDragState = {
   sourceKey: string;
@@ -245,6 +250,7 @@ function notifyStatusChange(notification: WatchNotification): Promise<void> {
 controller.subscribe(() => {
   render();
   void updateTrayIndicator();
+  void refreshListedRepositoryCiStatuses();
 });
 
 render();
@@ -252,6 +258,7 @@ void updateTrayIndicator();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void controller.refreshWatchMetadata();
+void refreshListedRepositoryCiStatuses();
 void listenForDesktopNotificationClicks((click) => {
   controller.markSeen(click.watchId);
   void openUrl(click.url);
@@ -329,7 +336,7 @@ void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
 
 function render(): void {
   const watches = controller.getWatches();
-  const viewModel = createPopupViewModel(watches, new Date(), settings.favoriteRepos, settings.repoOrder);
+  const viewModel = createPopupViewModel(watches, new Date(), settings.favoriteRepos, settings.repoOrder, repoCiStatuses);
   const hasWatches = watches.length > 0;
   const hasFinishedWatches = watches.some((watch) => !watch.active);
 
@@ -463,6 +470,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
         >
           <span class="watch-group-meta">
             <span class="watch-group-title">${escapeHtml(group.repoLabel)}</span>
+            ${renderRepoCiStatus(group)}
           </span>
         </button>
         ${renderRepoGroupActions(group, actions)}
@@ -480,6 +488,42 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
 
 function renderWatchGroupItem(item: WatchGroupViewModel["items"][number]): string {
   return item.kind === "tree" ? renderWatchTreeNode(item.node, 0) : renderWatch(item.row, 0);
+}
+
+function renderRepoCiStatus(group: WatchGroupViewModel): string {
+  if (!group.ciStatus) {
+    return "";
+  }
+
+  return `
+    <span
+      class="repo-ci-status is-${group.ciStatus.tone}"
+      title="${escapeHtml(group.ciStatus.description)}"
+      aria-label="${escapeHtml(group.ciStatus.label)}"
+    >
+      ${renderRepoCiStatusGlyph(group.ciStatus.tone)}
+    </span>
+  `;
+}
+
+function renderRepoCiStatusGlyph(tone: RepoCiStatusViewModel["tone"]): string {
+  if (tone === "success") {
+    return `
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="m3.25 8.25 3 3 6.5-6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2"/>
+      </svg>
+    `;
+  }
+
+  if (tone === "failure") {
+    return `
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/>
+      </svg>
+    `;
+  }
+
+  return `<span class="repo-ci-dot" aria-hidden="true"></span>`;
 }
 
 function renderRepoGroupChevron(
@@ -1961,6 +2005,7 @@ function removeRepoGroupWatches(button: HTMLButtonElement): void {
       };
       void saveSettings(settings);
       render();
+      void refreshListedRepositoryCiStatuses();
     }
   }
 }
@@ -2437,6 +2482,7 @@ function toggleFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): v
   settings = { ...settings, favoriteRepos };
   void saveSettings(settings);
   render();
+  void refreshListedRepositoryCiStatuses();
 
   if (!wasFavorite) {
     void refreshFavoriteRepoIcon(repo);
@@ -2817,6 +2863,7 @@ async function addWatch(url: string): Promise<void> {
   }
 
   render();
+  void refreshListedRepositoryCiStatuses();
   void updateTrayIndicator();
 }
 
@@ -2830,6 +2877,7 @@ async function parseWatchInput(input: string): Promise<ParsedGitHubTarget> {
 
 async function poll(): Promise<void> {
   if (isDemoMode) {
+    await refreshListedRepositoryCiStatuses(true);
     return;
   }
 
@@ -2847,9 +2895,90 @@ async function poll(): Promise<void> {
     }
 
     await controller.pollNow();
+    await refreshListedRepositoryCiStatuses(true);
   } finally {
     isPolling = false;
   }
+}
+
+async function refreshListedRepositoryCiStatuses(force = false): Promise<void> {
+  const repos = getListedRepositories();
+  const listedKeys = new Set(repos.map(getFavoriteRepoKey));
+  const nextRepoCiStatuses = Object.fromEntries(
+    Object.entries(repoCiStatuses).filter(([repoKey]) => listedKeys.has(repoKey)),
+  );
+
+  if (Object.keys(nextRepoCiStatuses).length !== Object.keys(repoCiStatuses).length) {
+    repoCiStatuses = nextRepoCiStatuses;
+    render();
+  }
+
+  await Promise.all(repos.map((repo) => refreshRepositoryCiStatus(repo, force)));
+}
+
+async function refreshRepositoryCiStatus(repo: Pick<FavoriteRepo, "owner" | "repo">, force: boolean): Promise<void> {
+  const repoKey = getFavoriteRepoKey(repo);
+
+  if (repoCiStatusRefreshes.has(repoKey) || (!force && repoCiStatuses[repoKey])) {
+    return;
+  }
+
+  repoCiStatusRefreshes.add(repoKey);
+
+  if (!repoCiStatuses[repoKey]) {
+    repoCiStatuses = {
+      ...repoCiStatuses,
+      [repoKey]: {
+        tone: "pending",
+        label: "Loading",
+        description: "Loading default branch CI status",
+      },
+    };
+    render();
+  }
+
+  try {
+    const status = isDemoMode ? await fetchDemoRepositoryDefaultBranchCiStatus(repo) : await fetchRepositoryDefaultBranchCiStatus(repo);
+
+    repoCiStatuses = {
+      ...repoCiStatuses,
+      [repoKey]: toRepoCiStatusViewModel(status),
+    };
+  } catch (error) {
+    repoCiStatuses = {
+      ...repoCiStatuses,
+      [repoKey]: {
+        tone: "pending",
+        label: "Unknown",
+        description: error instanceof Error ? error.message : String(error),
+      },
+    };
+  } finally {
+    repoCiStatusRefreshes.delete(repoKey);
+    render();
+  }
+}
+
+function getListedRepositories(): Array<Pick<FavoriteRepo, "owner" | "repo">> {
+  const repos = new Map<string, Pick<FavoriteRepo, "owner" | "repo">>();
+
+  for (const favorite of settings.favoriteRepos) {
+    repos.set(getFavoriteRepoKey(favorite), { owner: favorite.owner, repo: favorite.repo });
+  }
+
+  for (const watch of controller.getWatches()) {
+    repos.set(getFavoriteRepoKey(watch.target), { owner: watch.target.owner, repo: watch.target.repo });
+  }
+
+  return [...repos.values()];
+}
+
+function toRepoCiStatusViewModel(status: RepositoryCiStatus): RepoCiStatusViewModel {
+  return {
+    tone: status.tone,
+    label: status.label,
+    description: status.description,
+  };
 }
 
 async function updateTrayIndicator(): Promise<void> {
@@ -2971,6 +3100,18 @@ async function fetchDemoWorkflowDefinitions(): Promise<WorkflowDefinition[]> {
       state: "active",
     },
   ];
+}
+
+async function fetchDemoRepositoryDefaultBranchCiStatus(
+  repo: Pick<FavoriteRepo, "owner" | "repo">,
+): Promise<RepositoryCiStatus> {
+  return {
+    tone: repo.repo === "sentry" ? "pending" : "success",
+    label: repo.repo === "sentry" ? "Pending" : "Passing",
+    description: repo.repo === "sentry" ? "main: 1 check still running or queued" : "main: latest check runs passed",
+    defaultBranch: "main",
+    updatedAt: "2026-05-17T12:50:00Z",
+  };
 }
 
 function loadInitialWatches(): WatchRecord[] {
