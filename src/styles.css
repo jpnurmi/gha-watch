@@ -320,7 +320,7 @@ input {
   --tree-leading-width: 22px;
   --tree-column-gap: 4px;
   --tree-actions-width: 63px;
-  --repo-actions-width: 72px;
+  --repo-actions-width: 96px;
 
   display: flex;
   min-height: 0;
@@ -407,6 +407,7 @@ input {
 }
 
 .watch-group-star,
+.watch-group-subscribe-button,
 .watch-group-workflow-button,
 .watch-group-pr-button,
 .watch-group-remove-button {
@@ -422,6 +423,7 @@ input {
   cursor: pointer;
 }
 
+.watch-group-subscribe-button,
 .watch-group-workflow-button,
 .watch-group-pr-button,
 .watch-group-remove-button {
@@ -430,12 +432,15 @@ input {
   visibility: hidden;
 }
 
+.watch-group-header:hover .watch-group-subscribe-button,
 .watch-group-header:hover .watch-group-workflow-button,
 .watch-group-header:hover .watch-group-pr-button,
 .watch-group-header:hover .watch-group-remove-button,
+.watch-group-header:focus-within .watch-group-subscribe-button,
 .watch-group-header:focus-within .watch-group-workflow-button,
 .watch-group-header:focus-within .watch-group-pr-button,
 .watch-group-header:focus-within .watch-group-remove-button,
+.watch-group-subscribe-button[aria-expanded="true"],
 .watch-group-workflow-button[aria-expanded="true"],
 .watch-group-pr-button[aria-expanded="true"] {
   opacity: 0.6;
@@ -451,6 +456,7 @@ input {
 }
 
 .watch-group-star:hover,
+.watch-group-subscribe-button:hover,
 .watch-group-workflow-button:hover,
 .watch-group-pr-button:hover {
   background: rgb(255 255 255 / 7%);
@@ -470,6 +476,10 @@ input {
 
 .watch-group-star.is-favorite {
   color: rgb(238 241 245 / 62%);
+}
+
+.watch-group-subscribe-button.is-subscribed {
+  color: #58a6ff;
 }
 
 .watch-group-star-glyph,
@@ -513,6 +523,7 @@ input {
   height: 10px;
 }
 
+.watch-group-subscribe-button svg,
 .watch-group-workflow-button svg,
 .watch-group-pr-button svg {
   width: 12px;
@@ -593,6 +604,82 @@ input {
 
 .favorite-pr-status.is-error {
   color: #ffb4a9;
+}
+
+.workflow-subscription-popover {
+  width: min(330px, calc(100vw - 32px));
+}
+
+.workflow-subscription-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.workflow-subscription-item {
+  padding: 7px 9px 7px 11px;
+}
+
+.workflow-subscription-item:hover {
+  background: #2d3642;
+}
+
+.workflow-subscription-segmented {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgb(139 148 158 / 28%);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.workflow-subscription-segment {
+  min-width: 46px;
+  max-width: 92px;
+  height: 18px;
+  overflow: hidden;
+  border: 0;
+  border-left: 1px solid rgb(139 148 158 / 24%);
+  padding: 0 7px;
+  background: transparent;
+  color: rgb(216 222 231 / 58%);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-subscription-segment:first-child {
+  border-left: 0;
+}
+
+.workflow-subscription-segment:hover,
+.workflow-subscription-segment:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  color: #ffffff;
+}
+
+.workflow-subscription-segment.is-selected {
+  background: rgb(88 166 255 / 16%);
+  color: #79c0ff;
+}
+
+.workflow-subscription-segment-defaultBranch {
+  border-left-color: rgb(88 166 255 / 24%);
+  background: transparent;
+  font-size: 9px;
+}
+
+.workflow-subscription-segment-defaultBranch.is-selected {
+  background: rgb(88 166 255 / 18%);
+  color: rgb(188 216 255 / 92%);
+}
+
+.workflow-subscription-segment-user {
+  max-width: 78px;
 }
 
 .watch-group-icon {

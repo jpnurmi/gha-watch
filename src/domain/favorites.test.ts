@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   addFavoriteRepo,
   getFavoriteRepoKey,
+  hasFavoriteWorkflowSubscriptions,
   isFavoriteRepo,
   normalizeFavoriteRepos,
   toggleFavoriteRepo,
+  toggleFavoriteWorkflowSubscription,
   updateFavoriteRepoIcon,
 } from "./favorites";
 
@@ -14,7 +16,14 @@ describe("favorite repo operations", () => {
       normalizeFavoriteRepos([
         { owner: "getsentry", repo: "sentry", repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4" },
         { owner: "getsentry", repo: "sentry" },
-        { owner: "jpnurmi", repo: "gha-watch", repoIconUrl: "" },
+        {
+          owner: "jpnurmi",
+          repo: "gha-watch",
+          repoIconUrl: "",
+          defaultBranchWorkflowNames: ["CI", "CI", ""],
+          ownPullRequestWorkflowNames: ["CodeQL"],
+          userWorkflowNames: ["Build", "CodeQL"],
+        },
         { owner: "", repo: "missing-owner" },
         { owner: "missing-repo", repo: "" },
         null,
@@ -28,6 +37,8 @@ describe("favorite repo operations", () => {
       {
         owner: "jpnurmi",
         repo: "gha-watch",
+        defaultBranchWorkflowNames: ["CI"],
+        userWorkflowNames: ["Build", "CodeQL"],
       },
     ]);
   });
@@ -73,6 +84,38 @@ describe("favorite repo operations", () => {
         owner: "jpnurmi",
         repo: "gha-watch",
         repoIconUrl: "https://avatars.githubusercontent.com/u/123?v=4",
+      },
+    ]);
+  });
+
+  it("toggles workflow subscriptions and favorites repos when needed", () => {
+    const favorites = toggleFavoriteWorkflowSubscription(
+      [],
+      { owner: "getsentry", repo: "sentry-native" },
+      "defaultBranch",
+      "CI",
+    );
+
+    expect(favorites).toEqual([
+      {
+        owner: "getsentry",
+        repo: "sentry-native",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ]);
+    expect(hasFavoriteWorkflowSubscriptions(favorites[0])).toBe(true);
+    expect(toggleFavoriteWorkflowSubscription(favorites, favorites[0], "user", "CI")).toEqual([
+      {
+        owner: "getsentry",
+        repo: "sentry-native",
+        defaultBranchWorkflowNames: ["CI"],
+        userWorkflowNames: ["CI"],
+      },
+    ]);
+    expect(toggleFavoriteWorkflowSubscription(favorites, favorites[0], "defaultBranch", "CI")).toEqual([
+      {
+        owner: "getsentry",
+        repo: "sentry-native",
       },
     ]);
   });

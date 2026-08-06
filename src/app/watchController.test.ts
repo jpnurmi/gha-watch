@@ -3,7 +3,7 @@ import { createWatchController, type WatchControllerDeps } from "./watchControll
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } from "../domain/githubUrl";
 import type { FavoriteRepo } from "../domain/favorites";
 import { type WatchRecord } from "../domain/watches";
-import type { ActiveWorkflowRun, OpenPullRequest, WatchSnapshot } from "../platform/gh";
+import type { ActiveWorkflowRun, OpenPullRequest, WatchSnapshot, WorkflowDefinition } from "../platform/gh";
 
 const runTarget: CheckWatchTarget = {
   kind: "run",
@@ -52,6 +52,9 @@ function createDeps(
   reruns: CheckWatchTarget[];
   openPullRequestFetches: FavoriteRepo[];
   activeWorkflowRunFetches: FavoriteRepo[];
+  defaultBranchFetches: FavoriteRepo[];
+  userActiveWorkflowRunFetches: FavoriteRepo[];
+  workflowDefinitionFetches: FavoriteRepo[];
 } {
   const notifications: string[] = [];
   const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
@@ -60,6 +63,9 @@ function createDeps(
   const reruns: CheckWatchTarget[] = [];
   const openPullRequestFetches: FavoriteRepo[] = [];
   const activeWorkflowRunFetches: FavoriteRepo[] = [];
+  const defaultBranchFetches: FavoriteRepo[] = [];
+  const userActiveWorkflowRunFetches: FavoriteRepo[] = [];
+  const workflowDefinitionFetches: FavoriteRepo[] = [];
 
   return {
     notifications,
@@ -69,6 +75,9 @@ function createDeps(
     reruns,
     openPullRequestFetches,
     activeWorkflowRunFetches,
+    defaultBranchFetches,
+    userActiveWorkflowRunFetches,
+    workflowDefinitionFetches,
     deps: {
       async fetchState(target) {
         fetches.push(target);
@@ -105,9 +114,66 @@ function createDeps(
           {
             runId: "123",
             title: "CI: Build",
+            workflowName: "CI",
             status: "in_progress",
+            branchName: "main",
             updatedAt: "2026-05-17T12:00:00Z",
             url: "https://github.com/getsentry/sentry/actions/runs/123",
+          },
+          {
+            runId: "456",
+            title: "CodeQL: Analyze",
+            workflowName: "CodeQL",
+            status: "in_progress",
+            branchName: "main",
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/456",
+          },
+          {
+            runId: "789",
+            title: "CI: Build",
+            workflowName: "CI",
+            status: "in_progress",
+            branchName: "feature/tray-popup",
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/789",
+          },
+        ];
+      },
+      async fetchUserActiveWorkflowRuns(target) {
+        userActiveWorkflowRunFetches.push(target);
+        return [
+          {
+            runId: "789",
+            title: "CI: Build",
+            workflowName: "CI",
+            status: "in_progress",
+            branchName: "feature/tray-popup",
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/789",
+          },
+          {
+            runId: "790",
+            title: "CodeQL: Analyze",
+            workflowName: "CodeQL",
+            status: "in_progress",
+            branchName: "feature/tray-popup",
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/790",
+          },
+        ];
+      },
+      async fetchRepositoryDefaultBranch(target) {
+        defaultBranchFetches.push(target);
+        return "main";
+      },
+      async fetchWorkflowDefinitions(target) {
+        workflowDefinitionFetches.push(target);
+        return [
+          {
+            name: "CI",
+            path: ".github/workflows/ci.yml",
+            state: "active",
           },
         ];
       },
@@ -402,12 +468,101 @@ describe("watchController", () => {
       {
         runId: "123",
         title: "CI: Build",
+        workflowName: "CI",
         status: "in_progress",
+        branchName: "main",
         updatedAt: "2026-05-17T12:00:00Z",
         url: "https://github.com/getsentry/sentry/actions/runs/123",
       } satisfies ActiveWorkflowRun,
+      {
+        runId: "456",
+        title: "CodeQL: Analyze",
+        workflowName: "CodeQL",
+        status: "in_progress",
+        branchName: "main",
+        updatedAt: "2026-05-17T12:00:00Z",
+        url: "https://github.com/getsentry/sentry/actions/runs/456",
+      } satisfies ActiveWorkflowRun,
+      {
+        runId: "789",
+        title: "CI: Build",
+        workflowName: "CI",
+        status: "in_progress",
+        branchName: "feature/tray-popup",
+        updatedAt: "2026-05-17T12:00:00Z",
+        url: "https://github.com/getsentry/sentry/actions/runs/789",
+      } satisfies ActiveWorkflowRun,
     ]);
     expect(activeWorkflowRunFetches).toEqual([{ owner: "getsentry", repo: "sentry" }]);
+  });
+
+  it("loads workflow definitions for a repo on demand", async () => {
+    const { deps, workflowDefinitionFetches } = createDeps([]);
+    const controller = createWatchController(deps);
+
+    await expect(controller.listWorkflowDefinitions({ owner: "getsentry", repo: "sentry" })).resolves.toEqual([
+      {
+        name: "CI",
+        path: ".github/workflows/ci.yml",
+        state: "active",
+      } satisfies WorkflowDefinition,
+    ]);
+    expect(workflowDefinitionFetches).toEqual([{ owner: "getsentry", repo: "sentry" }]);
+  });
+
+  it("subscribes to selected default branch workflow runs", async () => {
+    const { deps, activeWorkflowRunFetches, defaultBranchFetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Build",
+        metadata: {
+          workflowName: "CI",
+          branchName: "main",
+        },
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(activeWorkflowRunFetches).toEqual([{ owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"] }]);
+    expect(defaultBranchFetches).toEqual([{ owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"] }]);
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/123"]);
+  });
+
+  it("subscribes to selected workflow runs triggered by the authenticated user", async () => {
+    const { deps, userActiveWorkflowRunFetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Build",
+        metadata: {
+          workflowName: "CI",
+          branchName: "feature/tray-popup",
+        },
+        url: "https://github.com/getsentry/sentry/actions/runs/789",
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        userWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(userActiveWorkflowRunFetches).toEqual([{ owner: "getsentry", repo: "sentry", userWorkflowNames: ["CI"] }]);
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/789"]);
   });
 
   it("requires a workflow run listing dependency before loading active workflow runs", async () => {

@@ -58,6 +58,7 @@ type PrCheckResponse = {
 };
 
 type RepositoryViewResponse = {
+  default_branch?: string;
   owner?: {
     avatar_url?: string;
   };
@@ -71,6 +72,7 @@ export type OpenPullRequest = {
   number: string;
   title: string;
   isDraft: boolean;
+  headBranch?: string;
   updatedAt?: string;
   url: string;
 };
@@ -78,6 +80,7 @@ export type OpenPullRequest = {
 export type ActiveWorkflowRun = {
   runId: string;
   title: string;
+  workflowName?: string;
   status: string;
   branchName?: string;
   createdAt?: string;
@@ -85,7 +88,14 @@ export type ActiveWorkflowRun = {
   url: string;
 };
 
+export type WorkflowDefinition = {
+  name: string;
+  path: string;
+  state?: string;
+};
+
 type PullRequestListResponse = {
+  headRefName?: string;
   isDraft?: boolean;
   number?: number | string;
   title?: string;
@@ -102,6 +112,12 @@ type WorkflowRunListResponse = {
   updatedAt?: string;
   url?: string;
   workflowName?: string;
+};
+
+type WorkflowListResponse = {
+  name?: string;
+  path?: string;
+  state?: string;
 };
 
 type PullRequestReference = {
@@ -164,6 +180,20 @@ export async function fetchRepositoryIconUrl(
   }
 }
 
+export async function fetchRepositoryDefaultBranch(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<string> {
+  try {
+    const result = await executor.execute("gh", ["api", `repos/${target.owner}/${target.repo}`]);
+
+    assertSuccessfulGhResult(result);
+    return requiredString(parseJson<RepositoryViewResponse>(result.stdout).default_branch, "repository default branch");
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
 export async function fetchAuthenticatedUserLogin(
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<string> {
@@ -192,7 +222,7 @@ export async function fetchOpenPullRequests(
       "--limit",
       "20",
       "--json",
-      "number,title,isDraft,updatedAt,url",
+      "number,title,isDraft,headRefName,updatedAt,url",
     ]);
 
     assertSuccessfulGhResult(result);
@@ -206,9 +236,59 @@ export async function fetchOpenPullRequests(
   }
 }
 
+export async function fetchWorkflowDefinitions(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<WorkflowDefinition[]> {
+  try {
+    const result = await executor.execute("gh", [
+      "workflow",
+      "list",
+      "-R",
+      `${target.owner}/${target.repo}`,
+      "--limit",
+      "100",
+      "--json",
+      "name,path,state",
+    ]);
+
+    assertSuccessfulGhResult(result);
+
+    return parseJson<WorkflowListResponse[]>(result.stdout)
+      .map(normalizeWorkflowDefinition)
+      .filter((workflow): workflow is WorkflowDefinition => Boolean(workflow))
+      .filter(dedupeWorkflowDefinitionNames())
+      .sort(compareWorkflowDefinitionsByName);
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
 export async function fetchActiveWorkflowRuns(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
   executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<ActiveWorkflowRun[]> {
+  return fetchActiveWorkflowRunsWithArgs(target, [], executor);
+}
+
+export async function fetchUserActiveWorkflowRuns(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  userLogin: string,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<ActiveWorkflowRun[]> {
+  const cleanUserLogin = userLogin.trim();
+
+  if (!cleanUserLogin) {
+    throw new Error("User workflow subscriptions need an authenticated GitHub user.");
+  }
+
+  return fetchActiveWorkflowRunsWithArgs(target, ["--user", cleanUserLogin], executor);
+}
+
+async function fetchActiveWorkflowRunsWithArgs(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  extraArgs: string[],
+  executor: ShellExecutor,
 ): Promise<ActiveWorkflowRun[]> {
   try {
     const results = await Promise.all(
@@ -222,6 +302,7 @@ export async function fetchActiveWorkflowRuns(
           status,
           "--limit",
           "20",
+          ...extraArgs,
           "--json",
           "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
         ]);
@@ -243,7 +324,8 @@ export async function fetchActiveWorkflowRuns(
 
 function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWorkflowRun | undefined {
   const runId = getRunDatabaseId(response.databaseId);
-  const title = joinTitle(response.workflowName, response.displayTitle);
+  const workflowName = response.workflowName?.trim();
+  const title = joinTitle(workflowName, response.displayTitle);
   const status = response.status?.trim();
   const url = response.url?.trim();
 
@@ -256,6 +338,7 @@ function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWo
   return {
     runId,
     title,
+    ...(workflowName ? { workflowName } : {}),
     status,
     ...(branchName ? { branchName } : {}),
     ...(response.createdAt ? { createdAt: response.createdAt } : {}),
@@ -281,9 +364,44 @@ function normalizeOpenPullRequest(response: PullRequestListResponse): OpenPullRe
     number,
     title,
     isDraft: response.isDraft === true,
+    ...(response.headRefName?.trim() ? { headBranch: response.headRefName.trim() } : {}),
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
     url,
   };
+}
+
+function normalizeWorkflowDefinition(response: WorkflowListResponse): WorkflowDefinition | undefined {
+  const name = response.name?.trim();
+  const path = response.path?.trim();
+
+  if (!name || !path) {
+    return undefined;
+  }
+
+  const state = response.state?.trim();
+
+  return {
+    name,
+    path,
+    ...(state ? { state } : {}),
+  };
+}
+
+function dedupeWorkflowDefinitionNames(): (workflow: WorkflowDefinition) => boolean {
+  const seen = new Set<string>();
+
+  return (workflow) => {
+    if (seen.has(workflow.name)) {
+      return false;
+    }
+
+    seen.add(workflow.name);
+    return true;
+  };
+}
+
+function compareWorkflowDefinitionsByName(left: WorkflowDefinition, right: WorkflowDefinition): number {
+  return left.name.localeCompare(right.name);
 }
 
 function getPullRequestListNumber(value: number | string | undefined): string | undefined {

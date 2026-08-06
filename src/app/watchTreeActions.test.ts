@@ -164,12 +164,12 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain('data-action="confirm-remove-repo"');
     expect(mainSource).toContain("dismissRepoActionOnHeaderLeave");
     expect(mainSource).toContain("removeRepoGroupWatches");
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*72px;/s);
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*96px;/s);
     expect(styles).toMatch(
-      /\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-remove-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
+      /\.watch-group-subscribe-button,[^{]*\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-remove-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
     );
     expect(styles).toMatch(
-      /\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-remove-button/s,
+      /\.watch-group-header:hover \.watch-group-subscribe-button,[^{]*\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-remove-button/s,
     );
   });
 

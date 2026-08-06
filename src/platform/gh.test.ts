@@ -3,8 +3,11 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchRepositoryDefaultBranch,
   fetchRepositoryIconUrl,
+  fetchUserActiveWorkflowRuns,
   fetchWatchState,
+  fetchWorkflowDefinitions,
   rerunFailedWatch,
   type ShellExecutor,
 } from "./gh";
@@ -342,6 +345,35 @@ describe("fetchRepositoryIconUrl", () => {
   });
 });
 
+describe("fetchRepositoryDefaultBranch", () => {
+  it("fetches the repository default branch via gh api", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        default_branch: "main",
+      }),
+      stderr: "",
+    });
+
+    await expect(
+      fetchRepositoryDefaultBranch(
+        {
+          owner: "getsentry",
+          repo: "sentry-native",
+        },
+        executor,
+      ),
+    ).resolves.toBe("main");
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry-native"],
+      },
+    ]);
+  });
+});
+
 describe("fetchAuthenticatedUserLogin", () => {
   it("fetches the authenticated GitHub user login via gh api", async () => {
     const { executor, calls } = createExecutor({
@@ -372,6 +404,7 @@ describe("fetchOpenPullRequests", () => {
           number: 51,
           title: "Older PR",
           isDraft: false,
+          headRefName: "older-pr",
           updatedAt: "2026-05-16T12:00:00Z",
           url: "https://github.com/getsentry/sentry/pull/51",
         },
@@ -379,6 +412,7 @@ describe("fetchOpenPullRequests", () => {
           number: 52,
           title: "Newer PR",
           isDraft: true,
+          headRefName: "newer-pr",
           updatedAt: "2026-05-17T12:00:00Z",
           url: "https://github.com/getsentry/sentry/pull/52",
         },
@@ -399,6 +433,7 @@ describe("fetchOpenPullRequests", () => {
         number: "52",
         title: "Newer PR",
         isDraft: true,
+        headBranch: "newer-pr",
         updatedAt: "2026-05-17T12:00:00Z",
         url: "https://github.com/getsentry/sentry/pull/52",
       },
@@ -406,6 +441,7 @@ describe("fetchOpenPullRequests", () => {
         number: "51",
         title: "Older PR",
         isDraft: false,
+        headBranch: "older-pr",
         updatedAt: "2026-05-16T12:00:00Z",
         url: "https://github.com/getsentry/sentry/pull/51",
       },
@@ -424,7 +460,7 @@ describe("fetchOpenPullRequests", () => {
           "--limit",
           "20",
           "--json",
-          "number,title,isDraft,updatedAt,url",
+          "number,title,isDraft,headRefName,updatedAt,url",
         ],
       },
     ]);
@@ -447,6 +483,50 @@ describe("fetchOpenPullRequests", () => {
         title: "Valid PR",
         isDraft: false,
         url: "https://github.com/getsentry/sentry/pull/51",
+      },
+    ]);
+  });
+});
+
+describe("fetchWorkflowDefinitions", () => {
+  it("fetches workflows through gh and sorts them by name", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify([
+        { name: "CodeQL", path: ".github/workflows/codeql.yml", state: "active" },
+        { name: "CI", path: ".github/workflows/ci.yml", state: "active" },
+        { name: "CI", path: ".github/workflows/ci-duplicate.yml", state: "active" },
+        { name: "", path: ".github/workflows/malformed.yml", state: "active" },
+      ]),
+      stderr: "",
+    });
+
+    await expect(fetchWorkflowDefinitions({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toEqual([
+      {
+        name: "CI",
+        path: ".github/workflows/ci.yml",
+        state: "active",
+      },
+      {
+        name: "CodeQL",
+        path: ".github/workflows/codeql.yml",
+        state: "active",
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "workflow",
+          "list",
+          "-R",
+          "getsentry/sentry",
+          "--limit",
+          "100",
+          "--json",
+          "name,path,state",
+        ],
       },
     ]);
   });
@@ -493,6 +573,7 @@ describe("fetchActiveWorkflowRuns", () => {
       {
         runId: "102",
         title: "Deploy: Newer run",
+        workflowName: "Deploy",
         status: "in_progress",
         branchName: "release/0.2",
         createdAt: "2026-05-17T11:00:00Z",
@@ -502,6 +583,7 @@ describe("fetchActiveWorkflowRuns", () => {
       {
         runId: "101",
         title: "CI: Older run",
+        workflowName: "CI",
         status: "queued",
         branchName: "main",
         createdAt: "2026-05-17T10:00:00Z",
@@ -537,6 +619,82 @@ describe("fetchActiveWorkflowRuns", () => {
           "in_progress",
           "--limit",
           "20",
+          "--json",
+          "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
+        ],
+      },
+    ]);
+  });
+
+  it("fetches active workflow runs triggered by a user", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          {
+            databaseId: 101,
+            displayTitle: "Manual run",
+            workflowName: "CI",
+            headBranch: "main",
+            status: "queued",
+            updatedAt: "2026-05-17T10:05:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/101",
+          },
+        ]),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: "[]",
+        stderr: "",
+      },
+    ]);
+
+    await expect(
+      fetchUserActiveWorkflowRuns({ owner: "getsentry", repo: "sentry" }, "jpnurmi", executor),
+    ).resolves.toEqual([
+      {
+        runId: "101",
+        title: "CI: Manual run",
+        workflowName: "CI",
+        status: "queued",
+        branchName: "main",
+        updatedAt: "2026-05-17T10:05:00Z",
+        url: "https://github.com/getsentry/sentry/actions/runs/101",
+      },
+    ]);
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "run",
+          "list",
+          "-R",
+          "getsentry/sentry",
+          "--status",
+          "queued",
+          "--limit",
+          "20",
+          "--user",
+          "jpnurmi",
+          "--json",
+          "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
+        ],
+      },
+      {
+        program: "gh",
+        args: [
+          "run",
+          "list",
+          "-R",
+          "getsentry/sentry",
+          "--status",
+          "in_progress",
+          "--limit",
+          "20",
+          "--user",
+          "jpnurmi",
           "--json",
           "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
@@ -584,6 +742,7 @@ describe("fetchActiveWorkflowRuns", () => {
       {
         runId: "101",
         title: "CI: Valid run",
+        workflowName: "CI",
         status: "queued",
         url: "https://github.com/getsentry/sentry/actions/runs/101",
       },

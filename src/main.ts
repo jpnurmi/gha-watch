@@ -43,10 +43,13 @@ import type { WatchNotification } from "./app/watchNotification";
 import {
   addFavoriteRepo,
   getFavoriteRepoKey,
+  hasFavoriteWorkflowSubscriptions,
   isFavoriteRepo,
   toggleFavoriteRepo,
+  toggleFavoriteWorkflowSubscription,
   updateFavoriteRepoIcon,
   type FavoriteRepo,
+  type FavoriteWorkflowSubscriptionScope,
 } from "./domain/favorites";
 import {
   isOwnerlessPullRequestSlug,
@@ -66,10 +69,14 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchRepositoryDefaultBranch,
   fetchRepositoryIconUrl,
+  fetchUserActiveWorkflowRuns,
   fetchWatchState,
+  fetchWorkflowDefinitions,
   type ActiveWorkflowRun,
   type OpenPullRequest,
+  type WorkflowDefinition,
   rerunFailedWatch,
 } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
@@ -105,6 +112,7 @@ let pendingTreeAction: PendingWatchTreeAction | undefined;
 let pendingRepoAction: PendingRepoAction | undefined;
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let favoritePrMenu: FavoritePullRequestMenuState | undefined;
+let workflowSubscriptionMenu: WorkflowSubscriptionMenuState | undefined;
 let repoPressState: RepoPressState | undefined;
 let repoDragState: RepoDragState | undefined;
 let watchPressState: WatchPressState | undefined;
@@ -178,6 +186,24 @@ type FavoritePullRequestMenuState =
       error: string;
     };
 
+type WorkflowSubscriptionMenuState =
+  | {
+      repoKey: string;
+      status: "loading";
+    }
+  | {
+      repoKey: string;
+      status: "loaded";
+      defaultBranch: string;
+      userLogin: string;
+      workflows: WorkflowDefinition[];
+    }
+  | {
+      repoKey: string;
+      status: "error";
+      error: string;
+    };
+
 type PendingRepoAction = {
   owner: string;
   repo: string;
@@ -195,7 +221,12 @@ const controller = createWatchController(
       : fetchWatchState,
     fetchActiveWorkflowRuns: isDemoMode ? fetchDemoActiveWorkflowRuns : fetchActiveWorkflowRuns,
     fetchOpenPullRequests: isDemoMode ? fetchDemoOpenPullRequests : fetchOpenPullRequests,
+    fetchRepositoryDefaultBranch: isDemoMode ? async () => "main" : fetchRepositoryDefaultBranch,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
+    fetchUserActiveWorkflowRuns: isDemoMode
+      ? fetchDemoUserActiveWorkflowRuns
+      : async (target) => fetchUserActiveWorkflowRuns(target, await fetchAuthenticatedUserLogin()),
+    fetchWorkflowDefinitions: isDemoMode ? fetchDemoWorkflowDefinitions : fetchWorkflowDefinitions,
     notificationsPaused: () => isPopupOpen,
     notify: notifyStatusChange,
     rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
@@ -265,13 +296,14 @@ document.addEventListener("click", (event) => {
     render();
   }
 
-  if (activeWorkflowRunMenu || favoritePrMenu) {
+  if (activeWorkflowRunMenu || favoritePrMenu || workflowSubscriptionMenu) {
     if (target instanceof Element && target.closest(".repo-action-menu")) {
       return;
     }
 
     activeWorkflowRunMenu = undefined;
     favoritePrMenu = undefined;
+    workflowSubscriptionMenu = undefined;
     render();
   }
 });
@@ -496,6 +528,7 @@ function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderA
 
   return `
     <div class="watch-group-actions">
+      ${renderWorkflowSubscriptionMenu(group)}
       ${actions.showOpenPullRequests ? renderFavoritePullRequestMenu(group) : ""}
       ${actions.showActiveWorkflowRuns ? renderActiveWorkflowRunMenu(group) : ""}
       ${
@@ -566,6 +599,159 @@ function renderChevronIcon(collapsed: boolean): string {
       <path d="${path}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
     </svg>
   `;
+}
+
+function renderWorkflowSubscriptionMenu(group: WatchGroupViewModel): string {
+  const repoKey = getFavoriteRepoKey(group);
+  const menuState = workflowSubscriptionMenu?.repoKey === repoKey ? workflowSubscriptionMenu : undefined;
+  const subscribed = favoriteRepoHasWorkflowSubscriptions(group);
+
+  return `
+    <div class="repo-action-menu favorite-pr-menu">
+      <button
+        class="watch-group-subscribe-button${subscribed ? " is-subscribed" : ""}"
+        type="button"
+        data-action="toggle-workflow-subscriptions"
+        data-owner="${escapeHtml(group.owner)}"
+        data-repo="${escapeHtml(group.repo)}"
+        title="Workflow subscriptions"
+        aria-label="Workflow subscriptions for ${escapeHtml(group.repoLabel)}"
+        aria-haspopup="menu"
+        aria-expanded="${menuState ? "true" : "false"}"
+      >
+        ${renderWorkflowSubscriptionIcon()}
+      </button>
+      ${menuState ? renderWorkflowSubscriptionPopover(group, menuState) : ""}
+    </div>
+  `;
+}
+
+function renderWorkflowSubscriptionIcon(): string {
+  return `
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M5.25 4.5h5.5M5.25 8h5.5M5.25 11.5h5.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"/>
+      <path d="M2.75 4.5h.01M2.75 8h.01M2.75 11.5h.01" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/>
+    </svg>
+  `;
+}
+
+function renderWorkflowSubscriptionPopover(
+  group: WatchGroupViewModel,
+  menuState: WorkflowSubscriptionMenuState,
+): string {
+  if (menuState.status === "loading") {
+    return `<div class="favorite-pr-popover workflow-subscription-popover" role="menu"><div class="favorite-pr-status">Loading...</div></div>`;
+  }
+
+  if (menuState.status === "error") {
+    return `
+      <div class="favorite-pr-popover workflow-subscription-popover" role="menu">
+        <div class="favorite-pr-status is-error">${escapeHtml(menuState.error)}</div>
+      </div>
+    `;
+  }
+
+  const workflows = getWorkflowSubscriptionMenuWorkflows(group, menuState.workflows);
+
+  if (workflows.length === 0) {
+    return `<div class="favorite-pr-popover workflow-subscription-popover" role="menu"><div class="favorite-pr-status">No workflows</div></div>`;
+  }
+
+  return `
+    <div class="favorite-pr-popover workflow-subscription-popover" role="menu">
+      ${workflows.map((workflow) => renderWorkflowSubscriptionItem(group, workflow, menuState.defaultBranch, menuState.userLogin)).join("")}
+    </div>
+  `;
+}
+
+function renderWorkflowSubscriptionItem(
+  group: WatchGroupViewModel,
+  workflow: WorkflowDefinition,
+  defaultBranch: string,
+  userLogin: string,
+): string {
+  return `
+    <div class="workflow-subscription-item" role="none">
+      <span class="favorite-pr-title" title="${escapeHtml(workflow.name)}">${escapeHtml(workflow.name)}</span>
+      <span class="workflow-subscription-segmented" role="group" aria-label="${escapeHtml(workflow.name)} subscriptions">
+        ${renderWorkflowSubscriptionToggle(group, workflow.name, "defaultBranch", defaultBranch)}
+        ${renderWorkflowSubscriptionToggle(group, workflow.name, "user", undefined, userLogin)}
+      </span>
+    </div>
+  `;
+}
+
+function renderWorkflowSubscriptionToggle(
+  group: WatchGroupViewModel,
+  workflowName: string,
+  scope: FavoriteWorkflowSubscriptionScope,
+  defaultBranch?: string,
+  userLogin?: string,
+): string {
+  const checked = workflowIsSubscribed(group, workflowName, scope);
+  const cleanDefaultBranch = defaultBranch?.trim() || "default branch";
+  const displayLabel = scope === "defaultBranch" ? cleanDefaultBranch : userLogin?.trim() || "PRs";
+  const label = scope === "defaultBranch" ? cleanDefaultBranch : `runs triggered by ${displayLabel}`;
+
+  return `
+    <button
+      class="workflow-subscription-segment workflow-subscription-segment-${scope}${checked ? " is-selected" : ""}"
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked="${checked ? "true" : "false"}"
+      data-action="toggle-workflow-subscription"
+      data-owner="${escapeHtml(group.owner)}"
+      data-repo="${escapeHtml(group.repo)}"
+      data-workflow="${escapeHtml(workflowName)}"
+      data-scope="${scope}"
+      title="${checked ? "Unsubscribe from" : "Subscribe to"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
+      aria-label="${checked ? "Unsubscribe from" : "Subscribe to"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
+    >
+      ${escapeHtml(displayLabel)}
+    </button>
+  `;
+}
+
+function getWorkflowSubscriptionMenuWorkflows(
+  group: WatchGroupViewModel,
+  workflows: WorkflowDefinition[],
+): WorkflowDefinition[] {
+  const favorite = findFavoriteRepo(group);
+  const workflowNames = new Set(workflows.map((workflow) => workflow.name));
+  const missingSelectedWorkflows = [
+    ...(favorite?.defaultBranchWorkflowNames ?? []),
+    ...(favorite?.userWorkflowNames ?? []),
+  ]
+    .filter((workflowName) => !workflowNames.has(workflowName))
+    .map((workflowName) => ({
+      name: workflowName,
+      path: "",
+    }));
+
+  return [...workflows, ...missingSelectedWorkflows];
+}
+
+function workflowIsSubscribed(
+  repo: Pick<FavoriteRepo, "owner" | "repo">,
+  workflowName: string,
+  scope: FavoriteWorkflowSubscriptionScope,
+): boolean {
+  const favorite = findFavoriteRepo(repo);
+  const workflowNames = scope === "defaultBranch"
+    ? favorite?.defaultBranchWorkflowNames
+    : favorite?.userWorkflowNames;
+
+  return Boolean(workflowNames?.includes(workflowName));
+}
+
+function favoriteRepoHasWorkflowSubscriptions(repo: Pick<FavoriteRepo, "owner" | "repo">): boolean {
+  const favorite = findFavoriteRepo(repo);
+  return Boolean(favorite && hasFavoriteWorkflowSubscriptions(favorite));
+}
+
+function findFavoriteRepo(repo: Pick<FavoriteRepo, "owner" | "repo">): FavoriteRepo | undefined {
+  const repoKey = getFavoriteRepoKey(repo);
+  return settings.favoriteRepos.find((favorite) => getFavoriteRepoKey(favorite) === repoKey);
 }
 
 function renderActiveWorkflowRunMenu(group: WatchGroupViewModel): string {
@@ -1298,6 +1484,26 @@ function bindEvents(): void {
     });
   }
 
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-workflow-subscriptions"]')) {
+    button.addEventListener("click", () => {
+      void toggleWorkflowSubscriptions({
+        owner: button.dataset.owner || "",
+        repo: button.dataset.repo || "",
+      });
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-workflow-subscription"]')) {
+    button.addEventListener("click", () => {
+      toggleWorkflowSubscription({
+        owner: button.dataset.owner || "",
+        repo: button.dataset.repo || "",
+        workflowName: button.dataset.workflow || "",
+        scope: getWorkflowSubscriptionScope(button.dataset.scope),
+      });
+    });
+  }
+
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-favorite-prs"]')) {
     button.addEventListener("click", () => {
       void toggleFavoritePullRequests({
@@ -1651,6 +1857,7 @@ function toggleTreeNode(nodeId: string): void {
   pendingRepoAction = undefined;
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
+  workflowSubscriptionMenu = undefined;
   render();
 }
 
@@ -1665,6 +1872,7 @@ function armTreeNodeRemoval(nodeId: string, rowIds: string[], mode: WatchTreeNod
   isClearMenuOpen = false;
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
+  workflowSubscriptionMenu = undefined;
   render();
 }
 
@@ -1687,6 +1895,7 @@ function armRepoGroupRemoval(button: HTMLButtonElement): void {
   isClearMenuOpen = false;
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
+  workflowSubscriptionMenu = undefined;
   render();
 }
 
@@ -1772,6 +1981,7 @@ function startWatchPointerDrag(repoKey: string, sourceKey: string, sourceIds: st
   isClearMenuOpen = false;
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
+  workflowSubscriptionMenu = undefined;
 
   app.querySelector(".watch-list")?.classList.add("is-reordering-runs");
   getWatchReorderElement(sourceKey)?.parentElement?.classList.add("is-reordering-runs");
@@ -1788,6 +1998,7 @@ function startRepoPointerDrag(sourceKey: string): void {
   isClearMenuOpen = false;
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
+  workflowSubscriptionMenu = undefined;
 
   app.querySelector(".watch-list")?.classList.add("is-reordering");
   getRepoGroupElement(sourceKey)?.classList.add("is-dragging");
@@ -2214,6 +2425,8 @@ function toggleFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): v
     favoritePrMenu = undefined;
   } else if (activeWorkflowRunMenu?.repoKey === getFavoriteRepoKey(repo)) {
     activeWorkflowRunMenu = undefined;
+  } else if (workflowSubscriptionMenu?.repoKey === getFavoriteRepoKey(repo)) {
+    workflowSubscriptionMenu = undefined;
   }
 
   settings = { ...settings, favoriteRepos };
@@ -2280,6 +2493,7 @@ async function toggleFavoritePullRequests(repo: Pick<FavoriteRepo, "owner" | "re
 
   favoritePrMenu = { repoKey, status: "loading" };
   activeWorkflowRunMenu = undefined;
+  workflowSubscriptionMenu = undefined;
   isClearMenuOpen = false;
   render();
 
@@ -2317,6 +2531,7 @@ async function toggleActiveWorkflowRuns(repo: Pick<FavoriteRepo, "owner" | "repo
 
   activeWorkflowRunMenu = { repoKey, status: "loading" };
   favoritePrMenu = undefined;
+  workflowSubscriptionMenu = undefined;
   isClearMenuOpen = false;
   render();
 
@@ -2339,6 +2554,85 @@ async function toggleActiveWorkflowRuns(repo: Pick<FavoriteRepo, "owner" | "repo
   }
 }
 
+async function toggleWorkflowSubscriptions(repo: Pick<FavoriteRepo, "owner" | "repo">): Promise<void> {
+  if (!repo.owner || !repo.repo) {
+    return;
+  }
+
+  const repoKey = getFavoriteRepoKey(repo);
+
+  if (workflowSubscriptionMenu?.repoKey === repoKey) {
+    workflowSubscriptionMenu = undefined;
+    render();
+    return;
+  }
+
+  workflowSubscriptionMenu = { repoKey, status: "loading" };
+  activeWorkflowRunMenu = undefined;
+  favoritePrMenu = undefined;
+  isClearMenuOpen = false;
+  render();
+
+  try {
+    const [workflows, defaultBranch, userLogin] = await Promise.all([
+      controller.listWorkflowDefinitions(repo),
+      isDemoMode ? Promise.resolve("main") : fetchRepositoryDefaultBranch(repo),
+      isDemoMode ? Promise.resolve("jpnurmi") : fetchAuthenticatedUserLogin(),
+    ]);
+
+    if (workflowSubscriptionMenu?.repoKey === repoKey) {
+      workflowSubscriptionMenu = { repoKey, status: "loaded", workflows, defaultBranch, userLogin };
+      render();
+    }
+  } catch (error) {
+    if (workflowSubscriptionMenu?.repoKey === repoKey) {
+      workflowSubscriptionMenu = {
+        repoKey,
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
+      render();
+    }
+  }
+}
+
+function toggleWorkflowSubscription(
+  target: Pick<FavoriteRepo, "owner" | "repo"> & {
+    scope: FavoriteWorkflowSubscriptionScope | undefined;
+    workflowName: string;
+  },
+): void {
+  if (!target.owner || !target.repo || !target.workflowName || !target.scope) {
+    return;
+  }
+
+  const wasFavorite = isFavoriteRepo(settings.favoriteRepos, target);
+  let favoriteRepos = toggleFavoriteWorkflowSubscription(
+    settings.favoriteRepos,
+    target,
+    target.scope,
+    target.workflowName,
+  );
+
+  if (!wasFavorite) {
+    favoriteRepos = updateFavoriteRepoIcon(favoriteRepos, target, findRepoIconUrl(target));
+  }
+
+  settings = { ...settings, favoriteRepos };
+  void saveSettings(settings);
+  render();
+
+  if (!wasFavorite) {
+    void refreshFavoriteRepoIcon(target);
+  }
+
+  void poll();
+}
+
+function getWorkflowSubscriptionScope(value: string | undefined): FavoriteWorkflowSubscriptionScope | undefined {
+  return value === "defaultBranch" || value === "user" ? value : undefined;
+}
+
 async function watchActiveWorkflowRun(
   target: Pick<FavoriteRepo, "owner" | "repo"> & { runId: string; url: string },
 ): Promise<void> {
@@ -2357,6 +2651,7 @@ async function watchActiveWorkflowRun(
       url: target.url,
     });
     activeWorkflowRunMenu = undefined;
+    workflowSubscriptionMenu = undefined;
   } catch (error) {
     activeWorkflowRunMenu = {
       repoKey,
@@ -2387,6 +2682,7 @@ async function watchFavoritePullRequest(
       url: `https://github.com/${target.owner}/${target.repo}/pull/${target.prNumber}`,
     });
     favoritePrMenu = undefined;
+    workflowSubscriptionMenu = undefined;
   } catch (error) {
     favoritePrMenu = {
       repoKey,
@@ -2539,6 +2835,12 @@ async function poll(): Promise<void> {
   isPolling = true;
 
   try {
+    try {
+      await controller.syncWorkflowSubscriptions(settings.favoriteRepos);
+    } catch (error) {
+      console.warn("Could not sync workflow subscriptions.", error);
+    }
+
     await controller.pollNow();
   } finally {
     isPolling = false;
@@ -2594,6 +2896,7 @@ async function fetchDemoOpenPullRequests(): Promise<OpenPullRequest[]> {
       number: "12",
       title: "Add favorite repo quick watches",
       isDraft: false,
+      headBranch: "feat/tray-badges",
       updatedAt: "2026-05-17T12:45:00Z",
       url: "https://github.com/getsentry/sentry/pull/12",
     },
@@ -2601,6 +2904,7 @@ async function fetchDemoOpenPullRequests(): Promise<OpenPullRequest[]> {
       number: "13",
       title: "Refine tray popup spacing",
       isDraft: true,
+      headBranch: "feat/popup-spacing",
       updatedAt: "2026-05-17T11:30:00Z",
       url: "https://github.com/getsentry/sentry/pull/13",
     },
@@ -2612,6 +2916,7 @@ async function fetchDemoActiveWorkflowRuns(): Promise<ActiveWorkflowRun[]> {
     {
       runId: "21",
       title: "CI: Build and test",
+      workflowName: "CI",
       status: "in_progress",
       branchName: "feat/tray-badges",
       updatedAt: "2026-05-17T12:50:00Z",
@@ -2620,10 +2925,45 @@ async function fetchDemoActiveWorkflowRuns(): Promise<ActiveWorkflowRun[]> {
     {
       runId: "22",
       title: "Release: Package app",
+      workflowName: "Release",
       status: "queued",
       branchName: "release/0.2",
       updatedAt: "2026-05-17T12:45:00Z",
       url: "https://github.com/getsentry/sentry/actions/runs/22",
+    },
+  ];
+}
+
+async function fetchDemoUserActiveWorkflowRuns(): Promise<ActiveWorkflowRun[]> {
+  return [
+    {
+      runId: "21",
+      title: "CI: Build and test",
+      workflowName: "CI",
+      status: "in_progress",
+      branchName: "feat/tray-badges",
+      updatedAt: "2026-05-17T12:50:00Z",
+      url: "https://github.com/getsentry/sentry/actions/runs/21",
+    },
+  ];
+}
+
+async function fetchDemoWorkflowDefinitions(): Promise<WorkflowDefinition[]> {
+  return [
+    {
+      name: "CI",
+      path: ".github/workflows/ci.yml",
+      state: "active",
+    },
+    {
+      name: "CodeQL",
+      path: ".github/workflows/codeql.yml",
+      state: "active",
+    },
+    {
+      name: "Release",
+      path: ".github/workflows/release.yml",
+      state: "active",
     },
   ];
 }

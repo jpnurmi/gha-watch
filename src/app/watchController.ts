@@ -15,7 +15,7 @@ import {
   type WatchRecord,
 } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
-import type { ActiveWorkflowRun, OpenPullRequest } from "../platform/gh";
+import type { ActiveWorkflowRun, OpenPullRequest, WorkflowDefinition } from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
 export type WatchControllerOptions = {
@@ -26,7 +26,10 @@ export type WatchControllerDeps = {
   fetchState(target: WatchTarget): Promise<WatchSnapshot>;
   fetchActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   fetchOpenPullRequests?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
+  fetchRepositoryDefaultBranch?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<string>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
+  fetchUserActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
+  fetchWorkflowDefinitions?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
   notificationsPaused?(): boolean;
   notify(notification: WatchNotification): Promise<void>;
   rerunFailed?(target: CheckWatchTarget): Promise<void>;
@@ -48,8 +51,10 @@ export type WatchController = {
   refreshWatchMetadata(): Promise<void>;
   listActiveWorkflowRuns(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   listOpenPullRequests(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
+  listWorkflowDefinitions(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
   rerunFailed(id: string): Promise<void>;
   setOptions(options: WatchControllerOptions): void;
+  syncWorkflowSubscriptions(favoriteRepos: FavoriteRepo[]): Promise<void>;
   pollNow(): Promise<void>;
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
@@ -162,6 +167,70 @@ export function createWatchController(
     }
   }
 
+  async function syncFavoriteWorkflowSubscriptions(favorite: FavoriteRepo): Promise<void> {
+    const defaultBranchWorkflowNames = favorite.defaultBranchWorkflowNames ?? [];
+    const userWorkflowNames = favorite.userWorkflowNames ?? [];
+
+    if (defaultBranchWorkflowNames.length === 0 && userWorkflowNames.length === 0) {
+      return;
+    }
+
+    const targets = new Map<string, ActiveWorkflowRun>();
+
+    if (defaultBranchWorkflowNames.length > 0) {
+      if (!deps.fetchActiveWorkflowRuns) {
+        throw new Error("Default branch workflow subscriptions need GitHub run listing support.");
+      }
+
+      if (!deps.fetchRepositoryDefaultBranch) {
+        throw new Error("Default branch workflow subscriptions need GitHub repository support.");
+      }
+
+      const runs = await deps.fetchActiveWorkflowRuns(favorite);
+      const defaultBranch = await deps.fetchRepositoryDefaultBranch(favorite);
+
+      for (const run of runs) {
+        if (
+          run.branchName === defaultBranch &&
+          workflowNameIsSelected(run.workflowName, defaultBranchWorkflowNames)
+        ) {
+          targets.set(run.runId, run);
+        }
+      }
+    }
+
+    if (userWorkflowNames.length > 0) {
+      if (!deps.fetchUserActiveWorkflowRuns) {
+        throw new Error("User workflow subscriptions need GitHub run listing support.");
+      }
+
+      const runs = await deps.fetchUserActiveWorkflowRuns(favorite);
+
+      for (const run of runs) {
+        if (workflowNameIsSelected(run.workflowName, userWorkflowNames)) {
+          targets.set(run.runId, run);
+        }
+      }
+    }
+
+    for (const run of targets.values()) {
+      await addSubscribedWorkflowRun(favorite, run);
+    }
+  }
+
+  async function addSubscribedWorkflowRun(
+    repo: Pick<FavoriteRepo, "owner" | "repo">,
+    run: ActiveWorkflowRun,
+  ): Promise<void> {
+    await addWatchTarget({
+      kind: "run",
+      owner: repo.owner,
+      repo: repo.repo,
+      runId: run.runId,
+      url: run.url,
+    });
+  }
+
   return {
     async add(target) {
       if (target.kind === "pr") {
@@ -269,6 +338,14 @@ export function createWatchController(
       return deps.fetchOpenPullRequests(target);
     },
 
+    async listWorkflowDefinitions(target) {
+      if (!deps.fetchWorkflowDefinitions) {
+        throw new Error("Workflow subscription lists need GitHub workflow listing support.");
+      }
+
+      return deps.fetchWorkflowDefinitions(target);
+    },
+
     async rerunFailed(id) {
       const watch = watches.find((item) => item.id === id);
 
@@ -286,6 +363,12 @@ export function createWatchController(
 
     setOptions(nextOptions) {
       options = { ...options, ...nextOptions };
+    },
+
+    async syncWorkflowSubscriptions(favoriteRepos) {
+      for (const favorite of favoriteRepos) {
+        await syncFavoriteWorkflowSubscriptions(favorite);
+      }
     },
 
     async pollNow() {
@@ -355,6 +438,10 @@ export function createWatchController(
       };
     },
   };
+}
+
+function workflowNameIsSelected(workflowName: string | undefined, selectedWorkflowNames: string[]): boolean {
+  return Boolean(workflowName && selectedWorkflowNames.includes(workflowName));
 }
 
 function withSnapshotPrNumber(target: WatchTarget, prNumber: string | undefined): WatchTarget {
