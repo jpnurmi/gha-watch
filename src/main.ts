@@ -2999,6 +2999,10 @@ async function updateTrayIndicator(): Promise<void> {
 }
 
 async function resizePopupToContent(): Promise<void> {
+  if (document.documentElement.dataset.platform === "linux") {
+    return;
+  }
+
   const nextHeight = calculatePopupHeight(measurePopupContentHeight());
 
   if (nextHeight === popupHeight) {

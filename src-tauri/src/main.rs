@@ -2,11 +2,14 @@ use std::sync::Mutex;
 
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+#[cfg(any(not(target_os = "linux"), test))]
+use tauri::PhysicalPosition;
+use tauri::WindowEvent;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, PhysicalPosition, Rect, State, WindowEvent,
+    AppHandle, Manager, Rect, State,
 };
 #[cfg(any(target_os = "macos", test))]
 use tauri::{LogicalPosition, Monitor, PhysicalRect, PhysicalSize};
@@ -174,12 +177,18 @@ fn tray_icon_for_status(status: &str, has_unseen_changes: bool) -> Result<Image<
 
 fn show_main_window(app: &AppHandle, tray_rect: Option<Rect>) {
     if let Some(window) = app.get_webview_window("main") {
-        let positioned_near_tray = tray_rect
-            .map(|rect| position_window_near_tray(&window, rect).is_ok())
-            .unwrap_or(false);
+        #[cfg(target_os = "linux")]
+        let _ = tray_rect;
 
-        if !positioned_near_tray {
-            let _ = position_window_near_top_right(&window);
+        #[cfg(not(target_os = "linux"))]
+        {
+            let positioned_near_tray = tray_rect
+                .map(|rect| position_window_near_tray(&window, rect).is_ok())
+                .unwrap_or(false);
+
+            if !positioned_near_tray {
+                let _ = position_window_near_top_right(&window);
+            }
         }
 
         show_and_focus_window(&window);
@@ -191,8 +200,14 @@ fn toggle_main_window(app: &AppHandle, tray_rect: Rect) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            if position_window_near_tray(&window, tray_rect).is_err() {
-                let _ = position_window_near_top_right(&window);
+            #[cfg(target_os = "linux")]
+            let _ = tray_rect;
+
+            #[cfg(not(target_os = "linux"))]
+            {
+                if position_window_near_tray(&window, tray_rect).is_err() {
+                    let _ = position_window_near_top_right(&window);
+                }
             }
             show_and_focus_window(&window);
         }
@@ -201,12 +216,66 @@ fn toggle_main_window(app: &AppHandle, tray_rect: Rect) {
 
 fn show_and_focus_window(window: &tauri::WebviewWindow) {
     let _ = window.show();
+
+    #[cfg(target_os = "linux")]
+    configure_linux_window_controls(window);
+
+    #[cfg(target_os = "linux")]
+    present_linux_window(window);
+
+    #[cfg(target_os = "linux")]
+    return;
+
+    #[cfg(not(target_os = "linux"))]
     let _ = window.set_focus();
 
+    #[cfg(not(target_os = "linux"))]
+    {
+        let window = window.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(75));
+            let _ = window.set_focus();
+        });
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn present_linux_window(window: &tauri::WebviewWindow) {
     let window = window.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(75));
-        let _ = window.set_focus();
+    let handle = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use gtk::prelude::*;
+
+        if let Ok(gtk_window) = handle.gtk_window() {
+            gtk_window.present();
+        }
+    });
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_window_controls(window: &tauri::WebviewWindow) {
+    let window = window.clone();
+    let handle = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use gtk::prelude::*;
+
+        if let Ok(gtk_window) = handle.gtk_window() {
+            gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Utility);
+
+            if let Some(titlebar) = gtk_window.titlebar() {
+                if let Some(event_box) = titlebar.downcast_ref::<gtk::EventBox>() {
+                    event_box.set_above_child(false);
+                }
+            }
+
+            if let Some(gdk_window) = gtk_window.window() {
+                gdk_window.set_functions(
+                    gtk::gdk::WMFunction::MOVE
+                        | gtk::gdk::WMFunction::RESIZE
+                        | gtk::gdk::WMFunction::CLOSE,
+                );
+            }
+        }
     });
 }
 
@@ -412,7 +481,7 @@ fn position_window_near_tray(window: &tauri::WebviewWindow, tray_rect: Rect) -> 
         .map_err(|error| error.to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 fn position_window_near_tray(window: &tauri::WebviewWindow, tray_rect: Rect) -> Result<(), String> {
     let scale_factor = window.scale_factor().map_err(|error| error.to_string())?;
     let tray_position = tray_rect.position.to_physical::<f64>(scale_factor);
@@ -425,7 +494,7 @@ fn position_window_near_tray(window: &tauri::WebviewWindow, tray_rect: Rect) -> 
     position_window_near_physical_anchor(window, tray_position, tray_size.width, tray_size.height)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 fn position_window_near_physical_anchor(
     window: &tauri::WebviewWindow,
     anchor_position: PhysicalPosition<f64>,
@@ -472,6 +541,7 @@ fn position_window_near_physical_anchor(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(not(target_os = "linux"))]
 fn position_window_near_top_right(window: &tauri::WebviewWindow) -> Result<(), String> {
     let window_size = window.outer_size().map_err(|error| error.to_string())?;
     let monitor = window
@@ -516,14 +586,26 @@ fn main() {
             set_tray_indicator,
             show_desktop_notification
         ])
-        .on_window_event(|window, event| {
-            if let WindowEvent::Focused(false) = event {
+        .on_window_event(|window, event| match event {
+            #[cfg(target_os = "linux")]
+            WindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close();
                 let _ = window.hide();
             }
+            #[cfg(not(target_os = "linux"))]
+            WindowEvent::Focused(false) => {
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                configure_linux_window_controls(&window);
+            }
 
             let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(tray_icon_for_status("idle", false)?)

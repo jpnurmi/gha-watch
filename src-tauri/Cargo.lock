@@ -1304,6 +1304,7 @@ dependencies = [
 name = "gha-watch"
 version = "0.1.0"
 dependencies = [
+ "gtk",
  "mac-notification-sys",
  "serde",
  "tauri",
