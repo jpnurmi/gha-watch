@@ -321,6 +321,7 @@ input {
   --tree-column-gap: 4px;
   --tree-actions-width: 63px;
   --repo-actions-width: 96px;
+  --scrollbar-gutter-width: 14px;
 
   display: flex;
   min-height: 0;
@@ -360,7 +361,7 @@ input {
     );
   align-items: center;
   gap: var(--tree-column-gap);
-  padding: 4px 6px 4px var(--tree-left-padding);
+  padding: 4px calc(6px + var(--scrollbar-gutter-width)) 4px var(--tree-left-padding);
   background: rgb(255 255 255 / 6%);
   touch-action: none;
 }
@@ -749,7 +750,8 @@ input {
   grid-template-columns: var(--tree-chevron-width) var(--tree-leading-width) minmax(0, 1fr);
   align-items: start;
   gap: var(--tree-column-gap);
-  padding: 8px 6px 8px calc(var(--tree-left-padding) + var(--tree-indent, 0px));
+  padding: 8px calc(6px + var(--scrollbar-gutter-width)) 8px
+    calc(var(--tree-left-padding) + var(--tree-indent, 0px));
   background: var(--watch-row-bg);
   color: inherit;
 }
@@ -908,18 +910,23 @@ input {
 .watch {
   --watch-row-bg: #161b22;
 
+  position: relative;
   display: grid;
   min-height: 52px;
-  grid-template-columns: var(--tree-leading-width) minmax(0, 1fr) var(--tree-actions-width);
+  grid-template-columns: var(--tree-leading-width) minmax(0, 1fr);
   align-items: start;
   gap: var(--tree-column-gap);
-  padding: 8px 6px 8px
+  padding: 8px calc(6px + var(--scrollbar-gutter-width)) 8px
     calc(
       var(--tree-left-padding) + var(--tree-chevron-width) + var(--tree-column-gap) +
         var(--watch-indent, 0px)
     );
   background: var(--watch-row-bg);
   cursor: pointer;
+}
+
+.watch.has-actions {
+  grid-template-columns: var(--tree-leading-width) minmax(0, 1fr) var(--tree-actions-width);
 }
 
 .watch:hover {
@@ -1134,6 +1141,19 @@ input {
   white-space: nowrap;
 }
 
+.watch-label.has-branch-badge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.watch-title-cluster {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
 .watch-title-text {
   min-width: 0;
   flex: 0 1 auto;
@@ -1154,6 +1174,7 @@ input {
   max-width: 68px;
   overflow: hidden;
   flex: 0 0 auto;
+  justify-self: end;
   border: 1px solid rgb(88 166 255 / 24%);
   border-radius: 999px;
   padding: 0 4px 1px;
@@ -1213,7 +1234,9 @@ input {
 }
 
 .watch-actions {
-  position: relative;
+  position: absolute;
+  top: 6px;
+  right: calc(6px + var(--scrollbar-gutter-width));
   display: flex;
   width: var(--tree-actions-width);
   height: 20px;
@@ -1222,8 +1245,21 @@ input {
   justify-content: flex-end;
   gap: 2px;
   justify-self: end;
-  margin-top: -2px;
   padding-right: 0;
+}
+
+.watch.has-actions .watch-actions {
+  position: relative;
+  top: auto;
+  right: auto;
+  margin-top: -2px;
+}
+
+.watch.has-actions.has-confirmation .watch-actions {
+  position: absolute;
+  top: 6px;
+  right: calc(6px + var(--scrollbar-gutter-width));
+  margin-top: 0;
 }
 
 .watch.has-confirmation .watch-actions::before {
@@ -1232,16 +1268,18 @@ input {
   right: 0;
   width: 84px;
   height: 100%;
-  background: linear-gradient(90deg, transparent, var(--watch-row-bg) 28px);
+  background: linear-gradient(90deg, transparent, var(--watch-row-bg) 24px);
   content: "";
   pointer-events: none;
 }
 
 .watch.has-confirmation .confirm-button {
   position: absolute;
-  top: -1px;
+  top: 1px;
   right: 0;
   z-index: 1;
+  height: 18px;
+  margin-top: 0;
 }
 
 .watch-action-button {

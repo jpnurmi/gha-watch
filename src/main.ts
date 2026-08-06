@@ -969,9 +969,11 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
           aria-label="${escapeHtml(actionLabel)}"
           ${treeToggleAttributes}
         >
-          <span class="watch-label">
-            <span class="watch-title-text">${escapeHtml(node.label)}</span>
-            ${node.referenceLabel ? `<span class="watch-title-reference">${escapeHtml(node.referenceLabel)}</span>` : ""}
+          <span class="watch-label${node.branchName ? " has-branch-badge" : ""}">
+            <span class="watch-title-cluster">
+              <span class="watch-title-text">${escapeHtml(node.label)}</span>
+              ${node.referenceLabel ? `<span class="watch-title-reference">${escapeHtml(node.referenceLabel)}</span>` : ""}
+            </span>
             ${renderBranchBadge(node.branchName)}
           </span>
           ${renderWatchTreeMetadata(node)}
@@ -1138,10 +1140,11 @@ function renderWatchTreeActions(node: WatchTreeNodeViewModel, depth: number): st
 
 function renderWatch(row: WatchRowViewModel, depth = 0): string {
   const hasConfirmation = pendingWatchAction?.id === row.id;
+  const hasActions = row.canRerun;
 
   return `
     <li
-      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasConfirmation ? " has-confirmation" : ""}"
+      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${hasConfirmation ? " has-confirmation" : ""}"
       data-id="${escapeHtml(row.id)}"
       data-reorder-key="${escapeHtml(row.id)}"
       data-row-ids="${escapeHtml(row.id)}"
@@ -1153,9 +1156,11 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
     >
       ${renderLeadingIcon(row)}
       <div class="watch-main">
-        <span class="watch-label">
-          <span class="watch-title-text">${escapeHtml(row.label)}</span>
-          ${row.prReference ? `<span class="watch-title-reference">${escapeHtml(row.prReference)}</span>` : ""}
+        <span class="watch-label${row.branchName ? " has-branch-badge" : ""}">
+          <span class="watch-title-cluster">
+            <span class="watch-title-text">${escapeHtml(row.label)}</span>
+            ${row.prReference ? `<span class="watch-title-reference">${escapeHtml(row.prReference)}</span>` : ""}
+          </span>
           ${renderBranchBadge(row.branchName)}
         </span>
         ${renderMetadata(row)}

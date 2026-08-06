@@ -83,12 +83,14 @@ describe("watch tree group actions", () => {
     expect(styles).toMatch(
       /\.watch-group-header\s*\{[^}]*grid-template-columns:\s*var\(--tree-chevron-width\) var\(--tree-leading-width\) minmax\(0,\s*1fr\) var\(\s*--repo-actions-width\s*\);/s,
     );
-    expect(styles).toMatch(/\.watch-group-header\s*\{[^}]*padding:\s*4px 6px 4px var\(--tree-left-padding\);/s);
     expect(styles).toMatch(
-      /\.watch-tree-header\s*\{[^}]*padding:\s*8px 6px 8px calc\(var\(--tree-left-padding\) \+ var\(--tree-indent,\s*0px\)\);/s,
+      /\.watch-group-header\s*\{[^}]*padding:\s*4px calc\(6px \+ var\(--scrollbar-gutter-width\)\) 4px var\(--tree-left-padding\);/s,
     );
     expect(styles).toMatch(
-      /\.watch\s*\{[^}]*padding:\s*8px 6px 8px\s*calc\(\s*var\(--tree-left-padding\) \+ var\(--tree-chevron-width\) \+ var\(--tree-column-gap\) \+\s*var\(--watch-indent,\s*0px\)\s*\);/s,
+      /\.watch-tree-header\s*\{[^}]*padding:\s*8px calc\(6px \+ var\(--scrollbar-gutter-width\)\) 8px\s*calc\(var\(--tree-left-padding\) \+ var\(--tree-indent,\s*0px\)\);/s,
+    );
+    expect(styles).toMatch(
+      /\.watch\s*\{[^}]*padding:\s*8px calc\(6px \+ var\(--scrollbar-gutter-width\)\) 8px\s*calc\(\s*var\(--tree-left-padding\) \+ var\(--tree-chevron-width\) \+ var\(--tree-column-gap\) \+\s*var\(--watch-indent,\s*0px\)\s*\);/s,
     );
   });
 
@@ -242,7 +244,7 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain("${node.rows.map((row) => renderWatch(row, depth + 1)).join(\"\")}");
     expect(mainSource).toContain('style="--watch-indent: ${depth * treeIndentStepPx}px;"');
     expect(styles).toMatch(
-      /\.watch\s*\{[^}]*padding:\s*8px 6px 8px\s*calc\(\s*var\(--tree-left-padding\) \+ var\(--tree-chevron-width\) \+ var\(--tree-column-gap\) \+\s*var\(--watch-indent,\s*0px\)\s*\);/s,
+      /\.watch\s*\{[^}]*padding:\s*8px calc\(6px \+ var\(--scrollbar-gutter-width\)\) 8px\s*calc\(\s*var\(--tree-left-padding\) \+ var\(--tree-chevron-width\) \+ var\(--tree-column-gap\) \+\s*var\(--watch-indent,\s*0px\)\s*\);/s,
     );
     expect(styles).toMatch(/\.watch-actions\s*\{[^}]*margin-top:\s*-2px;/s);
   });
