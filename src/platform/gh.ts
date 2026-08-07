@@ -144,6 +144,7 @@ type WorkflowRunListResponse = {
   createdAt?: string;
   databaseId?: number | string;
   displayTitle?: string;
+  event?: string;
   headBranch?: string | null;
   headSha?: string | null;
   status?: string;
@@ -259,10 +260,12 @@ export async function fetchRepositoryDefaultBranchCiStatus(
       defaultBranch,
       "--commit",
       commitSha,
+      "--event",
+      "push",
       "--limit",
       "100",
       "--json",
-      "databaseId,displayTitle,workflowDatabaseId,workflowName,headBranch,headSha,status,conclusion,createdAt,updatedAt,url",
+      "databaseId,displayTitle,event,workflowDatabaseId,workflowName,headBranch,headSha,status,conclusion,createdAt,updatedAt,url",
     ]);
 
     assertSuccessfulGhResult(result);
@@ -549,7 +552,8 @@ function summarizeRepositoryCiStatus(
 
 function isRepositoryCiRunForCommit(response: WorkflowRunListResponse, commitSha: string): boolean {
   const headSha = response.headSha?.trim();
-  return Boolean(headSha && headSha.toLowerCase() === commitSha.toLowerCase());
+  const event = response.event?.trim();
+  return Boolean(headSha && headSha.toLowerCase() === commitSha.toLowerCase() && event === "push");
 }
 
 function getRepositoryCiWorkflowStatuses(response: WorkflowRunListResponse[]): RepositoryCiWorkflowStatus[] {

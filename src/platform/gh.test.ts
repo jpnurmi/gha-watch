@@ -460,6 +460,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
           {
             databaseId: 101,
             displayTitle: "Build main",
+            event: "push",
             workflowName: "CI",
             headBranch: "main",
             headSha: "abc123",
@@ -473,6 +474,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
           {
             databaseId: 102,
             displayTitle: "Lint main",
+            event: "push",
             workflowName: "Lint",
             headBranch: "main",
             headSha: "abc123",
@@ -536,16 +538,18 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
           "main",
           "--commit",
           "abc123",
+          "--event",
+          "push",
           "--limit",
           "100",
           "--json",
-          "databaseId,displayTitle,workflowDatabaseId,workflowName,headBranch,headSha,status,conclusion,createdAt,updatedAt,url",
+          "databaseId,displayTitle,event,workflowDatabaseId,workflowName,headBranch,headSha,status,conclusion,createdAt,updatedAt,url",
         ],
       },
     ]);
   });
 
-  it("ignores default branch workflow runs from earlier commits", async () => {
+  it("ignores same-branch workflow runs that are not push builds for the latest commit", async () => {
     const { executor } = createSequenceExecutor([
       {
         code: 0,
@@ -566,6 +570,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
         stdout: JSON.stringify([
           {
             displayTitle: "Build main",
+            event: "push",
             workflowName: "CI",
             headBranch: "main",
             headSha: "abc123",
@@ -576,6 +581,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
           },
           {
             displayTitle: "Deploy main",
+            event: "push",
             workflowName: "Deploy",
             headBranch: "main",
             headSha: "older456",
@@ -583,6 +589,17 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
             conclusion: "",
             updatedAt: "2026-05-17T12:06:00Z",
             url: "https://github.com/getsentry/sentry/actions/runs/456",
+          },
+          {
+            displayTitle: "Manual release",
+            event: "workflow_dispatch",
+            workflowName: "Release",
+            headBranch: "main",
+            headSha: "abc123",
+            status: "in_progress",
+            conclusion: "",
+            updatedAt: "2026-05-17T12:07:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/789",
           },
         ]),
         stderr: "",
@@ -629,6 +646,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
         stdout: JSON.stringify([
           {
             displayTitle: "Build main",
+            event: "push",
             workflowName: "CI",
             headBranch: "main",
             headSha: "abc123",
@@ -682,6 +700,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
         stdout: JSON.stringify([
           {
             displayTitle: "Build main",
+            event: "push",
             workflowName: "CI",
             headBranch: "main",
             headSha: "abc123",
