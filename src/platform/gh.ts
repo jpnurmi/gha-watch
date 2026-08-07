@@ -145,6 +145,7 @@ type WorkflowRunListResponse = {
   databaseId?: number | string;
   displayTitle?: string;
   headBranch?: string | null;
+  headSha?: string | null;
   status?: string;
   updatedAt?: string;
   url?: string;
@@ -487,7 +488,9 @@ function summarizeRepositoryCiStatus(
   commitSha: string,
   response: WorkflowRunListResponse[],
 ): RepositoryCiStatus {
-  const workflows = getRepositoryCiWorkflowStatuses(response);
+  const workflows = getRepositoryCiWorkflowStatuses(
+    response.filter((run) => isRepositoryCiRunForCommit(run, commitSha)),
+  );
 
   if (workflows.length === 0) {
     return {
@@ -542,6 +545,11 @@ function summarizeRepositoryCiStatus(
     ...(updatedAt ? { updatedAt } : {}),
     ...(url ? { url } : {}),
   };
+}
+
+function isRepositoryCiRunForCommit(response: WorkflowRunListResponse, commitSha: string): boolean {
+  const headSha = response.headSha?.trim();
+  return Boolean(headSha && headSha.toLowerCase() === commitSha.toLowerCase());
 }
 
 function getRepositoryCiWorkflowStatuses(response: WorkflowRunListResponse[]): RepositoryCiWorkflowStatus[] {

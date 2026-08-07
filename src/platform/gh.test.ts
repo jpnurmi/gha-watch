@@ -462,6 +462,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
             displayTitle: "Build main",
             workflowName: "CI",
             headBranch: "main",
+            headSha: "abc123",
             status: "completed",
             conclusion: "success",
             createdAt: "2026-05-17T12:00:00Z",
@@ -474,6 +475,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
             displayTitle: "Lint main",
             workflowName: "Lint",
             headBranch: "main",
+            headSha: "abc123",
             status: "completed",
             conclusion: "skipped",
             createdAt: "2026-05-17T12:01:00Z",
@@ -543,6 +545,69 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
     ]);
   });
 
+  it("ignores default branch workflow runs from earlier commits", async () => {
+    const { executor } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          default_branch: "main",
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          sha: "abc123",
+        }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify([
+          {
+            displayTitle: "Build main",
+            workflowName: "CI",
+            headBranch: "main",
+            headSha: "abc123",
+            status: "completed",
+            conclusion: "success",
+            updatedAt: "2026-05-17T12:05:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/123",
+          },
+          {
+            displayTitle: "Deploy main",
+            workflowName: "Deploy",
+            headBranch: "main",
+            headSha: "older456",
+            status: "in_progress",
+            conclusion: "",
+            updatedAt: "2026-05-17T12:06:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/456",
+          },
+        ]),
+        stderr: "",
+      },
+    ]);
+
+    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toMatchObject({
+      tone: "success",
+      label: "Passing",
+      description: "main: 1 workflow passed",
+      commitSha: "abc123",
+      url: "https://github.com/getsentry/sentry/actions/runs/123",
+      workflows: [
+        {
+          tone: "success",
+          label: "Passing",
+          description: "CI passed",
+          name: "CI",
+          updatedAt: "2026-05-17T12:05:00Z",
+          url: "https://github.com/getsentry/sentry/actions/runs/123",
+        },
+      ],
+    });
+  });
+
   it("marks default branch CI pending when the latest workflow run has not completed", async () => {
     const { executor } = createSequenceExecutor([
       {
@@ -566,6 +631,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
             displayTitle: "Build main",
             workflowName: "CI",
             headBranch: "main",
+            headSha: "abc123",
             status: "in_progress",
             conclusion: "",
             updatedAt: "2026-05-17T12:05:00Z",
@@ -618,6 +684,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
             displayTitle: "Build main",
             workflowName: "CI",
             headBranch: "main",
+            headSha: "abc123",
             status: "completed",
             conclusion: "failure",
             updatedAt: "2026-05-17T12:05:00Z",
