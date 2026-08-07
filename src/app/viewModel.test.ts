@@ -353,12 +353,32 @@ describe("createPopupViewModel", () => {
         "getsentry/sentry": {
           tone: "success",
           label: "Passing",
-          description: "main: latest check runs passed",
+          description: "main: 1 workflow passed",
+          url: "https://github.com/getsentry/sentry/actions/runs/101",
+          workflows: [
+            {
+              tone: "success",
+              label: "Passing",
+              description: "CI passed",
+              name: "CI",
+              url: "https://github.com/getsentry/sentry/actions/runs/101",
+            },
+          ],
         },
         "jpnurmi/gha-watch": {
           tone: "failure",
           label: "Failing",
-          description: "main: 1 check not successful",
+          description: "main: 1 workflow failing",
+          url: "https://github.com/jpnurmi/gha-watch/actions/runs/202",
+          workflows: [
+            {
+              tone: "failure",
+              label: "Failing",
+              description: "CI failure",
+              name: "CI",
+              url: "https://github.com/jpnurmi/gha-watch/actions/runs/202",
+            },
+          ],
         },
       },
     );
@@ -369,7 +389,17 @@ describe("createPopupViewModel", () => {
         {
           tone: "failure",
           label: "Failing",
-          description: "main: 1 check not successful",
+          description: "main: 1 workflow failing",
+          url: "https://github.com/jpnurmi/gha-watch/actions/runs/202",
+          workflows: [
+            {
+              tone: "failure",
+              label: "Failing",
+              description: "CI failure",
+              name: "CI",
+              url: "https://github.com/jpnurmi/gha-watch/actions/runs/202",
+            },
+          ],
         },
       ],
       [
@@ -377,7 +407,17 @@ describe("createPopupViewModel", () => {
         {
           tone: "success",
           label: "Passing",
-          description: "main: latest check runs passed",
+          description: "main: 1 workflow passed",
+          url: "https://github.com/getsentry/sentry/actions/runs/101",
+          workflows: [
+            {
+              tone: "success",
+              label: "Passing",
+              description: "CI passed",
+              name: "CI",
+              url: "https://github.com/getsentry/sentry/actions/runs/101",
+            },
+          ],
         },
       ],
     ]);

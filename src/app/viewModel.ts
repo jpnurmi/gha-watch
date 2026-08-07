@@ -92,6 +92,16 @@ export type RepoCiStatusViewModel = {
   tone: RepoCiStatusTone;
   label: string;
   description: string;
+  workflows: RepoCiWorkflowStatusViewModel[];
+  url?: string;
+};
+
+export type RepoCiWorkflowStatusViewModel = {
+  tone: RepoCiStatusTone;
+  label: string;
+  description: string;
+  name: string;
+  url: string;
 };
 
 export type PopupViewModel = {

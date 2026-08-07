@@ -34,6 +34,7 @@ import { createTrayState } from "./app/trayState";
 import {
   createPopupViewModel,
   type RepoCiStatusViewModel,
+  type RepoCiWorkflowStatusViewModel,
   type RowTone,
   type WatchGroupViewModel,
   type WatchRowViewModel,
@@ -128,6 +129,7 @@ let pendingRepoAction: PendingRepoAction | undefined;
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let favoritePrMenu: FavoritePullRequestMenuState | undefined;
 let workflowSubscriptionMenu: WorkflowSubscriptionMenuState | undefined;
+let repoCiStatusMenu: RepoCiStatusMenuState | undefined;
 let repoPressState: RepoPressState | undefined;
 let repoDragState: RepoDragState | undefined;
 let watchPressState: WatchPressState | undefined;
@@ -220,6 +222,10 @@ type WorkflowSubscriptionMenuState =
       status: "error";
       error: string;
     };
+
+type RepoCiStatusMenuState = {
+  repoKey: string;
+};
 
 type PendingRepoAction = {
   owner: string;
@@ -315,7 +321,7 @@ document.addEventListener("click", (event) => {
     render();
   }
 
-  if (activeWorkflowRunMenu || favoritePrMenu || workflowSubscriptionMenu) {
+  if (activeWorkflowRunMenu || favoritePrMenu || workflowSubscriptionMenu || repoCiStatusMenu) {
     if (target instanceof Element && target.closest(".repo-action-menu")) {
       return;
     }
@@ -323,6 +329,7 @@ document.addEventListener("click", (event) => {
     activeWorkflowRunMenu = undefined;
     favoritePrMenu = undefined;
     workflowSubscriptionMenu = undefined;
+    repoCiStatusMenu = undefined;
     render();
   }
 });
@@ -472,19 +479,19 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
       <div class="watch-group-header">
         ${renderRepoGroupChevron(group, actions, isCollapsed)}
         ${renderFavoriteRepoButton(group)}
-        <button
-          class="watch-group-toggle"
-          type="button"
-          data-action="toggle-group"
-          data-repo="${escapeHtml(group.repoLabel)}"
-          aria-expanded="${isCollapsed ? "false" : "true"}"
-          ${collapseDisabled}
-        >
-          <span class="watch-group-meta">
+        <span class="watch-group-meta">
+          <button
+            class="watch-group-toggle"
+            type="button"
+            data-action="toggle-group"
+            data-repo="${escapeHtml(group.repoLabel)}"
+            aria-expanded="${isCollapsed ? "false" : "true"}"
+            ${collapseDisabled}
+          >
             <span class="watch-group-title">${escapeHtml(group.repoLabel)}</span>
-            ${renderRepoCiStatus(group)}
-          </span>
-        </button>
+          </button>
+          ${renderRepoCiStatus(group)}
+        </span>
         ${renderRepoGroupActions(group, actions)}
       </div>
       ${
@@ -507,14 +514,67 @@ function renderRepoCiStatus(group: WatchGroupViewModel): string {
     return "";
   }
 
+  const repoKey = getFavoriteRepoKey(group);
+  const menuOpen = repoCiStatusMenu?.repoKey === repoKey;
+  const content = `
+    ${renderRepoCiStatusGlyph(group.ciStatus.tone)}
+  `;
+  const attributes = `
+    class="repo-ci-status is-${group.ciStatus.tone}"
+    title="${escapeHtml(group.ciStatus.description)}"
+    aria-label="${escapeHtml(group.ciStatus.label)}"
+  `;
+
+  if (group.ciStatus.workflows.length > 0) {
+    return `
+      <span class="repo-action-menu repo-ci-menu">
+        <button
+          ${attributes}
+          type="button"
+          data-action="toggle-repo-ci-status"
+          data-repo="${escapeHtml(repoKey)}"
+          aria-haspopup="menu"
+          aria-expanded="${menuOpen ? "true" : "false"}"
+        >
+          ${content}
+        </button>
+        ${menuOpen ? renderRepoCiStatusPopover(group.ciStatus) : ""}
+      </span>
+    `;
+  }
+
   return `
     <span
-      class="repo-ci-status is-${group.ciStatus.tone}"
-      title="${escapeHtml(group.ciStatus.description)}"
-      aria-label="${escapeHtml(group.ciStatus.label)}"
+      ${attributes}
     >
-      ${renderRepoCiStatusGlyph(group.ciStatus.tone)}
+      ${content}
     </span>
+  `;
+}
+
+function renderRepoCiStatusPopover(status: RepoCiStatusViewModel): string {
+  return `
+    <div class="favorite-pr-popover repo-ci-popover" role="menu">
+      ${status.workflows.map(renderRepoCiStatusItem).join("")}
+    </div>
+  `;
+}
+
+function renderRepoCiStatusItem(workflow: RepoCiWorkflowStatusViewModel): string {
+  return `
+    <button
+      class="repo-ci-item"
+      type="button"
+      role="menuitem"
+      data-action="open-repo-ci-workflow"
+      data-url="${escapeHtml(workflow.url)}"
+      title="${escapeHtml(workflow.description)}"
+    >
+      <span class="repo-ci-item-icon repo-ci-status is-${workflow.tone}" aria-hidden="true">
+        ${renderRepoCiStatusGlyph(workflow.tone)}
+      </span>
+      <span class="repo-ci-item-title">${escapeHtml(workflow.name)}</span>
+    </button>
   `;
 }
 
@@ -1423,6 +1483,28 @@ function bindEvents(): void {
     });
   }
 
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repo-ci-status"]')) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      toggleRepoCiStatusMenu(button.dataset.repo || "");
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open-repo-ci-workflow"]')) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      repoCiStatusMenu = undefined;
+
+      if (button.dataset.url) {
+        void openUrl(button.dataset.url);
+      }
+    });
+  }
+
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-tree-node"]')) {
     button.addEventListener("click", (event) => {
       const nodeId = button.dataset.treeNode;
@@ -1846,7 +1928,7 @@ function getRepoHeaderPressKey(header: HTMLElement, event: Event): string | unde
     return undefined;
   }
 
-  if (event.target.closest(".watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron")) {
+  if (event.target.closest(".watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron, .repo-ci-status")) {
     return undefined;
   }
 
@@ -1909,6 +1991,7 @@ function toggleRepoGroup(repoLabel: string): void {
   collapsedGroups.toggle(repoLabel);
   isClearMenuOpen = false;
   pendingRepoAction = undefined;
+  repoCiStatusMenu = undefined;
   render();
 }
 
@@ -1919,6 +2002,7 @@ function toggleTreeNode(nodeId: string): void {
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
   workflowSubscriptionMenu = undefined;
+  repoCiStatusMenu = undefined;
   render();
 }
 
@@ -1934,6 +2018,7 @@ function armTreeNodeRemoval(nodeId: string, rowIds: string[], mode: WatchTreeNod
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
   workflowSubscriptionMenu = undefined;
+  repoCiStatusMenu = undefined;
   render();
 }
 
@@ -1957,6 +2042,7 @@ function armRepoGroupRemoval(button: HTMLButtonElement): void {
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
   workflowSubscriptionMenu = undefined;
+  repoCiStatusMenu = undefined;
   render();
 }
 
@@ -2044,6 +2130,7 @@ function startWatchPointerDrag(repoKey: string, sourceKey: string, sourceIds: st
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
   workflowSubscriptionMenu = undefined;
+  repoCiStatusMenu = undefined;
 
   app.querySelector(".watch-list")?.classList.add("is-reordering-runs");
   getWatchReorderElement(sourceKey)?.parentElement?.classList.add("is-reordering-runs");
@@ -2061,6 +2148,7 @@ function startRepoPointerDrag(sourceKey: string): void {
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
   workflowSubscriptionMenu = undefined;
+  repoCiStatusMenu = undefined;
 
   app.querySelector(".watch-list")?.classList.add("is-reordering");
   getRepoGroupElement(sourceKey)?.classList.add("is-dragging");
@@ -2473,6 +2561,19 @@ function repoOrdersAreEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((repoKey, index) => repoKey === right[index]);
 }
 
+function toggleRepoCiStatusMenu(repoKey: string): void {
+  if (!repoKey) {
+    return;
+  }
+
+  repoCiStatusMenu = repoCiStatusMenu?.repoKey === repoKey ? undefined : { repoKey };
+  activeWorkflowRunMenu = undefined;
+  favoritePrMenu = undefined;
+  workflowSubscriptionMenu = undefined;
+  isClearMenuOpen = false;
+  render();
+}
+
 function toggleFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): void {
   if (!repo.owner || !repo.repo) {
     return;
@@ -2489,6 +2590,8 @@ function toggleFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): v
     activeWorkflowRunMenu = undefined;
   } else if (workflowSubscriptionMenu?.repoKey === getFavoriteRepoKey(repo)) {
     workflowSubscriptionMenu = undefined;
+  } else if (repoCiStatusMenu?.repoKey === getFavoriteRepoKey(repo)) {
+    repoCiStatusMenu = undefined;
   }
 
   settings = { ...settings, favoriteRepos };
@@ -2557,6 +2660,7 @@ async function toggleFavoritePullRequests(repo: Pick<FavoriteRepo, "owner" | "re
   favoritePrMenu = { repoKey, status: "loading" };
   activeWorkflowRunMenu = undefined;
   workflowSubscriptionMenu = undefined;
+  repoCiStatusMenu = undefined;
   isClearMenuOpen = false;
   render();
 
@@ -2595,6 +2699,7 @@ async function toggleActiveWorkflowRuns(repo: Pick<FavoriteRepo, "owner" | "repo
   activeWorkflowRunMenu = { repoKey, status: "loading" };
   favoritePrMenu = undefined;
   workflowSubscriptionMenu = undefined;
+  repoCiStatusMenu = undefined;
   isClearMenuOpen = false;
   render();
 
@@ -2633,6 +2738,7 @@ async function toggleWorkflowSubscriptions(repo: Pick<FavoriteRepo, "owner" | "r
   workflowSubscriptionMenu = { repoKey, status: "loading" };
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
+  repoCiStatusMenu = undefined;
   isClearMenuOpen = false;
   render();
 
@@ -2715,6 +2821,7 @@ async function watchActiveWorkflowRun(
     });
     activeWorkflowRunMenu = undefined;
     workflowSubscriptionMenu = undefined;
+    repoCiStatusMenu = undefined;
   } catch (error) {
     activeWorkflowRunMenu = {
       repoKey,
@@ -2746,6 +2853,7 @@ async function watchFavoritePullRequest(
     });
     favoritePrMenu = undefined;
     workflowSubscriptionMenu = undefined;
+    repoCiStatusMenu = undefined;
   } catch (error) {
     favoritePrMenu = {
       repoKey,
@@ -2767,6 +2875,7 @@ function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
   pendingTreeAction = undefined;
   pendingRepoAction = undefined;
   isClearMenuOpen = false;
+  repoCiStatusMenu = undefined;
   render();
 }
 
@@ -2869,6 +2978,7 @@ async function addWatch(url: string): Promise<void> {
 
     isAdding = false;
     isClearMenuOpen = false;
+    repoCiStatusMenu = undefined;
     addError = undefined;
   } catch (error) {
     addError = error instanceof Error ? error.message : String(error);
@@ -2944,6 +3054,7 @@ async function refreshRepositoryCiStatus(repo: Pick<FavoriteRepo, "owner" | "rep
         tone: "pending",
         label: "Loading",
         description: "Loading default branch CI status",
+        workflows: [],
       },
     };
     render();
@@ -2963,6 +3074,7 @@ async function refreshRepositoryCiStatus(repo: Pick<FavoriteRepo, "owner" | "rep
         tone: "pending",
         label: "Unknown",
         description: error instanceof Error ? error.message : String(error),
+        workflows: [],
       },
     };
   } finally {
@@ -2990,6 +3102,14 @@ function toRepoCiStatusViewModel(status: RepositoryCiStatus): RepoCiStatusViewMo
     tone: status.tone,
     label: status.label,
     description: status.description,
+    workflows: status.workflows.map((workflow) => ({
+      tone: workflow.tone,
+      label: workflow.label,
+      description: workflow.description,
+      name: workflow.name,
+      url: workflow.url,
+    })),
+    ...(status.url ? { url: status.url } : {}),
   };
 }
 
@@ -3121,12 +3241,27 @@ async function fetchDemoWorkflowDefinitions(): Promise<WorkflowDefinition[]> {
 async function fetchDemoRepositoryDefaultBranchCiStatus(
   repo: Pick<FavoriteRepo, "owner" | "repo">,
 ): Promise<RepositoryCiStatus> {
+  const pending = repo.repo === "sentry";
+  const workflowUrl = `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${pending ? "21" : "22"}`;
+
   return {
-    tone: repo.repo === "sentry" ? "pending" : "success",
-    label: repo.repo === "sentry" ? "Pending" : "Passing",
-    description: repo.repo === "sentry" ? "main: 1 check still running or queued" : "main: latest check runs passed",
+    tone: pending ? "pending" : "success",
+    label: pending ? "Pending" : "Passing",
+    description: pending ? "main: 1 workflow pending" : "main: 1 workflow passed",
     defaultBranch: "main",
+    commitSha: "demo-default-branch-commit",
     updatedAt: "2026-05-17T12:50:00Z",
+    url: workflowUrl,
+    workflows: [
+      {
+        tone: pending ? "pending" : "success",
+        label: pending ? "Pending" : "Passing",
+        description: pending ? "CI is in progress" : "CI passed",
+        name: "CI",
+        url: workflowUrl,
+        updatedAt: "2026-05-17T12:50:00Z",
+      },
+    ],
   };
 }
 

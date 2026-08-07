@@ -383,7 +383,8 @@ input {
 
 .watch-group-toggle {
   display: grid;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   align-items: center;
   min-width: 0;
   border: 0;
@@ -542,6 +543,11 @@ input {
   position: relative;
 }
 
+.repo-ci-menu {
+  position: relative;
+  display: inline-grid;
+}
+
 .favorite-pr-popover {
   position: absolute;
   z-index: 20;
@@ -615,6 +621,49 @@ input {
 
 .workflow-subscription-popover {
   width: min(330px, calc(100vw - 32px));
+}
+
+.repo-ci-popover {
+  top: 24px;
+  right: auto;
+  left: 0;
+  width: max-content;
+  max-width: min(220px, calc(100vw - 32px));
+}
+
+.repo-ci-item {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 8px 10px;
+  background: transparent;
+  color: #d8dee7;
+  cursor: pointer;
+  text-align: left;
+}
+
+.repo-ci-item:hover,
+.repo-ci-item:focus-visible {
+  background: #2d3642;
+  color: #ffffff;
+}
+
+.repo-ci-item-icon {
+  pointer-events: none;
+}
+
+.repo-ci-item-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workflow-subscription-item {
@@ -730,11 +779,14 @@ input {
 
 .repo-ci-status {
   display: inline-grid;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 999px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
 }
 
 .repo-ci-status svg {
@@ -753,6 +805,15 @@ input {
 
 .repo-ci-status.is-failure {
   color: #f85149;
+}
+
+button.repo-ci-status {
+  cursor: pointer;
+}
+
+button.repo-ci-status:hover,
+button.repo-ci-status:focus-visible {
+  background: rgb(255 255 255 / 8%);
 }
 
 .repo-ci-dot {

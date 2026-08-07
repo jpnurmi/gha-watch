@@ -153,7 +153,7 @@ describe("watch tree group actions", () => {
       /\.watch-group-header\s*\{[^}]*grid-template-columns:\s*var\(--tree-chevron-width\) var\(--tree-leading-width\) minmax\(0,\s*1fr\) var\(\s*--repo-actions-width\s*\);/s,
     );
     expect(mainSource).toContain(
-      'event.target.closest(".watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron")',
+      'event.target.closest(".watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron, .repo-ci-status")',
     );
     expect(styles).toMatch(
       /\.watch-group-header:hover \.watch-tree-chevron:not\(\[aria-disabled="true"\]\),[^{]*\.watch-group-header:focus-within \.watch-tree-chevron:not\(\[aria-disabled="true"\]\)/s,
@@ -173,6 +173,23 @@ describe("watch tree group actions", () => {
     expect(styles).toMatch(
       /\.watch-group-header:hover \.watch-group-subscribe-button,[^{]*\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-remove-button/s,
     );
+  });
+
+  it("renders repository CI status as a workflow status menu", () => {
+    expect(mainSource).toContain('data-action="toggle-repo-ci-status"');
+    expect(mainSource).toContain("renderRepoCiStatusPopover(group.ciStatus)");
+    expect(mainSource).toContain("status.workflows.map(renderRepoCiStatusItem)");
+    expect(mainSource).toContain('data-action="open-repo-ci-workflow"');
+    expect(mainSource).toContain('data-url="${escapeHtml(workflow.url)}"');
+    expect(mainSource).toContain("void openUrl(button.dataset.url)");
+    expect(mainSource).toContain("workflows: status.workflows.map((workflow) => ({");
+    expect(styles).toMatch(/\.repo-ci-status\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*border-radius:\s*6px;/s);
+    expect(styles).toContain(".repo-ci-popover");
+    expect(styles).toContain(".repo-ci-item");
+    expect(styles).toMatch(/\.repo-ci-popover\s*\{[^}]*width:\s*max-content;[^}]*max-width:\s*min\(220px,\s*calc\(100vw - 32px\)\);/s);
+    expect(styles).toMatch(/\.repo-ci-item\s*\{[^}]*grid-template-columns:\s*18px minmax\(0,\s*1fr\);/s);
+    expect(styles).toMatch(/button\.repo-ci-status\s*\{[^}]*cursor:\s*pointer;/s);
+    expect(mainSource).not.toContain("repo-ci-item-label");
   });
 
   it("opens watches from row clicks instead of hover-only open-link actions", () => {

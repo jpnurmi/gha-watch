@@ -67,21 +67,15 @@ type PrCheckResponse = {
   startedAt?: string | null;
 };
 
-type CommitCheckRunsResponse = {
-  check_runs?: CommitCheckRunResponse[];
-};
-
-type CommitCheckRunResponse = {
-  completed_at?: string | null;
-  conclusion?: string | null;
-  status?: string;
-};
-
 type RepositoryViewResponse = {
   default_branch?: string;
   owner?: {
     avatar_url?: string;
   };
+};
+
+type CommitViewResponse = {
+  sha?: string;
 };
 
 type UserViewResponse = {
@@ -115,6 +109,18 @@ export type RepositoryCiStatus = {
   label: string;
   description: string;
   defaultBranch: string;
+  workflows: RepositoryCiWorkflowStatus[];
+  commitSha?: string;
+  updatedAt?: string;
+  url?: string;
+};
+
+export type RepositoryCiWorkflowStatus = {
+  tone: RepositoryCiStatusTone;
+  label: string;
+  description: string;
+  name: string;
+  url: string;
   updatedAt?: string;
 };
 
@@ -134,6 +140,7 @@ type PullRequestListResponse = {
 };
 
 type WorkflowRunListResponse = {
+  conclusion?: string | null;
   createdAt?: string;
   databaseId?: number | string;
   displayTitle?: string;
@@ -141,6 +148,7 @@ type WorkflowRunListResponse = {
   status?: string;
   updatedAt?: string;
   url?: string;
+  workflowDatabaseId?: number | string;
   workflowName?: string;
 };
 
@@ -235,14 +243,30 @@ export async function fetchRepositoryDefaultBranchCiStatus(
 ): Promise<RepositoryCiStatus> {
   try {
     const defaultBranch = await fetchRepositoryDefaultBranch(target, executor);
-    const result = await executor.execute("gh", [
+    const commitResult = await executor.execute("gh", [
       "api",
-      `repos/${target.owner}/${target.repo}/commits/${encodeURIComponent(defaultBranch)}/check-runs?per_page=100`,
+      `repos/${target.owner}/${target.repo}/commits/${encodeURIComponent(defaultBranch)}`,
+    ]);
+    assertSuccessfulGhResult(commitResult);
+    const commitSha = requiredString(parseJson<CommitViewResponse>(commitResult.stdout).sha, "default branch commit");
+    const result = await executor.execute("gh", [
+      "run",
+      "list",
+      "-R",
+      `${target.owner}/${target.repo}`,
+      "--branch",
+      defaultBranch,
+      "--commit",
+      commitSha,
+      "--limit",
+      "100",
+      "--json",
+      "databaseId,displayTitle,workflowDatabaseId,workflowName,headBranch,headSha,status,conclusion,createdAt,updatedAt,url",
     ]);
 
     assertSuccessfulGhResult(result);
 
-    return summarizeRepositoryCiStatus(defaultBranch, parseJson<CommitCheckRunsResponse>(result.stdout));
+    return summarizeRepositoryCiStatus(defaultBranch, commitSha, parseJson<WorkflowRunListResponse[]>(result.stdout));
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -458,55 +482,190 @@ function compareWorkflowDefinitionsByName(left: WorkflowDefinition, right: Workf
   return left.name.localeCompare(right.name);
 }
 
-function summarizeRepositoryCiStatus(defaultBranch: string, response: CommitCheckRunsResponse): RepositoryCiStatus {
-  const checks = (response.check_runs ?? []).filter((check) => check.status?.trim() || check.conclusion?.trim());
-  const updatedAt = getLatestTimestamp(checks.map((check) => check.completed_at ?? undefined));
+function summarizeRepositoryCiStatus(
+  defaultBranch: string,
+  commitSha: string,
+  response: WorkflowRunListResponse[],
+): RepositoryCiStatus {
+  const workflows = getRepositoryCiWorkflowStatuses(response);
 
-  if (checks.length === 0) {
+  if (workflows.length === 0) {
     return {
       tone: "pending",
       label: "Unknown",
-      description: `${defaultBranch}: no default branch check runs found`,
+      description: `${defaultBranch}: no default branch workflow runs found`,
       defaultBranch,
-      ...(updatedAt ? { updatedAt } : {}),
+      commitSha,
+      workflows,
     };
   }
 
-  const incompleteCount = checks.filter((check) => check.status?.trim() !== "completed").length;
+  const updatedAt = getLatestRepositoryCiUpdatedAt(workflows);
+  const url = getRepositoryCiSummaryUrl(workflows);
+  const pendingCount = workflows.filter((workflow) => workflow.tone === "pending").length;
 
-  if (incompleteCount > 0) {
+  if (pendingCount > 0) {
     return {
       tone: "pending",
       label: "Pending",
-      description: `${defaultBranch}: ${formatCheckCount(incompleteCount)} still running or queued`,
+      description: `${defaultBranch}: ${formatWorkflowCount(pendingCount)} pending`,
       defaultBranch,
+      commitSha,
+      workflows,
       ...(updatedAt ? { updatedAt } : {}),
+      ...(url ? { url } : {}),
     };
   }
 
-  const failedCount = checks.filter((check) => isFailingRepositoryConclusion(check.conclusion)).length;
+  const failedCount = workflows.filter((workflow) => workflow.tone === "failure").length;
 
   if (failedCount > 0) {
     return {
       tone: "failure",
       label: "Failing",
-      description: `${defaultBranch}: ${formatCheckCount(failedCount)} not successful`,
+      description: `${defaultBranch}: ${formatWorkflowCount(failedCount)} failing`,
       defaultBranch,
+      commitSha,
+      workflows,
       ...(updatedAt ? { updatedAt } : {}),
+      ...(url ? { url } : {}),
     };
   }
 
   return {
     tone: "success",
     label: "Passing",
-    description: `${defaultBranch}: latest check runs passed`,
+    description: `${defaultBranch}: ${formatWorkflowCount(workflows.length)} passed`,
     defaultBranch,
+    commitSha,
+    workflows,
     ...(updatedAt ? { updatedAt } : {}),
+    ...(url ? { url } : {}),
   };
 }
 
-function formatCheckCount(count: number): string {
-  return `${count} check${count === 1 ? "" : "s"}`;
+function getRepositoryCiWorkflowStatuses(response: WorkflowRunListResponse[]): RepositoryCiWorkflowStatus[] {
+  const workflowsByKey = new Map<string, RepositoryCiWorkflowStatus>();
+
+  for (const item of response) {
+    const workflow = parseRepositoryCiWorkflowRun(item);
+
+    if (!workflow) {
+      continue;
+    }
+
+    const key = getRepositoryCiWorkflowKey(item, workflow);
+    const current = workflowsByKey.get(key);
+
+    if (!current || getSortTimestamp(workflow.updatedAt) > getSortTimestamp(current.updatedAt)) {
+      workflowsByKey.set(key, workflow);
+    }
+  }
+
+  return [...workflowsByKey.values()].sort(compareRepositoryCiWorkflowStatuses);
+}
+
+function parseRepositoryCiWorkflowRun(response: WorkflowRunListResponse | undefined): RepositoryCiWorkflowStatus | undefined {
+  const status = response?.status?.trim();
+  const url = response?.url?.trim();
+  const workflowName = response?.workflowName?.trim();
+  const displayTitle = response?.displayTitle?.trim();
+  const name = workflowName || displayTitle || "latest workflow run";
+
+  if (!status || !url) {
+    return undefined;
+  }
+
+  const conclusion = response?.conclusion?.trim();
+  const tone = getRepositoryCiWorkflowTone(status, conclusion);
+
+  return {
+    tone,
+    label: getRepositoryCiWorkflowLabel(tone, conclusion),
+    description: getRepositoryCiWorkflowDescription(name, status, conclusion),
+    name,
+    ...(response?.updatedAt ? { updatedAt: response.updatedAt } : {}),
+    url,
+  };
+}
+
+function getRepositoryCiWorkflowKey(
+  response: WorkflowRunListResponse,
+  workflow: Pick<RepositoryCiWorkflowStatus, "name">,
+): string {
+  const workflowDatabaseId = getRunDatabaseId(response.workflowDatabaseId);
+  return workflowDatabaseId ? `workflow:${workflowDatabaseId}` : `workflow:${workflow.name.toLowerCase()}`;
+}
+
+function getRepositoryCiWorkflowTone(status: string, conclusion: string | undefined): RepositoryCiStatusTone {
+  if (status !== "completed") {
+    return "pending";
+  }
+
+  return isFailingRepositoryConclusion(conclusion) ? "failure" : "success";
+}
+
+function getRepositoryCiWorkflowLabel(tone: RepositoryCiStatusTone, conclusion: string | undefined): string {
+  if (tone === "pending") {
+    return "Pending";
+  }
+
+  if (tone === "failure") {
+    return "Failing";
+  }
+
+  if (conclusion === "skipped") {
+    return "Skipped";
+  }
+
+  return "Passing";
+}
+
+function getRepositoryCiWorkflowDescription(name: string, status: string, conclusion: string | undefined): string {
+  if (status !== "completed") {
+    return `${name} is ${formatWorkflowRunStatus(status)}`;
+  }
+
+  return `${name} ${formatWorkflowRunConclusion(conclusion)}`;
+}
+
+function compareRepositoryCiWorkflowStatuses(
+  left: RepositoryCiWorkflowStatus,
+  right: RepositoryCiWorkflowStatus,
+): number {
+  const toneOrder: Record<RepositoryCiStatusTone, number> = {
+    failure: 0,
+    pending: 1,
+    success: 2,
+  };
+
+  return toneOrder[left.tone] - toneOrder[right.tone] || left.name.localeCompare(right.name);
+}
+
+function getLatestRepositoryCiUpdatedAt(workflows: RepositoryCiWorkflowStatus[]): string | undefined {
+  return getLatestTimestamp(workflows.map((workflow) => workflow.updatedAt));
+}
+
+function getRepositoryCiSummaryUrl(workflows: RepositoryCiWorkflowStatus[]): string | undefined {
+  return workflows.find((workflow) => workflow.tone === "failure")?.url ||
+    workflows.find((workflow) => workflow.tone === "pending")?.url ||
+    workflows[0]?.url;
+}
+
+function formatWorkflowCount(count: number): string {
+  return `${count} workflow${count === 1 ? "" : "s"}`;
+}
+
+function formatWorkflowRunStatus(status: string): string {
+  return status.replaceAll("_", " ");
+}
+
+function formatWorkflowRunConclusion(conclusion: string | undefined): string {
+  if (conclusion === "success") {
+    return "passed";
+  }
+
+  return conclusion ? conclusion.replaceAll("_", " ") : "did not pass";
 }
 
 function isFailingRepositoryConclusion(conclusion: string | null | undefined): boolean {
