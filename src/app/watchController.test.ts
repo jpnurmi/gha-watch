@@ -366,6 +366,44 @@ describe("watchController", () => {
     });
   });
 
+  it("fetches a PR title once and keeps it during check polling", async () => {
+    const { deps } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "Pull request #51",
+        prNumber: "51",
+        url: prTarget.url,
+      },
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "Pull request #51",
+        prNumber: "51",
+        url: prTarget.url,
+      },
+    ]);
+    const titleFetches: PrWatchTarget[] = [];
+    const controller = createWatchController({
+      ...deps,
+      async fetchPullRequestTitle(target) {
+        titleFetches.push(target);
+        return "Fix epoch-sized check durations";
+      },
+    });
+
+    await controller.add(prTarget);
+    await controller.pollNow();
+
+    expect(titleFetches).toEqual([prTarget]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      label: "Fix epoch-sized check durations",
+      metadata: {
+        prTitle: "Fix epoch-sized check durations",
+      },
+    });
+  });
+
   it("reorders watches inside one repository without changing other repository slots", () => {
     const { deps, saves } = createDeps([]);
     const first = existingWatch();

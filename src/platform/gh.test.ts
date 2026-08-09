@@ -3,6 +3,7 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchPullRequestTitle,
   fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
@@ -237,6 +238,11 @@ describe("fetchWatchState", () => {
           startedAt: "2026-05-16T12:03:00Z",
           completedAt: null,
         },
+        {
+          bucket: "skipping",
+          startedAt: "0001-01-01T00:00:00Z",
+          completedAt: "0001-01-01T00:00:00Z",
+        },
       ]),
       stderr: "",
     });
@@ -256,9 +262,6 @@ describe("fetchWatchState", () => {
       status: "in_progress",
       conclusion: null,
       title: "Pull request #51",
-      metadata: {
-        prTitle: "Pull request #51",
-      },
       prNumber: "51",
       timing: {
         startedAt: "2026-05-16T12:00:00.000Z",
@@ -277,6 +280,39 @@ describe("fetchWatchState", () => {
           "getsentry/sentry",
           "--json",
           "bucket,completedAt,startedAt",
+        ],
+      },
+    ]);
+  });
+
+  it("fetches the real pull request title", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({ title: "Fix epoch-sized check durations" }),
+      stderr: "",
+    });
+    const target = {
+      kind: "pr" as const,
+      owner: "getsentry",
+      repo: "sentry",
+      prNumber: "51",
+      url: "https://github.com/getsentry/sentry/pull/51",
+    };
+
+    await expect(fetchPullRequestTitle(target, executor)).resolves.toBe(
+      "Fix epoch-sized check durations",
+    );
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "pr",
+          "view",
+          "51",
+          "-R",
+          "getsentry/sentry",
+          "--json",
+          "title",
         ],
       },
     ]);

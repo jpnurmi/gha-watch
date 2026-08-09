@@ -261,13 +261,32 @@ describe("createPopupViewModel", () => {
         kind: "row",
         row: {
           id: "getsentry/sentry/pull/51",
-          label: "Pull request #51",
+          label: "Fix flaky CI",
           prReference: "#51",
           prState: { label: "Ready", tone: "ready" },
           subject: "pull-request",
         },
       },
     ]);
+  });
+
+  it("does not duplicate a placeholder pull request reference", () => {
+    const model = createPopupViewModel([
+      watch({
+        id: "getsentry/sentry/pull/51",
+        target: {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+        label: "Pull request #51",
+      }),
+    ]);
+
+    expect(model.rows[0]).toMatchObject({ label: "Pull request #51" });
+    expect(model.rows[0].prReference).toBeUndefined();
   });
 
   it("orders repository groups by saved repo order", () => {
@@ -723,6 +742,16 @@ describe("createPopupViewModel", () => {
             completedAt: "2026-05-16T12:09:00Z",
           },
         }),
+        watch({
+          id: "getsentry/sentry/run/999",
+          status: "completed:success",
+          active: false,
+          lastState: { status: "completed", conclusion: "success" },
+          timing: {
+            startedAt: "0001-01-01T00:00:00Z",
+            completedAt: "2026-05-16T12:09:00Z",
+          },
+        }),
       ],
       now,
     );
@@ -731,6 +760,7 @@ describe("createPopupViewModel", () => {
       "Queued 4m ago",
       "Started 2m ago · 2m elapsed",
       "Completed 1m ago · 7m",
+      "Completed 1m ago",
     ]);
   });
 });

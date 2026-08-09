@@ -67,6 +67,10 @@ type PrCheckResponse = {
   startedAt?: string | null;
 };
 
+type PullRequestViewResponse = {
+  title?: string;
+};
+
 type RepositoryViewResponse = {
   default_branch?: string;
   owner?: {
@@ -313,6 +317,31 @@ export async function fetchOpenPullRequests(
       .map(normalizeOpenPullRequest)
       .filter((pullRequest): pullRequest is OpenPullRequest => Boolean(pullRequest))
       .sort(comparePullRequestsByUpdatedAt);
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function fetchPullRequestTitle(
+  target: PrWatchTarget,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<string> {
+  try {
+    const result = await executor.execute("gh", [
+      "pr",
+      "view",
+      target.prNumber,
+      "-R",
+      `${target.owner}/${target.repo}`,
+      "--json",
+      "title",
+    ]);
+
+    assertSuccessfulGhResult(result);
+    return requiredString(
+      parseJson<PullRequestViewResponse>(result.stdout).title,
+      "pull request title",
+    );
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -904,9 +933,6 @@ function toPrSnapshot(target: PrWatchTarget, checks: PrCheckResponse[]): WatchSn
   return {
     ...state,
     title: `Pull request #${target.prNumber}`,
-    metadata: {
-      prTitle: `Pull request #${target.prNumber}`,
-    },
     prNumber: target.prNumber,
     ...(timing ? { timing } : {}),
     url: target.url,
@@ -961,7 +987,7 @@ function getExtremeTimestamp(
 ): string | undefined {
   const timestamps = values
     .map((value) => (value ? Date.parse(value) : Number.NaN))
-    .filter((timestamp) => Number.isFinite(timestamp));
+    .filter((timestamp) => Number.isFinite(timestamp) && timestamp > 0);
 
   if (timestamps.length === 0) {
     return undefined;

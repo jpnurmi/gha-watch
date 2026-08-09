@@ -38,6 +38,7 @@ export type WatchControllerDeps = {
   fetchState(target: WatchTarget): Promise<WatchSnapshot>;
   fetchActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   fetchOpenPullRequests?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
+  fetchPullRequestTitle?(target: PrWatchTarget): Promise<string>;
   fetchRepositoryDefaultBranch?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<string>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   fetchUserActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
@@ -182,7 +183,7 @@ export function createWatchController(
       updateWatch(id, (watch) => ({
         ...watch,
         target: withSnapshotPrNumber(watch.target, snapshot.prNumber),
-        label: snapshot.title,
+        label: getSnapshotLabel(watch, snapshot),
         metadata: mergeWatchMetadata(watch.metadata, snapshot.metadata),
         status,
         lastSeenStatus: status,
@@ -202,6 +203,24 @@ export function createWatchController(
         lastSeenStatus: "error",
         error: error instanceof Error ? error.message : String(error),
       }));
+    }
+  }
+
+  async function refreshPullRequestTitle(id: string, target: PrWatchTarget): Promise<void> {
+    if (!deps.fetchPullRequestTitle) {
+      return;
+    }
+
+    try {
+      const title = await deps.fetchPullRequestTitle(target);
+
+      updateWatch(id, (watch) => ({
+        ...watch,
+        label: title,
+        metadata: mergeWatchMetadata(watch.metadata, { prTitle: title }),
+      }));
+    } catch {
+      // Missing PR metadata should not interfere with check polling.
     }
   }
 
@@ -243,6 +262,7 @@ export function createWatchController(
 
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
     await addWatchTarget(source, "ready", true);
+    await refreshPullRequestTitle(getWatchId(source), source);
   }
 
   function applyAutoDoneFinishedWatches(): void {
@@ -423,6 +443,17 @@ export function createWatchController(
     },
 
     async refreshWatchMetadata() {
+      const pullRequestsMissingTitles = watches.filter(
+        (watch): watch is WatchRecord & { target: PrWatchTarget } =>
+          getWatchTriageState(watch) !== "done" &&
+          watch.target.kind === "pr" &&
+          !hasPullRequestTitle(watch),
+      );
+
+      for (const watch of pullRequestsMissingTitles) {
+        await refreshPullRequestTitle(watch.id, watch.target);
+      }
+
       const watchesMissingMetadata = watches.filter(
         (watch) => getWatchTriageState(watch) !== "done" && !watch.target.prNumber,
       );
@@ -440,7 +471,7 @@ export function createWatchController(
           updateWatch(watch.id, (current) => ({
             ...current,
             target: withSnapshotPrNumber(current.target, snapshot.prNumber),
-            label: snapshot.title,
+            label: getSnapshotLabel(current, snapshot),
             metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
             status,
             lastSeenStatus: current.lastSeenStatus ?? current.status,
@@ -537,7 +568,7 @@ export function createWatchController(
           const nextWatch = {
             ...current,
             target: withSnapshotPrNumber(current.target, snapshot.prNumber),
-            label: snapshot.title,
+            label: getSnapshotLabel(current, snapshot),
             metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
             status,
             lastSeenStatus: current.lastSeenStatus ?? current.status,
@@ -600,6 +631,25 @@ function withSnapshotPrNumber(target: WatchTarget, prNumber: string | undefined)
     ...target,
     prNumber,
   };
+}
+
+function getSnapshotLabel(watch: WatchRecord, snapshot: WatchSnapshot): string {
+  if (watch.target.kind !== "pr") {
+    return snapshot.title;
+  }
+
+  return snapshot.metadata?.prTitle?.trim() ||
+    watch.metadata?.prTitle?.trim() ||
+    snapshot.title;
+}
+
+function hasPullRequestTitle(watch: WatchRecord): boolean {
+  if (watch.target.kind !== "pr") {
+    return false;
+  }
+
+  const title = watch.metadata?.prTitle?.trim();
+  return Boolean(title && title !== `Pull request #${watch.target.prNumber}`);
 }
 
 function mergeWatchMetadata(

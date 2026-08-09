@@ -69,6 +69,7 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchPullRequestTitle,
   fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
@@ -243,6 +244,7 @@ const controller = createWatchController(
       : fetchWatchState,
     fetchActiveWorkflowRuns: isDemoMode ? fetchDemoActiveWorkflowRuns : fetchActiveWorkflowRuns,
     fetchOpenPullRequests: isDemoMode ? fetchDemoOpenPullRequests : fetchOpenPullRequests,
+    fetchPullRequestTitle: isDemoMode ? async () => "Demo pull request" : fetchPullRequestTitle,
     fetchRepositoryDefaultBranch: isDemoMode ? async () => "main" : fetchRepositoryDefaultBranch,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     fetchUserActiveWorkflowRuns: isDemoMode

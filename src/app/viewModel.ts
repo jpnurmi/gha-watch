@@ -149,7 +149,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
   if (watch.error) {
     return {
       id: watch.id,
-      label: watch.label,
+      label: getWatchDisplayLabel(watch),
       subject: getWatchSubject(watch),
       prReference: getPullRequestReference(watch),
       prState: getPullRequestState(watch),
@@ -212,7 +212,7 @@ function createRow(
 ): WatchRowViewModel {
   return {
     id: watch.id,
-    label: watch.label,
+    label: getWatchDisplayLabel(watch),
     subject: getWatchSubject(watch),
     prReference: getPullRequestReference(watch),
     prState: getPullRequestState(watch),
@@ -230,7 +230,22 @@ function createRow(
 }
 
 function getPullRequestReference(watch: WatchRecord): string | undefined {
-  return watch.target.prNumber ? `#${watch.target.prNumber}` : undefined;
+  if (!watch.target.prNumber) {
+    return undefined;
+  }
+
+  const reference = `#${watch.target.prNumber}`;
+  return watch.target.kind === "pr" && getWatchDisplayLabel(watch) === `Pull request ${reference}`
+    ? undefined
+    : reference;
+}
+
+function getWatchDisplayLabel(watch: WatchRecord): string {
+  if (watch.target.kind !== "pr") {
+    return watch.label;
+  }
+
+  return watch.metadata?.prTitle?.trim() || watch.label;
 }
 
 function getBranchName(watch: WatchRecord): string | undefined {
@@ -815,7 +830,7 @@ function parseTimestamp(value: string | undefined): number | undefined {
   }
 
   const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : undefined;
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined;
 }
 
 function formatRelativeTime(timestamp: number, now: number): string {
