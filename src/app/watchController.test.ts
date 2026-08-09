@@ -371,7 +371,7 @@ describe("watchController", () => {
     });
   });
 
-  it("fetches PR details once and keeps them during check polling", async () => {
+  it("refreshes PR details during check polling", async () => {
     const { deps } = createDeps([
       {
         status: "queued",
@@ -400,7 +400,7 @@ describe("watchController", () => {
     await controller.add(prTarget);
     await controller.pollNow();
 
-    expect(detailFetches).toEqual([prTarget]);
+    expect(detailFetches).toEqual([prTarget, prTarget]);
     expect(controller.getWatches()[0]).toMatchObject({
       label: "Fix epoch-sized check durations",
       sourceState: "ready",
@@ -931,6 +931,122 @@ describe("watchController", () => {
       prNumber: "51",
     });
     expect(notifications).toEqual([]);
+  });
+
+  it("hydrates inactive watches without a PR reference only once", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [existingWatch()]);
+
+    await controller.refreshWatchMetadata();
+    await controller.refreshWatchMetadata();
+
+    expect(fetches).toEqual([runTarget]);
+  });
+
+  it("does not repoll a legacy watch reactivated by hydration", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [existingWatch()]);
+
+    await controller.pollNow();
+
+    expect(fetches).toEqual([runTarget]);
+    expect(controller.getWatches()[0].active).toBe(true);
+  });
+
+  it("hydrates an inactive Done watch after it returns to Inbox", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-09T00:00:00.000Z") },
+      [
+        {
+          ...existingWatch(),
+          triageState: "done",
+          doneAt: "2026-08-01T00:00:00.000Z",
+        },
+      ],
+    );
+
+    await controller.refreshWatchMetadata();
+    controller.setTriageState([existingWatch().id], "inbox");
+    await controller.refreshWatchMetadata();
+
+    expect(fetches).toEqual([runTarget]);
+  });
+
+  it("leaves active metadata hydration to the regular poll", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+    ]);
+
+    await controller.refreshWatchMetadata();
+    await controller.pollNow();
+
+    expect(fetches).toEqual([runTarget]);
+  });
+
+  it("enriches newly associated PRs before auto-done", async () => {
+    const { deps } = createDeps([
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: tests",
+        prNumber: "51",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(
+      {
+        ...deps,
+        async fetchPullRequestDetails() {
+          return { state: "merged", title: "Refine lifecycle icons" };
+        },
+      },
+      [{ ...existingWatch(), active: true }],
+      { autoDoneFinishedWatches: true },
+    );
+
+    await controller.pollNow();
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      source: prTarget,
+      sourceState: "merged",
+      triageState: "done",
+    });
   });
 
   it("does not notify when a watched status changes to in progress", async () => {

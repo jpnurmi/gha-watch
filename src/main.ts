@@ -3049,7 +3049,6 @@ async function poll(): Promise<void> {
         console.warn("Could not sync workflow subscriptions.", error);
       }
 
-      await controller.refreshWatchMetadata();
       await controller.pollNow();
       await refreshListedRepositoryCiStatuses(true);
       await updateRateLimit();

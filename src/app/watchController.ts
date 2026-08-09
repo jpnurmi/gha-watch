@@ -95,6 +95,7 @@ export function createWatchController(
   let watches = clearExpiredDoneWatches(normalizedWatches, initialNow);
   let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
   let options: WatchControllerOptions = initialOptions;
+  const metadataHydratedWatchIds = new Set<string>();
   const listeners = new Set<() => void>();
 
   if (watches !== normalizedWatches) {
@@ -249,6 +250,46 @@ export function createWatchController(
 
     if (target) {
       await refreshPullRequestDetails([target]);
+    }
+  }
+
+  async function hydrateLegacyWatchMetadata(): Promise<void> {
+    const watchesMissingMetadata = watches.filter(
+      (watch) =>
+        getWatchTriageState(watch) !== "done" &&
+        !watch.active &&
+        watch.target.kind !== "pr" &&
+        !watch.target.prNumber &&
+        !metadataHydratedWatchIds.has(watch.id),
+    );
+
+    for (const watch of watchesMissingMetadata) {
+      metadataHydratedWatchIds.add(watch.id);
+
+      try {
+        const snapshot = await deps.fetchState(watch.target);
+        const nextState = {
+          status: snapshot.status,
+          conclusion: snapshot.conclusion,
+          ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
+        };
+        const status = formatWatchState(nextState);
+
+        updateWatch(watch.id, (current) => ({
+          ...current,
+          target: withSnapshotPrNumber(current.target, snapshot.prNumber),
+          label: getSnapshotLabel(current, snapshot),
+          metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
+          status,
+          lastSeenStatus: current.lastSeenStatus ?? current.status,
+          lastState: nextState,
+          timing: snapshot.timing,
+          active: !isTerminalStatus(nextState),
+          error: undefined,
+        }));
+      } catch {
+        // Metadata hydration should not turn existing watches into error rows.
+      }
     }
   }
 
@@ -466,37 +507,7 @@ export function createWatchController(
     },
 
     async refreshWatchMetadata() {
-      const watchesMissingMetadata = watches.filter(
-        (watch) => getWatchTriageState(watch) !== "done" && !watch.target.prNumber,
-      );
-
-      for (const watch of watchesMissingMetadata) {
-        try {
-          const snapshot = await deps.fetchState(watch.target);
-          const nextState = {
-            status: snapshot.status,
-            conclusion: snapshot.conclusion,
-            ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
-          };
-          const status = formatWatchState(nextState);
-
-          updateWatch(watch.id, (current) => ({
-            ...current,
-            target: withSnapshotPrNumber(current.target, snapshot.prNumber),
-            label: getSnapshotLabel(current, snapshot),
-            metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
-            status,
-            lastSeenStatus: current.lastSeenStatus ?? current.status,
-            lastState: nextState,
-            timing: snapshot.timing,
-            active: !isTerminalStatus(nextState),
-            error: undefined,
-          }));
-        } catch {
-          // Metadata refresh should not turn existing watches into error rows.
-        }
-      }
-
+      await hydrateLegacyWatchMetadata();
       await refreshPullRequestDetails();
     },
 
@@ -565,10 +576,12 @@ export function createWatchController(
       const activeWatches = watches.filter(
         (watch) => watch.active && getWatchTriageState(watch) !== "done",
       );
+      await hydrateLegacyWatchMetadata();
       const rowNotifications: WatchNotification[] = [];
 
       for (const watch of activeWatches) {
         const snapshot = await deps.fetchState(watch.target);
+        metadataHydratedWatchIds.add(watch.id);
         const nextState = {
           status: snapshot.status,
           conclusion: snapshot.conclusion,
@@ -605,6 +618,8 @@ export function createWatchController(
 
         rowNotifications.push(createWatchNotification(changedWatch, notificationTime));
       }
+
+      await refreshPullRequestDetails();
 
       if (deps.notificationsPaused?.()) {
         applyAutoDoneFinishedWatches();
