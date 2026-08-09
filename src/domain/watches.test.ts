@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   addWatch,
+  clearDoneWatches,
+  clearExpiredDoneWatches,
+  getWatchTriageState,
   moveWatchGroupWithinRepo,
   moveWatchWithinRepo,
+  normalizeWatchDoneAt,
   normalizeWatchSeenStatus,
-  removeWatch,
+  setWatchesTriageState,
   type WatchRecord,
 } from "./watches";
 
@@ -154,16 +158,76 @@ describe("watch operations", () => {
     });
   });
 
-  it("removes watches by id", () => {
-    const watches = addWatch([], {
-      kind: "run",
-      owner: "getsentry",
-      repo: "sentry",
-      runId: "123",
-      url: "https://github.com/getsentry/sentry/actions/runs/123",
-    });
+  it("defaults existing watches to the inbox", () => {
+    expect(getWatchTriageState(watch({}))).toBe("inbox");
+  });
 
-    expect(removeWatch(watches, "getsentry/sentry/run/123")).toEqual([]);
+  it("moves selected watches between triage states", () => {
+    const watches = [
+      watch({ lastSeenStatus: "queued", status: "completed:success" }),
+      runWatch("getsentry", "sentry", "456"),
+    ];
+
+    const next = setWatchesTriageState(
+      watches,
+      ["getsentry/sentry/run/123"],
+      "done",
+      new Date("2026-01-15T12:00:00Z"),
+    );
+
+    expect(next[0]).toMatchObject({
+      id: "getsentry/sentry/run/123",
+      triageState: "done",
+      doneAt: "2026-01-15T12:00:00.000Z",
+      lastSeenStatus: "completed:success",
+    });
+    expect(next[1]).toBe(watches[1]);
+
+    const saved = setWatchesTriageState(
+      next,
+      ["getsentry/sentry/run/123"],
+      "saved",
+      new Date("2026-01-16T12:00:00Z"),
+    );
+
+    expect(saved[0]).not.toHaveProperty("doneAt");
+  });
+
+  it("timestamps older Done records when they are loaded", () => {
+    expect(
+      normalizeWatchDoneAt(
+        watch({ triageState: "done" }),
+        new Date("2026-02-01T10:00:00Z"),
+      ),
+    ).toMatchObject({
+      triageState: "done",
+      doneAt: "2026-02-01T10:00:00.000Z",
+    });
+  });
+
+  it("clears Done watches manually or after five months", () => {
+    const inbox = watch({ id: "inbox" });
+    const saved = watch({ id: "saved", triageState: "saved" });
+    const recentDone = watch({
+      id: "recent-done",
+      triageState: "done",
+      doneAt: "2026-04-01T00:00:00.000Z",
+    });
+    const expiredDone = watch({
+      id: "expired-done",
+      triageState: "done",
+      doneAt: "2026-03-01T00:00:00.000Z",
+    });
+    const watches = [inbox, saved, recentDone, expiredDone];
+
+    expect(
+      clearExpiredDoneWatches(watches, new Date("2026-08-02T00:00:00Z")).map(
+        (item) => item.id,
+      ),
+    ).toEqual(["inbox", "saved", "recent-done"]);
+    expect(
+      clearDoneWatches(watches, ["recent-done"]).map((item) => item.id),
+    ).toEqual(["inbox", "saved", "expired-done"]);
   });
 
   it("moves a watch within its repository while preserving other repository slots", () => {

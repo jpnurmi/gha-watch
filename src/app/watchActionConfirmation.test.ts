@@ -6,8 +6,8 @@ const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("isWatchActionConfirmation", () => {
   it("only lets explicit confirmation actions pass through", () => {
-    expect(isWatchActionConfirmation("confirm-remove")).toBe(true);
-    expect(isWatchActionConfirmation("confirm-ignore-pr-workflow")).toBe(true);
+    expect(isWatchActionConfirmation("confirm-remove")).toBe(false);
+    expect(isWatchActionConfirmation("confirm-ignore-pr-workflow")).toBe(false);
     expect(isWatchActionConfirmation("confirm-rerun")).toBe(true);
     expect(isWatchActionConfirmation("arm-remove")).toBe(false);
     expect(isWatchActionConfirmation("arm-ignore-pr-workflow")).toBe(false);
@@ -18,14 +18,13 @@ describe("isWatchActionConfirmation", () => {
 });
 
 describe("shouldDismissPendingWatchActionOnRowLeave", () => {
-  it("dismisses remove and re-run confirmations when the pointer leaves their row", () => {
-    expect(shouldDismissPendingWatchActionOnRowLeave({ id: "run-123", kind: "remove" }, "run-123")).toBe(true);
+  it("dismisses re-run confirmations when the pointer leaves their row", () => {
     expect(shouldDismissPendingWatchActionOnRowLeave({ id: "run-123", kind: "rerun" }, "run-123")).toBe(true);
   });
 
   it("keeps confirmations when another row or no active row is left", () => {
-    expect(shouldDismissPendingWatchActionOnRowLeave({ id: "run-123", kind: "remove" }, "run-456")).toBe(false);
-    expect(shouldDismissPendingWatchActionOnRowLeave({ id: "run-123", kind: "remove" }, undefined)).toBe(false);
+    expect(shouldDismissPendingWatchActionOnRowLeave({ id: "run-123", kind: "rerun" }, "run-456")).toBe(false);
+    expect(shouldDismissPendingWatchActionOnRowLeave({ id: "run-123", kind: "rerun" }, undefined)).toBe(false);
     expect(shouldDismissPendingWatchActionOnRowLeave(undefined, "run-123")).toBe(false);
   });
 });

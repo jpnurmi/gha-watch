@@ -31,6 +31,25 @@ describe("createTrayState", () => {
     });
   });
 
+  it("ignores done watches", () => {
+    expect(
+      createTrayState([
+        watch({
+          triageState: "done",
+          active: false,
+          status: "completed:failure",
+          lastSeenStatus: "in_progress",
+          lastState: { status: "completed", conclusion: "failure" },
+        }),
+      ]),
+    ).toEqual({
+      status: "idle",
+      hasUnseenChanges: false,
+      label: "No watches",
+      tooltip: "GHA Watch",
+    });
+  });
+
   it("uses an active tray icon when any watch is still running", () => {
     expect(createTrayState([watch({ active: true })])).toEqual({
       status: "active",

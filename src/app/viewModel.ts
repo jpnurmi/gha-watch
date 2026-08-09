@@ -1,5 +1,13 @@
 import type { FavoriteRepo } from "../domain/favorites";
-import { getWatchId, getWatchState, hasUnseenStatusChange, type PrSourceState, type WatchRecord } from "../domain/watches";
+import {
+  getWatchId,
+  getWatchState,
+  getWatchTriageState,
+  hasUnseenStatusChange,
+  type PrSourceState,
+  type WatchRecord,
+  type WatchTriageState,
+} from "../domain/watches";
 
 export type RowTone =
   | "pending"
@@ -19,7 +27,6 @@ export type PrStateViewModel = {
 };
 
 export type WatchSubject = "pull-request" | "workflow" | "job";
-export type WatchRemoveMode = "remove" | "ignore-pr-workflow";
 
 export type WatchRowViewModel = {
   id: string;
@@ -35,11 +42,9 @@ export type WatchRowViewModel = {
   timingText?: string;
   unseenStatusChange: boolean;
   canRerun: boolean;
-  removeMode: WatchRemoveMode;
+  triageState: WatchTriageState;
   url: string;
 };
-
-export type HeaderTone = "pending" | "success" | "warning";
 
 export type WatchTreeNodeKind = "pull-request" | "workflow";
 
@@ -107,7 +112,6 @@ export type RepoCiWorkflowStatusViewModel = {
 export type PopupViewModel = {
   title: string;
   subtitle: string;
-  headerTone: HeaderTone;
   groups: WatchGroupViewModel[];
   rows: WatchRowViewModel[];
 };
@@ -136,7 +140,6 @@ export function createPopupViewModel(
   return {
     title: getTitle(counts, rows.length),
     subtitle: getSubtitle(counts, rows.length),
-    headerTone: getHeaderTone(counts, rows.length),
     groups: orderGroups(groupRowsByRepo(watches, rows, favoriteRepos, repoCiStatuses), repoOrder),
     rows,
   };
@@ -158,7 +161,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
       timingText: getTimingText(watch, "error", now),
       unseenStatusChange: hasUnseenStatusChange(watch),
       canRerun: canRerun(watch),
-      removeMode: getWatchRemoveMode(watch),
+      triageState: getWatchTriageState(watch),
       url: watch.target.url,
     };
   }
@@ -221,7 +224,7 @@ function createRow(
     timingText: getTimingText(watch, tone, now),
     unseenStatusChange: hasUnseenStatusChange(watch),
     canRerun: canRerun(watch),
-    removeMode: getWatchRemoveMode(watch),
+    triageState: getWatchTriageState(watch),
     url: watch.target.url,
   };
 }
@@ -275,10 +278,6 @@ function canRerun(watch: WatchRecord): boolean {
     state.conclusion !== "success" &&
     state.conclusion !== "cancelled" &&
     state.conclusion !== "skipped";
-}
-
-function getWatchRemoveMode(watch: WatchRecord): WatchRemoveMode {
-  return "remove";
 }
 
 function groupRowsByRepo(
@@ -904,26 +903,6 @@ function getTitle(counts: Counts, total: number): string {
   }
 
   return "All checks have passed";
-}
-
-function getHeaderTone(counts: Counts, total: number): HeaderTone {
-  if (total === 0) {
-    return "pending";
-  }
-
-  if (
-    counts.failed > 0 ||
-    counts.cancelled > 0 ||
-    counts.skipped > 0 ||
-    counts.errored > 0 ||
-    counts.pending > 0 ||
-    counts.queued > 0 ||
-    counts.inProgress > 0
-  ) {
-    return "warning";
-  }
-
-  return "success";
 }
 
 function getSubtitle(counts: Counts, total: number): string {

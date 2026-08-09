@@ -1,5 +1,5 @@
 import type { WatchRecord } from "../domain/watches";
-import { getWatchState, hasUnseenStatusChange } from "../domain/watches";
+import { getWatchState, getWatchTriageState, hasUnseenStatusChange } from "../domain/watches";
 
 export type TrayStatus = "idle" | "active" | "cancelled" | "error" | "success";
 
@@ -11,18 +11,19 @@ export type TrayState = {
 };
 
 export function createTrayState(watches: WatchRecord[]): TrayState {
-  const hasUnseenChanges = watches.some(hasUnseenStatusChange);
-  const active = watches.filter((watch) => watch.active);
-  const errors = watches.filter((watch) => Boolean(watch.error));
-  const watchStates = watches.map((watch) => getWatchState(watch));
-  const failures = watches.filter(
+  const watched = watches.filter((watch) => getWatchTriageState(watch) !== "done");
+  const hasUnseenChanges = watched.some(hasUnseenStatusChange);
+  const active = watched.filter((watch) => watch.active);
+  const errors = watched.filter((watch) => Boolean(watch.error));
+  const watchStates = watched.map((watch) => getWatchState(watch));
+  const failures = watched.filter(
     (_watch, index) =>
       watchStates[index]?.status === "completed" &&
       watchStates[index].conclusion !== "success" &&
       watchStates[index].conclusion !== "cancelled" &&
       watchStates[index].conclusion !== "skipped",
   );
-  const cancelled = watches.filter(
+  const cancelled = watched.filter(
     (_watch, index) => watchStates[index]?.status === "completed" && watchStates[index].conclusion === "cancelled",
   );
 
@@ -53,7 +54,7 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
     };
   }
 
-  if (watches.length > 0) {
+  if (watched.length > 0) {
     return {
       status: "success",
       hasUnseenChanges,

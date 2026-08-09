@@ -1,7 +1,12 @@
 import { defaultAppSettings, normalizeAppSettings, type AppSettings } from "../domain/settings";
+import {
+  normalizeWatchSuppressions,
+  type WatchSuppression,
+} from "../domain/watchSuppressions";
 import type { WatchRecord } from "../domain/watches";
 
 const watchesStorageKey = "gha-watch:watches";
+const watchSuppressionsStorageKey = "gha-watch:watch-suppressions";
 const settingsStorageKey = "gha-watch:settings";
 
 export function loadWatches(): WatchRecord[] {
@@ -21,6 +26,26 @@ export function loadWatches(): WatchRecord[] {
 
 export async function saveWatches(watches: WatchRecord[]): Promise<void> {
   localStorage.setItem(watchesStorageKey, JSON.stringify(watches));
+}
+
+export function loadWatchSuppressions(): WatchSuppression[] {
+  const rawSuppressions = localStorage.getItem(watchSuppressionsStorageKey);
+
+  if (!rawSuppressions) {
+    return [];
+  }
+
+  try {
+    return normalizeWatchSuppressions(JSON.parse(rawSuppressions));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveWatchSuppressions(
+  suppressions: WatchSuppression[],
+): Promise<void> {
+  localStorage.setItem(watchSuppressionsStorageKey, JSON.stringify(suppressions));
 }
 
 export function loadSettings(): AppSettings {

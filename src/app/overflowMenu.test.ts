@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getOverflowMenuItems } from "./overflowMenu";
 
 describe("getOverflowMenuItems", () => {
-  it("places clear actions before lower-frequency settings", () => {
+  it("places done actions before lower-frequency settings", () => {
     expect(
       getOverflowMenuItems({
         autoClearFinishedWatches: true,
@@ -10,11 +10,12 @@ describe("getOverflowMenuItems", () => {
         autoStartBusy: false,
         hasWatches: true,
         hasFinishedWatches: true,
+        isDoneView: false,
       }).map((item) => item.action),
-    ).toEqual(["clear-all", "clear-finished", "toggle-auto-clear-finished", "toggle-autostart"]);
+    ).toEqual(["done-all", "done-finished", "toggle-auto-clear-finished", "toggle-autostart"]);
   });
 
-  it("shows Auto-clear and Auto-start as checkable menu items", () => {
+  it("shows Auto-done and Auto-start as checkable menu items", () => {
     expect(
       getOverflowMenuItems({
         autoClearFinishedWatches: true,
@@ -22,6 +23,7 @@ describe("getOverflowMenuItems", () => {
         autoStartBusy: false,
         hasWatches: true,
         hasFinishedWatches: true,
+        isDoneView: false,
       }).slice(2),
     ).toEqual([
       {
@@ -30,7 +32,7 @@ describe("getOverflowMenuItems", () => {
         checkbox: "checked",
         disabled: false,
         kind: "checkbox",
-        label: "Auto-clear",
+        label: "Auto-done",
       },
       {
         action: "toggle-autostart",
@@ -43,7 +45,7 @@ describe("getOverflowMenuItems", () => {
     ]);
   });
 
-  it("keeps clear actions disabled until they apply and disables Auto-start while loading", () => {
+  it("keeps done actions disabled until they apply and disables Auto-start while loading", () => {
     expect(
       getOverflowMenuItems({
         autoClearFinishedWatches: false,
@@ -51,19 +53,20 @@ describe("getOverflowMenuItems", () => {
         autoStartBusy: true,
         hasWatches: false,
         hasFinishedWatches: false,
+        isDoneView: false,
       }),
     ).toEqual([
       {
-        action: "clear-all",
+        action: "done-all",
         disabled: true,
         kind: "action",
-        label: "Clear all",
+        label: "Mark all done",
       },
       {
-        action: "clear-finished",
+        action: "done-finished",
         disabled: true,
         kind: "action",
-        label: "Clear finished",
+        label: "Mark finished done",
       },
       {
         action: "toggle-auto-clear-finished",
@@ -71,7 +74,7 @@ describe("getOverflowMenuItems", () => {
         checkbox: "empty",
         disabled: false,
         kind: "checkbox",
-        label: "Auto-clear",
+        label: "Auto-done",
       },
       {
         action: "toggle-autostart",
@@ -82,5 +85,23 @@ describe("getOverflowMenuItems", () => {
         label: "Auto-start",
       },
     ]);
+  });
+
+  it("offers manual clearing in the Done view", () => {
+    const items = getOverflowMenuItems({
+      autoClearFinishedWatches: false,
+      autoStartEnabled: false,
+      autoStartBusy: false,
+      hasWatches: true,
+      hasFinishedWatches: false,
+      isDoneView: true,
+    });
+
+    expect(items.map((item) => item.action)).toEqual([
+      "clear-done",
+      "toggle-auto-clear-finished",
+      "toggle-autostart",
+    ]);
+    expect(items[0]).toMatchObject({ label: "Clear all done" });
   });
 });

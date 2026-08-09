@@ -1,4 +1,4 @@
-export type WatchActionKind = "remove" | "ignore-pr-workflow" | "rerun";
+export type WatchActionKind = "rerun";
 
 export type PendingWatchAction = {
   id: string;
@@ -6,7 +6,7 @@ export type PendingWatchAction = {
 };
 
 export function isWatchActionConfirmation(action: string | undefined): boolean {
-  return action === "confirm-remove" || action === "confirm-ignore-pr-workflow" || action === "confirm-rerun";
+  return action === "confirm-rerun";
 }
 
 export function shouldDismissPendingWatchActionOnRowLeave(

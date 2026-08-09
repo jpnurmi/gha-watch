@@ -1,10 +1,5 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import {
-  canRemoveWatchTreeNode,
-  getWatchTreeNodeRemoveMode,
-  shouldDismissPendingTreeActionOnHeaderLeave,
-} from "./watchTreeActions";
 
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
@@ -18,36 +13,10 @@ describe("watch tree group actions", () => {
     expect(styles).not.toMatch(/\.watch-group-action\s*\{/);
   });
 
-  it("allows nested workflow groups to expose close controls", () => {
-    expect(canRemoveWatchTreeNode({ rowIds: ["getsentry/sentry/run/123"] }, 1)).toBe(true);
-  });
-
-  it("hides nested PR workflows instead of removing the whole PR source", () => {
-    expect(getWatchTreeNodeRemoveMode({ kind: "workflow" }, 1)).toBe("ignore-pr-workflow");
-    expect(getWatchTreeNodeRemoveMode({ kind: "pull-request" }, 0)).toBe("remove");
-    expect(getWatchTreeNodeRemoveMode({ kind: "workflow" }, 0)).toBe("remove");
-  });
-
-  it("dismisses group removal confirmations when the pointer leaves their header", () => {
-    expect(
-      shouldDismissPendingTreeActionOnHeaderLeave(
-        { mode: "remove", nodeId: "repo:getsentry/sentry", rowIds: ["getsentry/sentry/run/123"] },
-        "repo:getsentry/sentry",
-      ),
-    ).toBe(true);
-    expect(
-      shouldDismissPendingTreeActionOnHeaderLeave(
-        { mode: "ignore-pr-workflow", nodeId: "workflow:CI", rowIds: ["getsentry/sentry/run/123"] },
-        "workflow:Build",
-      ),
-    ).toBe(false);
-    expect(shouldDismissPendingTreeActionOnHeaderLeave(undefined, "workflow:CI")).toBe(false);
-  });
-
-  it("wires tree headers to dismiss pending group confirmations on mouse leave", () => {
-    expect(mainSource).toContain('querySelectorAll<HTMLElement>(".watch-tree-header")');
-    expect(mainSource).toContain('header.addEventListener("mouseleave"');
-    expect(mainSource).toContain("dismissTreeActionOnHeaderLeave");
+  it("exposes direct triage actions on nested watch groups", () => {
+    expect(mainSource).toContain("function renderWatchTreeActions(node: WatchTreeNodeViewModel): string");
+    expect(mainSource).toContain("renderTriageButtons(currentWatchView, node.rowIds");
+    expect(mainSource).not.toContain("confirm-remove-group");
   });
 
   it("renders tree groups with normal row title and metadata placement", () => {
@@ -134,7 +103,7 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain('class="watch-tree-chevron-spacer"');
     expect(mainSource).toContain('class="watch-tree-chevron"');
     expect(mainSource).toContain("${renderWatchTreeChevron(node, hasVisibleChildren, isCollapsed)}");
-    expect(mainSource).toContain("function renderWatchTreeActions(node: WatchTreeNodeViewModel, depth: number): string");
+    expect(mainSource).toContain("function renderWatchTreeActions(node: WatchTreeNodeViewModel): string");
     expect(mainSource).not.toContain("const chevron = renderWatchTreeChevron");
     expect(mainSource).not.toContain("${chevron}");
     expect(mainSource).toContain('data-action="toggle-tree-node"');
@@ -160,18 +129,17 @@ describe("watch tree group actions", () => {
     );
   });
 
-  it("renders repository removal controls and hides repo quick actions until hover", () => {
+  it("renders repository triage controls and hides repo quick actions until hover", () => {
     expect(mainSource).toContain("renderRepoGroupActions(group, actions)");
-    expect(mainSource).toContain('data-action="arm-remove-repo"');
-    expect(mainSource).toContain('data-action="confirm-remove-repo"');
-    expect(mainSource).toContain("dismissRepoActionOnHeaderLeave");
-    expect(mainSource).toContain("removeRepoGroupWatches");
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*96px;/s);
+    expect(mainSource).toContain('"watch-group-triage-button"');
+    expect(mainSource).not.toContain('data-action="arm-remove-repo"');
+    expect(mainSource).not.toContain('data-action="confirm-remove-repo"');
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*120px;/s);
     expect(styles).toMatch(
-      /\.watch-group-subscribe-button,[^{]*\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-remove-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
+      /\.watch-group-subscribe-button,[^{]*\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-triage-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
     );
     expect(styles).toMatch(
-      /\.watch-group-header:hover \.watch-group-subscribe-button,[^{]*\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-remove-button/s,
+      /\.watch-group-header:hover \.watch-group-subscribe-button,[^{]*\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-triage-button/s,
     );
   });
 
@@ -203,10 +171,10 @@ describe("watch tree group actions", () => {
     expect(mainSource).not.toContain('data-action="open"');
     expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*63px;/s);
     expect(styles).toMatch(
-      /\.watch \.watch-action-button\.rerun-button,[^{]*\.watch \.watch-action-button\.remove-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
+      /\.watch \.watch-action-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
     );
     expect(styles).toMatch(
-      /\.watch:hover \.watch-action-button\.rerun-button,[^{]*\.watch:focus-within \.watch-action-button\.rerun-button,[^{]*\.watch:hover \.watch-action-button\.remove-button/s,
+      /\.watch:hover \.watch-action-button,[^{]*\.watch:focus-within \.watch-action-button/s,
     );
     expect(styles).not.toContain("open-link-button");
   });
@@ -226,28 +194,25 @@ describe("watch tree group actions", () => {
     );
   });
 
-  it("renders unseen tree indicators on the leading icon and keeps remove controls available", () => {
+  it("renders unseen tree indicators on the leading icon and keeps triage controls available", () => {
     expect(mainSource).toContain("renderWatchTreeLeading(node, depth, actionLabel, treeToggleAttributes, isCollapsed)");
     expect(mainSource).toContain("shouldShowWatchTreeUnseenIndicator(node, isCollapsed)");
     expect(mainSource).toContain("hasVisibleUnseenDescendantIndicator(node)");
     expect(mainSource).toContain('data-action="mark-seen"');
     expect(mainSource).toContain('data-row-ids="${escapeHtml(node.rowIds.join("\\n"))}"');
-    expect(styles).not.toMatch(/\.watch\.has-unseen-change \.watch-action-button\.remove-button/);
+    expect(styles).not.toMatch(/\.watch\.has-unseen-change \.watch-action-button/);
     expect(styles).toMatch(
       /\.watch-list\.is-reordering-runs \.watch-tree-node\.is-row-dragging > \.watch-tree-header \.unseen-dot\s*\{[^}]*display:\s*none;/s,
     );
   });
 
   it("keeps action tooltips short while preserving descriptive accessible labels", () => {
-    expect(mainSource).toContain('title="Remove"');
+    expect(mainSource).toContain('title="${action.label}"');
     expect(mainSource).toContain('aria-label="Open ${escapeHtml(row.label)} in GitHub"');
-    expect(mainSource).toContain('aria-label="Remove ${escapeHtml(node.label)}"');
     expect(mainSource).not.toContain('title="Open ${escapeHtml(row.label)} in GitHub"');
-    expect(mainSource).not.toContain('title="Remove ${escapeHtml(node.label)}"');
-    expect(mainSource).not.toContain('title="Remove ${escapeHtml(group.repoLabel)}"');
   });
 
-  it("aligns top-level group close controls with row close controls", () => {
+  it("aligns top-level group actions with row actions", () => {
     expect(styles).toMatch(
       /\.watch-tree-header\.has-actions\s*\{[^}]*grid-template-columns:\s*var\(--tree-chevron-width\) var\(--tree-leading-width\) minmax\(0,\s*1fr\) var\(\s*--tree-actions-width\s*\);/s,
     );
@@ -266,24 +231,20 @@ describe("watch tree group actions", () => {
     expect(styles).toMatch(/\.watch-actions\s*\{[^}]*margin-top:\s*-2px;/s);
   });
 
-  it("only reveals close controls for the hovered or focused row", () => {
+  it("only reveals row actions for the hovered or focused row", () => {
     expect(styles).toMatch(
-      /\.watch \.watch-action-button\.remove-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
+      /\.watch \.watch-action-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
     );
     expect(styles).toMatch(
-      /\.watch:hover \.watch-action-button\.remove-button,[^{]*\.watch:focus-within \.watch-action-button\.remove-button\s*\{[^}]*visibility:\s*visible;[^}]*opacity:\s*0\.6;[^}]*pointer-events:\s*auto;/s,
+      /\.watch:hover \.watch-action-button,[^{]*\.watch:focus-within \.watch-action-button\s*\{[^}]*visibility:\s*visible;[^}]*opacity:\s*0\.6;[^}]*pointer-events:\s*auto;/s,
     );
-    expect(styles).not.toMatch(/\.watch\.has-unseen-change \.watch-action-button\.remove-button/);
+    expect(styles).not.toMatch(/\.watch\.has-unseen-change \.watch-action-button/);
   });
 
-  it("uses the same quiet red treatment for close controls", () => {
-    expect(styles).toMatch(
-      /\.watch-tree-action-button\s*\{[^}]*background:\s*transparent;[^}]*color:\s*#ff7b72;/s,
-    );
-    expect(styles).toMatch(/\.remove-button\s*\{[^}]*color:\s*#ff7b72;/s);
-    expect(styles).toMatch(
-      /\.watch-action-button\.remove-button:hover,[^{]*\.watch-action-button\.remove-button:focus-visible\s*\{[^}]*background:\s*rgb\(248 81 73 \/ 12%\);[^}]*color:\s*#ff7b72;/s,
-    );
-    expect(styles).not.toMatch(/\.watch-tree-action-button\s*\{[^}]*background:\s*rgb\(248 81 73 \/ 12%\);/s);
+  it("uses the same neutral treatment for every triage action", () => {
+    expect(styles).toMatch(/\.watch-triage-button\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 60%\);/s);
+    expect(styles).not.toContain(".watch-triage-button.is-inbox");
+    expect(styles).not.toContain(".watch-triage-button.is-saved");
+    expect(styles).not.toContain(".watch-triage-button.is-done");
   });
 });

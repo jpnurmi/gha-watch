@@ -23,13 +23,7 @@ import {
   type PendingWatchAction,
 } from "./app/watchActionConfirmation";
 import { getClickedUnseenWatchIds } from "./app/watchSeenAction";
-import {
-  canRemoveWatchTreeNode,
-  getWatchTreeNodeRemoveMode,
-  shouldDismissPendingTreeActionOnHeaderLeave,
-  type PendingWatchTreeAction,
-  type WatchTreeNodeRemoveMode,
-} from "./app/watchTreeActions";
+import { getWatchTriageActions } from "./app/watchTriage";
 import { createTrayState } from "./app/trayState";
 import {
   createPopupViewModel,
@@ -66,7 +60,11 @@ import {
   type RepoDropPosition,
   type RepoDropTarget,
 } from "./domain/repoOrder";
-import type { WatchRecord } from "./domain/watches";
+import {
+  getWatchTriageState,
+  type WatchRecord,
+  type WatchTriageState,
+} from "./domain/watches";
 import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
@@ -87,7 +85,14 @@ import {
 } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
-import { loadSettings, loadWatches, saveSettings, saveWatches } from "./platform/store";
+import {
+  loadSettings,
+  loadWatches,
+  loadWatchSuppressions,
+  saveSettings,
+  saveWatches,
+  saveWatchSuppressions,
+} from "./platform/store";
 import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
@@ -126,8 +131,7 @@ let autoStartBusy = true;
 let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
-let pendingTreeAction: PendingWatchTreeAction | undefined;
-let pendingRepoAction: PendingRepoAction | undefined;
+let currentWatchView: WatchTriageState = "inbox";
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let favoritePrMenu: FavoritePullRequestMenuState | undefined;
 let workflowSubscriptionMenu: WorkflowSubscriptionMenuState | undefined;
@@ -230,14 +234,6 @@ type RepoCiStatusMenuState = {
   repoKey: string;
 };
 
-type PendingRepoAction = {
-  owner: string;
-  repo: string;
-  repoLabel: string;
-  rowIds: string[];
-  removeFavorite: boolean;
-};
-
 const controller = createWatchController(
   {
     fetchState: isDemoMode
@@ -257,11 +253,13 @@ const controller = createWatchController(
     notify: notifyStatusChange,
     rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
     save: saveWatches,
+    saveSuppressions: saveWatchSuppressions,
   },
   loadInitialWatches(),
   {
-    autoClearFinishedWatches: settings.autoClearFinishedWatches,
+    autoDoneFinishedWatches: settings.autoClearFinishedWatches,
   },
+  isDemoMode ? [] : loadWatchSuppressions(),
 );
 
 function notifyStatusChange(notification: WatchNotification): Promise<void> {
@@ -292,7 +290,7 @@ void poll();
 document.addEventListener(
   "click",
   (event) => {
-    if (!pendingWatchAction && !pendingTreeAction && !pendingRepoAction) {
+    if (!pendingWatchAction) {
       return;
     }
 
@@ -300,13 +298,11 @@ document.addEventListener(
     const actionTarget = target instanceof Element ? target.closest<HTMLElement>("[data-action]") : null;
     const action = actionTarget?.dataset.action;
 
-    if (isWatchActionConfirmation(action) || action === "confirm-remove-group" || action === "confirm-remove-repo") {
+    if (isWatchActionConfirmation(action)) {
       return;
     }
 
     pendingWatchAction = undefined;
-    pendingTreeAction = undefined;
-    pendingRepoAction = undefined;
     render();
     event.preventDefault();
     event.stopPropagation();
@@ -400,18 +396,27 @@ function renderRateLimitIndicator(): string {
 }
 
 function render(): void {
-  const watches = controller.getWatches();
-  const viewModel = createPopupViewModel(watches, new Date(), settings.favoriteRepos, settings.repoOrder, repoCiStatuses);
+  const allWatches = controller.getWatches();
+  const watches = allWatches.filter((watch) => getWatchTriageState(watch) === currentWatchView);
+  const showRepositoryTools = currentWatchView === "inbox";
+  const viewModel = createPopupViewModel(
+    watches,
+    new Date(),
+    showRepositoryTools ? settings.favoriteRepos : [],
+    settings.repoOrder,
+    showRepositoryTools ? repoCiStatuses : {},
+  );
   const hasWatches = watches.length > 0;
-  const hasFinishedWatches = watches.some((watch) => !watch.active);
+  const hasFinishedWatches = currentWatchView !== "done" && watches.some((watch) => !watch.active);
 
   replacePopupHtmlPreservingScroll(app, `
     <section class="shell">
       <header class="header">
         <div class="header-row">
           <div>
-            <h1 class="header-title is-${viewModel.headerTone}">GHA Watch</h1>
+            <h1 class="header-title">GHA Watch</h1>
           </div>
+          ${renderWatchViewSwitcher()}
           <div class="header-actions">
             <button class="icon-button" type="button" data-action="toggle-add" title="Add" aria-label="Add repository or watch">
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -468,18 +473,52 @@ function renderPopupBodySection(
 }
 
 function renderWatchList(viewModel: ReturnType<typeof createPopupViewModel>): string {
+  const emptyState = {
+    inbox: { label: "Inbox is clear", showAdd: true },
+    saved: { label: "No saved watches", showAdd: false },
+    done: { label: "Nothing marked done", showAdd: false },
+  }[currentWatchView];
+
   return `
     <ul class="watch-list">
       ${
         viewModel.groups.length === 0
           ? `<li class="empty">
               <div class="empty-content">
-                <button class="empty-action" type="button" data-action="toggle-add">Add</button>
+                <span class="empty-label">${emptyState.label}</span>
+                ${emptyState.showAdd ? `<button class="empty-action" type="button" data-action="toggle-add">Add</button>` : ""}
               </div>
             </li>`
           : viewModel.groups.map(renderWatchGroup).join("")
       }
     </ul>
+  `;
+}
+
+function renderWatchViewSwitcher(): string {
+  const views: Array<{ label: string; state: WatchTriageState }> = [
+    { label: "Inbox", state: "inbox" },
+    { label: "Saved", state: "saved" },
+    { label: "Done", state: "done" },
+  ];
+
+  return `
+    <div class="watch-view-switcher" role="tablist" aria-label="Watch view">
+      ${views
+        .map(
+          ({ label, state }) => `
+            <button
+              class="watch-view-button${currentWatchView === state ? " is-active" : ""}"
+              type="button"
+              role="tab"
+              data-action="select-watch-view"
+              data-watch-view="${state}"
+              aria-selected="${currentWatchView === state ? "true" : "false"}"
+            >${label}</button>
+          `,
+        )
+        .join("")}
+    </div>
   `;
 }
 
@@ -671,49 +710,14 @@ function renderRepoGroupChevron(
 }
 
 function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderActions): string {
-  if (pendingRepoAction?.repoLabel === group.repoLabel) {
-    return `
-      <div class="watch-group-actions has-confirmation">
-        <button
-          class="watch-group-confirm-button confirm-button confirm-button-remove"
-          type="button"
-          data-action="confirm-remove-repo"
-          data-owner="${escapeHtml(group.owner)}"
-          data-repo="${escapeHtml(group.repo)}"
-          data-row-ids="${escapeHtml(group.rows.map((row) => row.id).join("\n"))}"
-          data-remove-favorite="${group.favorite ? "true" : "false"}"
-        >
-          Remove
-        </button>
-      </div>
-    `;
-  }
-
-  const canRemove = group.rows.length > 0 || group.favorite;
+  const rowIds = group.rows.map((row) => row.id);
 
   return `
     <div class="watch-group-actions">
       ${renderWorkflowSubscriptionMenu(group)}
       ${actions.showOpenPullRequests ? renderFavoritePullRequestMenu(group) : ""}
       ${actions.showActiveWorkflowRuns ? renderActiveWorkflowRunMenu(group) : ""}
-      ${
-        canRemove
-          ? `<button
-              class="watch-group-remove-button remove-button"
-              type="button"
-              data-action="arm-remove-repo"
-              data-owner="${escapeHtml(group.owner)}"
-              data-repo="${escapeHtml(group.repo)}"
-              data-repo-label="${escapeHtml(group.repoLabel)}"
-              data-row-ids="${escapeHtml(group.rows.map((row) => row.id).join("\n"))}"
-              data-remove-favorite="${group.favorite ? "true" : "false"}"
-              title="Remove"
-              aria-label="Remove ${escapeHtml(group.repoLabel)}"
-            >
-              <span class="remove-icon" aria-hidden="true">&times;</span>
-            </button>`
-          : ""
-      }
+      ${rowIds.length > 0 ? renderTriageButtons(currentWatchView, rowIds, "watch-group-triage-button", group.repoLabel) : ""}
     </div>
   `;
 }
@@ -1105,8 +1109,7 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
           data-tree-node="${escapeHtml(node.id)}"
           aria-expanded="${isCollapsed ? "false" : "true"}"`
     : "";
-  const canRemove = canRemoveWatchTreeNode(node, depth);
-  const hasActions = canRemove;
+  const hasActions = node.rowIds.length > 0;
   const children = !hasVisibleChildren || isCollapsed
     ? ""
     : `
@@ -1143,7 +1146,7 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
           </span>
           ${renderWatchTreeMetadata(node)}
         </button>
-        ${renderWatchTreeActions(node, depth)}
+        ${renderWatchTreeActions(node)}
       </div>
       ${children}
     </li>
@@ -1259,53 +1262,21 @@ function renderWatchTreeMetadata(node: WatchTreeNodeViewModel): string {
   return `<span class="watch-meta">${items.join(renderMetaSeparator())}</span>`;
 }
 
-function renderWatchTreeActions(node: WatchTreeNodeViewModel, depth: number): string {
-  const canRemove = canRemoveWatchTreeNode(node, depth);
-
-  if (!canRemove) {
+function renderWatchTreeActions(node: WatchTreeNodeViewModel): string {
+  if (node.rowIds.length === 0) {
     return "";
-  }
-
-  const removeMode = getWatchTreeNodeRemoveMode(node, depth);
-
-  if (pendingTreeAction?.nodeId === node.id) {
-    return `
-      <div class="watch-tree-actions">
-        <button
-          class="watch-tree-confirm-button confirm-button confirm-button-remove"
-          type="button"
-          data-action="confirm-remove-group"
-          data-tree-node="${escapeHtml(node.id)}"
-          data-remove-mode="${removeMode ?? "remove"}"
-          data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
-        >
-          Remove
-        </button>
-      </div>
-    `;
   }
 
   return `
     <div class="watch-tree-actions">
-      <button
-        class="watch-tree-action-button remove-button"
-        type="button"
-        data-action="arm-remove-group"
-        data-tree-node="${escapeHtml(node.id)}"
-        data-remove-mode="${removeMode ?? "remove"}"
-        data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
-        title="Remove"
-        aria-label="Remove ${escapeHtml(node.label)}"
-      >
-        <span class="remove-icon" aria-hidden="true">&times;</span>
-      </button>
+      ${renderTriageButtons(currentWatchView, node.rowIds, "watch-tree-action-button", node.label)}
     </div>
   `;
 }
 
 function renderWatch(row: WatchRowViewModel, depth = 0): string {
   const hasConfirmation = pendingWatchAction?.id === row.id;
-  const hasActions = row.canRerun;
+  const hasActions = true;
 
   return `
     <li
@@ -1402,16 +1373,10 @@ function getMetadataDetail(row: WatchRowViewModel): string | undefined {
 
 function renderWatchActions(row: WatchRowViewModel): string {
   if (pendingWatchAction?.id === row.id) {
-    const isRerun = pendingWatchAction.kind === "rerun";
-    const isPrWorkflowIgnore = pendingWatchAction.kind === "ignore-pr-workflow";
-    const label = isRerun ? "Re-run" : "Remove";
-    const action = isRerun ? "confirm-rerun" : isPrWorkflowIgnore ? "confirm-ignore-pr-workflow" : "confirm-remove";
-    const tone = isRerun ? "rerun" : "remove";
-
     return `
       <div class="watch-actions">
-        <button class="confirm-button confirm-button-${tone}" type="button" data-action="${action}" data-id="${escapeHtml(row.id)}">
-          ${label}
+        <button class="confirm-button confirm-button-rerun" type="button" data-action="confirm-rerun" data-id="${escapeHtml(row.id)}">
+          Re-run
         </button>
       </div>
     `;
@@ -1426,10 +1391,76 @@ function renderWatchActions(row: WatchRowViewModel): string {
             </button>`
           : ""
       }
-      <button class="watch-action-button remove-button" type="button" data-action="${row.removeMode === "ignore-pr-workflow" ? "arm-ignore-pr-workflow" : "arm-remove"}" data-id="${escapeHtml(row.id)}" title="Remove" aria-label="Remove ${escapeHtml(row.label)}">
-        <span class="remove-icon" aria-hidden="true">&times;</span>
-      </button>
+      ${renderTriageButtons(row.triageState, [row.id], "watch-action-button", row.label)}
     </div>
+  `;
+}
+
+function renderTriageButtons(
+  currentState: WatchTriageState,
+  rowIds: string[],
+  className: string,
+  subjectLabel: string,
+): string {
+  const triageButtons = getWatchTriageActions(currentState)
+    .map(
+      (action) => `
+        <button
+          class="${className} watch-triage-button is-${action.state}"
+          type="button"
+          data-action="triage-watch"
+          data-triage-state="${action.state}"
+          data-row-ids="${escapeHtml(rowIds.join("\n"))}"
+          title="${action.label}"
+          aria-label="${action.label} ${escapeHtml(subjectLabel)}"
+        >
+          ${renderTriageIcon(action.state)}
+        </button>
+      `,
+    )
+    .join("");
+
+  if (currentState !== "done") {
+    return triageButtons;
+  }
+
+  return `${triageButtons}
+    <button
+      class="${className} watch-clear-done-button"
+      type="button"
+      data-action="clear-done-watch"
+      data-row-ids="${escapeHtml(rowIds.join("\n"))}"
+      title="Remove from Done"
+      aria-label="Remove ${escapeHtml(subjectLabel)} from Done"
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/>
+      </svg>
+    </button>
+  `;
+}
+
+function renderTriageIcon(state: WatchTriageState): string {
+  if (state === "inbox") {
+    return `
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2.25 3.25h11.5v9.5H2.25zM2.25 9h3l1.25 1.5h3L10.75 9h3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+      </svg>
+    `;
+  }
+
+  if (state === "saved") {
+    return `
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M4 2.25h8v11.5L8 11.2l-4 2.55z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5"/>
+      </svg>
+    `;
+  }
+
+  return `
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m3.25 8.25 3 3 6.5-6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+    </svg>
   `;
 }
 
@@ -1473,11 +1504,33 @@ function renderWatchSubjectIcon(
 function bindEvents(): void {
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-add"]')) {
     button.addEventListener("click", () => {
-      isAdding = !isAdding;
+      const wasAdding = isAdding && currentWatchView === "inbox";
+      currentWatchView = "inbox";
+      isAdding = !wasAdding;
       isClearMenuOpen = false;
       addError = undefined;
       render();
       app.querySelector<HTMLInputElement>('input[name="url"]')?.focus();
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="select-watch-view"]')) {
+    button.addEventListener("click", () => {
+      const view = parseWatchTriageState(button.dataset.watchView);
+
+      if (!view || view === currentWatchView) {
+        return;
+      }
+
+      currentWatchView = view;
+      isAdding = false;
+      isClearMenuOpen = false;
+      pendingWatchAction = undefined;
+      activeWorkflowRunMenu = undefined;
+      favoritePrMenu = undefined;
+      workflowSubscriptionMenu = undefined;
+      repoCiStatusMenu = undefined;
+      render();
     });
   }
 
@@ -1570,36 +1623,6 @@ function bindEvents(): void {
     });
   }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-remove-group"]')) {
-    button.addEventListener("click", () => {
-      armTreeNodeRemoval(button.dataset.treeNode || "", getTreeNodeRowIds(button), getTreeNodeRemoveMode(button));
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-remove-group"]')) {
-    button.addEventListener("click", () => {
-      removeTreeNodeWatches(getTreeNodeRowIds(button), getTreeNodeRemoveMode(button));
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-remove-repo"]')) {
-    button.addEventListener("click", () => {
-      armRepoGroupRemoval(button);
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-remove-repo"]')) {
-    button.addEventListener("click", () => {
-      removeRepoGroupWatches(button);
-    });
-  }
-
-  for (const header of app.querySelectorAll<HTMLElement>(".watch-tree-header")) {
-    header.addEventListener("mouseleave", () => {
-      dismissTreeActionOnHeaderLeave(header.closest<HTMLElement>(".watch-tree-node")?.dataset.treeNode);
-    });
-  }
-
   for (const header of app.querySelectorAll<HTMLElement>(".watch-group-header")) {
     header.addEventListener("click", (event) => {
       if (event.target instanceof Element && event.target.closest('[data-action="toggle-group"]')) {
@@ -1620,24 +1643,33 @@ function bindEvents(): void {
 
       toggleRepoGroup(repoLabel);
     });
-    header.addEventListener("mouseleave", () => {
-      dismissRepoActionOnHeaderLeave(header.closest<HTMLElement>(".watch-group[data-repo]")?.dataset.repo);
-    });
   }
 
-  app.querySelector<HTMLButtonElement>('[data-action="clear-finished"]')?.addEventListener(
+  app.querySelector<HTMLButtonElement>('[data-action="done-finished"]')?.addEventListener(
     "click",
     () => {
       isClearMenuOpen = false;
-      controller.clearFinished();
+      controller.markFinishedDone(currentWatchView);
     },
   );
 
-  app.querySelector<HTMLButtonElement>('[data-action="clear-all"]')?.addEventListener(
+  app.querySelector<HTMLButtonElement>('[data-action="done-all"]')?.addEventListener(
     "click",
     () => {
       isClearMenuOpen = false;
-      controller.clearAll();
+      controller.markAllDone(currentWatchView);
+    },
+  );
+
+  app.querySelector<HTMLButtonElement>('[data-action="clear-done"]')?.addEventListener(
+    "click",
+    () => {
+      isClearMenuOpen = false;
+      controller.clearDone(
+        controller.getWatches()
+          .filter((watch) => getWatchTriageState(watch) === "done")
+          .map((watch) => watch.id),
+      );
     },
   );
 
@@ -1649,7 +1681,7 @@ function bindEvents(): void {
         autoClearFinishedWatches: !settings.autoClearFinishedWatches,
       };
       controller.setOptions({
-        autoClearFinishedWatches: settings.autoClearFinishedWatches,
+        autoDoneFinishedWatches: settings.autoClearFinishedWatches,
       });
       isClearMenuOpen = false;
       void saveSettings(settings);
@@ -1726,41 +1758,36 @@ function bindEvents(): void {
     });
   }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-remove"]')) {
-    button.addEventListener("click", () => {
-      armWatchAction(button.dataset.id || "", "remove");
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-ignore-pr-workflow"]')) {
-    button.addEventListener("click", () => {
-      armWatchAction(button.dataset.id || "", "ignore-pr-workflow");
-    });
-  }
-
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-rerun"]')) {
     button.addEventListener("click", () => {
       armWatchAction(button.dataset.id || "", "rerun");
     });
   }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-remove"]')) {
-    button.addEventListener("click", () => {
-      pendingWatchAction = undefined;
-      controller.remove(button.dataset.id || "");
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-ignore-pr-workflow"]')) {
-    button.addEventListener("click", () => {
-      pendingWatchAction = undefined;
-      controller.ignorePrWorkflow(button.dataset.id || "");
-    });
-  }
-
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-rerun"]')) {
     button.addEventListener("click", () => {
       void confirmRerun(button.dataset.id || "");
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="triage-watch"]')) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const triageState = parseWatchTriageState(button.dataset.triageState);
+
+      if (triageState) {
+        controller.setTriageState(getTreeNodeRowIds(button), triageState);
+      }
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="clear-done-watch"]')) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      controller.clearDone(getTreeNodeRowIds(button));
     });
   }
 
@@ -1837,6 +1864,7 @@ function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): stri
         autoStartBusy,
         hasWatches,
         hasFinishedWatches,
+        isDoneView: currentWatchView === "done",
       })
         .map(renderClearMenuItem)
         .join("")}
@@ -2039,7 +2067,6 @@ function toggleRepoGroup(repoLabel: string): void {
 
   collapsedGroups.toggle(repoLabel);
   isClearMenuOpen = false;
-  pendingRepoAction = undefined;
   repoCiStatusMenu = undefined;
   render();
 }
@@ -2047,118 +2074,11 @@ function toggleRepoGroup(repoLabel: string): void {
 function toggleTreeNode(nodeId: string): void {
   collapsedGroups.toggle(nodeId);
   isClearMenuOpen = false;
-  pendingRepoAction = undefined;
   activeWorkflowRunMenu = undefined;
   favoritePrMenu = undefined;
   workflowSubscriptionMenu = undefined;
   repoCiStatusMenu = undefined;
   render();
-}
-
-function armTreeNodeRemoval(nodeId: string, rowIds: string[], mode: WatchTreeNodeRemoveMode): void {
-  if (!nodeId || rowIds.length === 0) {
-    return;
-  }
-
-  pendingTreeAction = { mode, nodeId, rowIds };
-  pendingWatchAction = undefined;
-  pendingRepoAction = undefined;
-  isClearMenuOpen = false;
-  activeWorkflowRunMenu = undefined;
-  favoritePrMenu = undefined;
-  workflowSubscriptionMenu = undefined;
-  repoCiStatusMenu = undefined;
-  render();
-}
-
-function armRepoGroupRemoval(button: HTMLButtonElement): void {
-  const repoLabel = button.dataset.repoLabel || "";
-
-  if (!repoLabel) {
-    return;
-  }
-
-  pendingRepoAction = {
-    owner: button.dataset.owner || "",
-    repo: button.dataset.repo || "",
-    repoLabel,
-    rowIds: getTreeNodeRowIds(button),
-    removeFavorite: button.dataset.removeFavorite === "true",
-  };
-  pendingWatchAction = undefined;
-  pendingTreeAction = undefined;
-  isClearMenuOpen = false;
-  activeWorkflowRunMenu = undefined;
-  favoritePrMenu = undefined;
-  workflowSubscriptionMenu = undefined;
-  repoCiStatusMenu = undefined;
-  render();
-}
-
-function dismissTreeActionOnHeaderLeave(nodeId: string | undefined): void {
-  if (!shouldDismissPendingTreeActionOnHeaderLeave(pendingTreeAction, nodeId)) {
-    return;
-  }
-
-  pendingTreeAction = undefined;
-  render();
-}
-
-function dismissRepoActionOnHeaderLeave(repoLabel: string | undefined): void {
-  if (!pendingRepoAction || pendingRepoAction.repoLabel !== repoLabel) {
-    return;
-  }
-
-  pendingRepoAction = undefined;
-  render();
-}
-
-function removeTreeNodeWatches(rowIds: string[], mode: WatchTreeNodeRemoveMode): void {
-  pendingTreeAction = undefined;
-
-  if (mode === "ignore-pr-workflow") {
-    controller.ignorePrWorkflow(rowIds[0] || "");
-    return;
-  }
-
-  for (const rowId of rowIds) {
-    if (controller.getWatches().some((watch) => watch.id === rowId)) {
-      controller.remove(rowId);
-    }
-  }
-}
-
-function removeRepoGroupWatches(button: HTMLButtonElement): void {
-  pendingRepoAction = undefined;
-
-  for (const rowId of getTreeNodeRowIds(button)) {
-    if (controller.getWatches().some((watch) => watch.id === rowId)) {
-      controller.remove(rowId);
-    }
-  }
-
-  if (button.dataset.removeFavorite === "true") {
-    const repo = {
-      owner: button.dataset.owner || "",
-      repo: button.dataset.repo || "",
-    };
-
-    if (isFavoriteRepo(settings.favoriteRepos, repo)) {
-      const repoKey = getFavoriteRepoKey(repo);
-
-      settings = {
-        ...settings,
-        favoriteRepos: settings.favoriteRepos.filter((favorite) => getFavoriteRepoKey(favorite) !== repoKey),
-      };
-      void saveSettings(settings);
-      render();
-      void refreshListedRepositoryCiStatuses();
-    }
-  }
-}
-
-function getTreeNodeRemoveMode(button: HTMLButtonElement): WatchTreeNodeRemoveMode {
-  return button.dataset.removeMode === "ignore-pr-workflow" ? "ignore-pr-workflow" : "remove";
 }
 
 function getTreeNodeRowIds(button: HTMLButtonElement): string[] {
@@ -2166,6 +2086,10 @@ function getTreeNodeRowIds(button: HTMLButtonElement): string[] {
     .split("\n")
     .map((rowId) => rowId.trim())
     .filter((rowId) => rowId.length > 0);
+}
+
+function parseWatchTriageState(value: string | undefined): WatchTriageState | undefined {
+  return value === "inbox" || value === "saved" || value === "done" ? value : undefined;
 }
 
 function startWatchPointerDrag(repoKey: string, sourceKey: string, sourceIds: string[]): void {
@@ -2868,6 +2792,7 @@ async function watchActiveWorkflowRun(
       runId: target.runId,
       url: target.url,
     });
+    currentWatchView = "inbox";
     activeWorkflowRunMenu = undefined;
     workflowSubscriptionMenu = undefined;
     repoCiStatusMenu = undefined;
@@ -2900,6 +2825,7 @@ async function watchFavoritePullRequest(
       prNumber: target.prNumber,
       url: `https://github.com/${target.owner}/${target.repo}/pull/${target.prNumber}`,
     });
+    currentWatchView = "inbox";
     favoritePrMenu = undefined;
     workflowSubscriptionMenu = undefined;
     repoCiStatusMenu = undefined;
@@ -2921,8 +2847,6 @@ function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
   }
 
   pendingWatchAction = { id, kind };
-  pendingTreeAction = undefined;
-  pendingRepoAction = undefined;
   isClearMenuOpen = false;
   repoCiStatusMenu = undefined;
   render();
@@ -3025,6 +2949,7 @@ async function addWatch(url: string): Promise<void> {
       await controller.add(target);
     }
 
+    currentWatchView = "inbox";
     isAdding = false;
     isClearMenuOpen = false;
     repoCiStatusMenu = undefined;
@@ -3150,6 +3075,10 @@ function getListedRepositories(): Array<Pick<FavoriteRepo, "owner" | "repo">> {
   }
 
   for (const watch of controller.getWatches()) {
+    if (getWatchTriageState(watch) === "done") {
+      continue;
+    }
+
     repos.set(getFavoriteRepoKey(watch.target), { owner: watch.target.owner, repo: watch.target.repo });
   }
 
@@ -3333,6 +3262,7 @@ function loadInitialWatches(): WatchRecord[] {
         branchName: "feat/auto-start",
         prNumber: "8",
         sourceState: "merged",
+        triageState: "done",
       }),
       createDemoWatch("9", "CI: feat: slug", "completed", "success", false, {
         runTitle: "feat: slug",
@@ -3340,6 +3270,7 @@ function loadInitialWatches(): WatchRecord[] {
         branchName: "feat/slug",
         prNumber: "9",
         sourceState: "merged",
+        triageState: "saved",
       }),
       createDemoWatch("10", "CI: ci: add Rust cache", "completed", "success", false, {
         runTitle: "ci: add Rust cache",
@@ -3379,6 +3310,7 @@ function createDemoWatch(
     runTitle?: string;
     sourceState?: WatchRecord["sourceState"];
     timing?: WatchRecord["timing"];
+    triageState?: WatchTriageState;
     workflowName?: string;
   } = {},
 ): WatchRecord {
@@ -3416,6 +3348,7 @@ function createDemoWatch(
         }
       : {}),
     ...(options.sourceState ? { sourceState: options.sourceState } : {}),
+    ...(options.triageState ? { triageState: options.triageState } : {}),
     label,
     metadata: {
       ...(options.workflowName ? { workflowName: options.workflowName } : {}),

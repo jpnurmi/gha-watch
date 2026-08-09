@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } from "../domain/githubUrl";
 import type { FavoriteRepo } from "../domain/favorites";
+import type { WatchSuppression } from "../domain/watchSuppressions";
 import { type WatchRecord } from "../domain/watches";
 import type { ActiveWorkflowRun, OpenPullRequest, WatchSnapshot, WorkflowDefinition } from "../platform/gh";
 
@@ -48,6 +49,7 @@ function createDeps(
     ? Notification[]
     : never;
   saves: WatchRecord[][];
+  suppressionSaves: WatchSuppression[][];
   fetches: WatchTarget[];
   reruns: CheckWatchTarget[];
   openPullRequestFetches: FavoriteRepo[];
@@ -59,6 +61,7 @@ function createDeps(
   const notifications: string[] = [];
   const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
   const saves: WatchRecord[][] = [];
+  const suppressionSaves: WatchSuppression[][] = [];
   const fetches: WatchTarget[] = [];
   const reruns: CheckWatchTarget[] = [];
   const openPullRequestFetches: FavoriteRepo[] = [];
@@ -71,6 +74,7 @@ function createDeps(
     notifications,
     notificationRecords,
     saves,
+    suppressionSaves,
     fetches,
     reruns,
     openPullRequestFetches,
@@ -180,6 +184,9 @@ function createDeps(
       async save(watches) {
         saves.push(watches);
       },
+      async saveSuppressions(suppressions) {
+        suppressionSaves.push(suppressions);
+      },
     },
   };
 }
@@ -227,6 +234,35 @@ describe("watchController", () => {
       },
     ]);
     expect(notifications).toEqual([]);
+  });
+
+  it("moves an explicitly re-added watch back to the inbox", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        triageState: "done",
+      },
+    ]);
+
+    await controller.add(runTarget);
+
+    expect(fetches).toEqual([runTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/123",
+        triageState: "inbox",
+        status: "queued",
+        active: true,
+      },
+    ]);
   });
 
   it("stores pull request references returned by GitHub", async () => {
@@ -538,6 +574,125 @@ describe("watchController", () => {
     expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/123"]);
   });
 
+  it("does not reopen done watches while syncing subscriptions", async () => {
+    const { deps, fetches } = createDeps([]);
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        triageState: "done",
+      },
+    ]);
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(fetches).toEqual([]);
+    expect(controller.getWatches()[0].triageState).toBe("done");
+  });
+
+  it("does not reopen cleared watches while syncing subscriptions", async () => {
+    const { deps, fetches } = createDeps([]);
+    const controller = createWatchController(
+      deps,
+      [],
+      {},
+      [
+        {
+          id: "getsentry/sentry/run/123",
+          clearedAt: "2026-07-01T00:00:00.000Z",
+        },
+      ],
+    );
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(fetches).toEqual([]);
+    expect(controller.getWatches()).toEqual([]);
+  });
+
+  it("allows subscription sync after a suppression expires", async () => {
+    let now = new Date("2026-05-01T00:00:00Z");
+    const { deps, suppressionSaves } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(
+      {
+        ...deps,
+        now: () => now,
+      },
+      [],
+      {},
+      [
+        {
+          id: "getsentry/sentry/run/123",
+          clearedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    );
+    now = new Date("2026-07-01T00:00:00Z");
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/123",
+    ]);
+    expect(suppressionSaves.at(-1)).toEqual([]);
+  });
+
+  it("lets a manual add override a cleared-watch suppression", async () => {
+    const { deps, fetches, suppressionSaves } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(
+      deps,
+      [],
+      {},
+      [
+        {
+          id: "getsentry/sentry/run/123",
+          clearedAt: "2026-07-01T00:00:00.000Z",
+        },
+      ],
+    );
+
+    await controller.add(runTarget);
+
+    expect(fetches).toEqual([runTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/123",
+      },
+    ]);
+    expect(suppressionSaves.at(-1)).toEqual([]);
+  });
+
   it("subscribes to selected workflow runs triggered by the authenticated user", async () => {
     const { deps, userActiveWorkflowRunFetches } = createDeps([
       {
@@ -738,7 +893,7 @@ describe("watchController", () => {
     ]);
   });
 
-  it("removing a watch stops future polls", async () => {
+  it("stops polling done watches", async () => {
     const { deps, fetches } = createDeps([
       {
         status: "queued",
@@ -756,14 +911,83 @@ describe("watchController", () => {
     const controller = createWatchController(deps);
 
     await controller.add(runTarget);
-    controller.remove("getsentry/sentry/run/123");
+    controller.setTriageState(["getsentry/sentry/run/123"], "done");
     await controller.pollNow();
 
     expect(fetches).toHaveLength(1);
-    expect(controller.getWatches()).toEqual([]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/123",
+        triageState: "done",
+      },
+    ]);
   });
 
-  it("clears all watches", async () => {
+  it("clears Done watches on demand", () => {
+    const { deps, suppressionSaves } = createDeps([]);
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        triageState: "done",
+        doneAt: "2026-07-01T00:00:00.000Z",
+      },
+      {
+        ...existingWatch(),
+        id: "getsentry/sentry/run/saved",
+        triageState: "saved",
+      },
+    ]);
+
+    controller.clearDone(["getsentry/sentry/run/123"]);
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/saved",
+        triageState: "saved",
+      },
+    ]);
+    expect(suppressionSaves.at(-1)).toEqual([
+      {
+        id: "getsentry/sentry/run/123",
+        clearedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("clears Done watches after five months", () => {
+    const { deps, saves, suppressionSaves } = createDeps([]);
+    const controller = createWatchController(
+      {
+        ...deps,
+        now: () => new Date("2026-08-02T00:00:00Z"),
+      },
+      [
+        {
+          ...existingWatch(),
+          id: "expired",
+          triageState: "done",
+          doneAt: "2026-03-01T00:00:00.000Z",
+        },
+        {
+          ...existingWatch(),
+          id: "recent",
+          triageState: "done",
+          doneAt: "2026-04-01T00:00:00.000Z",
+        },
+      ],
+    );
+
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual(["recent"]);
+    expect(saves.at(-1)?.map((watch) => watch.id)).toEqual(["recent"]);
+    expect(suppressionSaves.at(-1)).toEqual([
+      {
+        id: "expired",
+        clearedAt: "2026-08-02T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("marks all watches in the selected view done", async () => {
     const { deps } = createDeps([
       {
         status: "queued",
@@ -772,15 +996,30 @@ describe("watchController", () => {
         url: runTarget.url,
       },
     ]);
-    const controller = createWatchController(deps);
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        id: "getsentry/sentry/run/saved",
+        triageState: "saved",
+      },
+    ]);
 
     await controller.add(runTarget);
-    controller.clearAll();
+    controller.markAllDone("inbox");
 
-    expect(controller.getWatches()).toEqual([]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/saved",
+        triageState: "saved",
+      },
+      {
+        id: "getsentry/sentry/run/123",
+        triageState: "done",
+      },
+    ]);
   });
 
-  it("clears only inactive watches when clearing finished watches", async () => {
+  it("marks only finished watches done", async () => {
     const { deps } = createDeps([
       {
         status: "completed",
@@ -799,9 +1038,14 @@ describe("watchController", () => {
 
     await controller.add(runTarget);
     await controller.add(jobTarget);
-    controller.clearFinished();
+    controller.markFinishedDone("inbox");
 
     expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/123",
+        active: false,
+        triageState: "done",
+      },
       {
         id: "getsentry/sentry/job/456",
         active: true,
@@ -839,7 +1083,7 @@ describe("watchController", () => {
     ]);
   });
 
-  it("keeps unread completed watches after polling when auto-clear is enabled", async () => {
+  it("keeps unread completed watches in the inbox when auto-done is enabled", async () => {
     const { deps, notificationRecords } = createDeps([
       {
         status: "in_progress",
@@ -855,7 +1099,7 @@ describe("watchController", () => {
       },
     ]);
     const controller = createWatchController(deps, [], {
-      autoClearFinishedWatches: true,
+      autoDoneFinishedWatches: true,
     });
 
     await controller.add(runTarget);
@@ -877,7 +1121,7 @@ describe("watchController", () => {
     ]);
   });
 
-  it("auto-clears completed watches after they are marked seen", async () => {
+  it("moves completed watches to done after they are marked seen", async () => {
     const { deps } = createDeps([
       {
         status: "in_progress",
@@ -893,14 +1137,38 @@ describe("watchController", () => {
       },
     ]);
     const controller = createWatchController(deps, [], {
-      autoClearFinishedWatches: true,
+      autoDoneFinishedWatches: true,
     });
 
     await controller.add(runTarget);
     await controller.pollNow();
     controller.markSeen("getsentry/sentry/run/123");
 
-    expect(controller.getWatches()).toEqual([]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/123",
+        triageState: "done",
+      },
+    ]);
+  });
+
+  it("does not auto-done explicitly saved watches", () => {
+    const controller = createWatchController(
+      createDeps([]).deps,
+      [
+        {
+          ...existingWatch(),
+          triageState: "saved",
+        },
+      ],
+      {
+        autoDoneFinishedWatches: true,
+      },
+    );
+
+    controller.markAllSeen();
+
+    expect(controller.getWatches()[0].triageState).toBe("saved");
   });
 
   it("marks a status change seen when requested", async () => {

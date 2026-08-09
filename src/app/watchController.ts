@@ -2,24 +2,36 @@ import type { FavoriteRepo } from "../domain/favorites";
 import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, WatchTarget } from "../domain/githubUrl";
 import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
 import {
+  addWatchSuppressions,
+  clearExpiredWatchSuppressions,
+  isWatchSuppressed,
+  removeWatchSuppression,
+  type WatchSuppression,
+} from "../domain/watchSuppressions";
+import {
   addWatch,
+  clearDoneWatches,
+  clearExpiredDoneWatches,
   getWatchId,
+  getWatchTriageState,
   markAllWatchesSeen,
   markWatchSeen,
   hasUnseenStatusChange,
   moveWatchGroupWithinRepo,
   moveWatchWithinRepo,
+  normalizeWatchDoneAt,
   normalizeWatchSeenStatus,
-  removeWatch,
+  setWatchesTriageState,
   type WatchDropPosition,
   type WatchRecord,
+  type WatchTriageState,
 } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
 import type { ActiveWorkflowRun, OpenPullRequest, WorkflowDefinition } from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
 export type WatchControllerOptions = {
-  autoClearFinishedWatches?: boolean;
+  autoDoneFinishedWatches?: boolean;
 };
 
 export type WatchControllerDeps = {
@@ -35,18 +47,19 @@ export type WatchControllerDeps = {
   rerunFailed?(target: CheckWatchTarget): Promise<void>;
   now?(): Date;
   save(watches: WatchRecord[]): Promise<void>;
+  saveSuppressions(suppressions: WatchSuppression[]): Promise<void>;
 };
 
 export type WatchController = {
   add(target: ParsedWatchTarget): Promise<void>;
-  remove(id: string): void;
-  ignorePrWorkflow(id: string): void;
+  setTriageState(ids: string[], state: WatchTriageState): void;
   reorderGroupWithinRepo(draggedIds: string[], targetIds: string[], position: WatchDropPosition): void;
   reorderWithinRepo(draggedId: string, targetId: string, position: WatchDropPosition): void;
   markSeen(id: string): void;
   markAllSeen(): void;
-  clearAll(): void;
-  clearFinished(): void;
+  markAllDone(state: WatchTriageState): void;
+  markFinishedDone(state: WatchTriageState): void;
+  clearDone(ids: string[]): void;
   refreshRepositoryIcons(): Promise<void>;
   refreshWatchMetadata(): Promise<void>;
   listActiveWorkflowRuns(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
@@ -64,10 +77,39 @@ export function createWatchController(
   deps: WatchControllerDeps,
   initialWatches: WatchRecord[] = [],
   initialOptions: WatchControllerOptions = {},
+  initialSuppressions: WatchSuppression[] = [],
 ): WatchController {
-  let watches: WatchRecord[] = initialWatches.map(normalizeWatchSeenStatus);
+  const initialNow = deps.now?.() ?? new Date();
+  let normalizedDoneAt = false;
+  const normalizedWatches = initialWatches.map(normalizeWatchSeenStatus).map((watch) => {
+    const normalized = normalizeWatchDoneAt(watch, initialNow);
+    normalizedDoneAt ||= normalized !== watch;
+    return normalized;
+  });
+  let watches = clearExpiredDoneWatches(normalizedWatches, initialNow);
+  let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
   let options: WatchControllerOptions = initialOptions;
   const listeners = new Set<() => void>();
+
+  if (watches !== normalizedWatches) {
+    const retainedIds = new Set(watches.map((watch) => watch.id));
+    const clearedIds = normalizedWatches
+      .filter((watch) => !retainedIds.has(watch.id))
+      .map((watch) => watch.id);
+    suppressions = addWatchSuppressions(suppressions, clearedIds, initialNow);
+  }
+
+  if (normalizedDoneAt || watches !== normalizedWatches) {
+    void deps.save(watches);
+  }
+
+  if (suppressions !== initialSuppressions) {
+    void deps.saveSuppressions(suppressions);
+  }
+
+  function getNow(): Date {
+    return deps.now?.() ?? new Date();
+  }
 
   function emitChange(): void {
     for (const listener of listeners) {
@@ -81,8 +123,34 @@ export function createWatchController(
     emitChange();
   }
 
+  function setSuppressions(nextSuppressions: WatchSuppression[]): void {
+    if (nextSuppressions === suppressions) {
+      return;
+    }
+
+    suppressions = nextSuppressions;
+    void deps.saveSuppressions(suppressions);
+  }
+
   function updateWatch(id: string, update: (watch: WatchRecord) => WatchRecord): void {
     setWatches(watches.map((watch) => (watch.id === id ? update(watch) : watch)));
+  }
+
+  function pruneExpiredDoneWatches(now = getNow()): void {
+    const next = clearExpiredDoneWatches(watches, now);
+
+    if (next !== watches) {
+      const retainedIds = new Set(next.map((watch) => watch.id));
+      const clearedIds = watches
+        .filter((watch) => !retainedIds.has(watch.id))
+        .map((watch) => watch.id);
+      setSuppressions(addWatchSuppressions(suppressions, clearedIds, now));
+      setWatches(next);
+    }
+  }
+
+  function pruneExpiredSuppressions(now = getNow()): void {
+    setSuppressions(clearExpiredWatchSuppressions(suppressions, now));
   }
 
   async function refreshRepositoryIcon(id: string, target: ParsedWatchTarget): Promise<void> {
@@ -137,33 +205,62 @@ export function createWatchController(
     }
   }
 
-  async function addWatchTarget(target: WatchTarget, sourceState?: WatchRecord["sourceState"]): Promise<void> {
+  async function addWatchTarget(
+    target: WatchTarget,
+    sourceState?: WatchRecord["sourceState"],
+    reactivateExisting = false,
+  ): Promise<void> {
+    const id = getWatchId(target);
+
+    if (!reactivateExisting && isWatchSuppressed(suppressions, id)) {
+      return;
+    }
+
+    if (reactivateExisting) {
+      setSuppressions(removeWatchSuppression(suppressions, id));
+    }
+
     const previous = watches;
     const next = addWatch(watches, target, undefined, sourceState);
 
     if (next === previous) {
+      if (reactivateExisting) {
+        const reactivated = setWatchesTriageState(watches, [id], "inbox", getNow());
+
+        if (reactivated !== watches) {
+          setWatches(reactivated);
+          await loadBaselineState(id, target);
+        }
+      }
       return;
     }
 
     setWatches(next);
 
-    const id = getWatchId(target);
     void refreshRepositoryIcon(id, target);
     await loadBaselineState(id, target);
   }
 
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
-    await addWatchTarget(source, "ready");
+    await addWatchTarget(source, "ready", true);
   }
 
-  function applyAutoClearFinishedWatches(): void {
-    if (!options.autoClearFinishedWatches) {
+  function applyAutoDoneFinishedWatches(): void {
+    if (!options.autoDoneFinishedWatches) {
       return;
     }
 
-    const nextWatches = watches.filter((watch) => watch.active || hasUnseenStatusChange(watch));
+    const finishedIds = watches
+      .filter(
+        (watch) =>
+          getWatchTriageState(watch) === "inbox" &&
+          !watch.active &&
+          !hasUnseenStatusChange(watch),
+      )
+      .map((watch) => watch.id);
+    const nextWatches = setWatchesTriageState(watches, finishedIds, "done", getNow());
 
-    if (nextWatches.length !== watches.length) {
+    if (nextWatches !== watches) {
       setWatches(nextWatches);
     }
   }
@@ -240,19 +337,19 @@ export function createWatchController(
       }
 
       if (target.kind === "run") {
-        await addWatchTarget(target);
+        await addWatchTarget(target, undefined, true);
         return;
       }
 
-      await addWatchTarget(target);
+      await addWatchTarget(target, undefined, true);
     },
 
-    remove(id) {
-      setWatches(removeWatch(watches, id));
-    },
+    setTriageState(ids, state) {
+      const next = setWatchesTriageState(watches, ids, state, getNow());
 
-    ignorePrWorkflow(id) {
-      setWatches(removeWatch(watches, id));
+      if (next !== watches) {
+        setWatches(next);
+      }
     },
 
     reorderGroupWithinRepo(draggedIds, targetIds, position) {
@@ -273,20 +370,52 @@ export function createWatchController(
 
     markSeen(id) {
       setWatches(markWatchSeen(watches, id));
-      applyAutoClearFinishedWatches();
+      applyAutoDoneFinishedWatches();
     },
 
     markAllSeen() {
       setWatches(markAllWatchesSeen(watches));
-      applyAutoClearFinishedWatches();
+      applyAutoDoneFinishedWatches();
     },
 
-    clearAll() {
-      setWatches([]);
+    markAllDone(state) {
+      const ids = watches
+        .filter((watch) => state !== "done" && getWatchTriageState(watch) === state)
+        .map((watch) => watch.id);
+      const next = setWatchesTriageState(watches, ids, "done", getNow());
+
+      if (next !== watches) {
+        setWatches(next);
+      }
     },
 
-    clearFinished() {
-      setWatches(watches.filter((watch) => watch.active));
+    markFinishedDone(state) {
+      const ids = watches
+        .filter(
+          (watch) =>
+            state !== "done" && getWatchTriageState(watch) === state && !watch.active,
+        )
+        .map((watch) => watch.id);
+      const next = setWatchesTriageState(watches, ids, "done", getNow());
+
+      if (next !== watches) {
+        setWatches(next);
+      }
+    },
+
+    clearDone(ids) {
+      const idSet = new Set(ids);
+      const doneIds = watches
+        .filter(
+          (watch) => idSet.has(watch.id) && getWatchTriageState(watch) === "done",
+        )
+        .map((watch) => watch.id);
+      const next = clearDoneWatches(watches, doneIds);
+
+      if (next !== watches) {
+        setSuppressions(addWatchSuppressions(suppressions, doneIds, getNow()));
+        setWatches(next);
+      }
     },
 
     async refreshRepositoryIcons() {
@@ -294,7 +423,9 @@ export function createWatchController(
     },
 
     async refreshWatchMetadata() {
-      const watchesMissingMetadata = watches.filter((watch) => !watch.target.prNumber);
+      const watchesMissingMetadata = watches.filter(
+        (watch) => getWatchTriageState(watch) !== "done" && !watch.target.prNumber,
+      );
 
       for (const watch of watchesMissingMetadata) {
         try {
@@ -356,11 +487,18 @@ export function createWatchController(
       }
 
       await deps.rerunFailed(watch.target);
-      updateWatch(id, (current) => ({
-        ...current,
-        active: true,
-        error: undefined,
-      }));
+      const reactivated = setWatchesTriageState(watches, [id], "inbox", getNow());
+      setWatches(
+        reactivated.map((current) =>
+          current.id === id
+            ? {
+                ...current,
+                active: true,
+                error: undefined,
+              }
+            : current,
+        ),
+      );
     },
 
     setOptions(nextOptions) {
@@ -368,14 +506,20 @@ export function createWatchController(
     },
 
     async syncWorkflowSubscriptions(favoriteRepos) {
+      pruneExpiredSuppressions();
+
       for (const favorite of favoriteRepos) {
         await syncFavoriteWorkflowSubscriptions(favorite);
       }
     },
 
     async pollNow() {
-      const activeWatches = watches.filter((watch) => watch.active);
-      const notificationTime = deps.now?.() ?? new Date();
+      const notificationTime = getNow();
+      pruneExpiredSuppressions(notificationTime);
+      pruneExpiredDoneWatches(notificationTime);
+      const activeWatches = watches.filter(
+        (watch) => watch.active && getWatchTriageState(watch) !== "done",
+      );
       const rowNotifications: WatchNotification[] = [];
 
       for (const watch of activeWatches) {
@@ -418,7 +562,7 @@ export function createWatchController(
       }
 
       if (deps.notificationsPaused?.()) {
-        applyAutoClearFinishedWatches();
+        applyAutoDoneFinishedWatches();
         return;
       }
 
@@ -426,7 +570,7 @@ export function createWatchController(
         await deps.notify(notification);
       }
 
-      applyAutoClearFinishedWatches();
+      applyAutoDoneFinishedWatches();
     },
 
     getWatches() {

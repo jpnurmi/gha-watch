@@ -79,6 +79,46 @@ input {
   min-width: 0;
 }
 
+.watch-view-switcher {
+  position: absolute;
+  left: 50%;
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid rgb(139 148 158 / 28%);
+  border-radius: 6px;
+  background: rgb(0 0 0 / 14%);
+  transform: translateX(-50%);
+}
+
+.watch-view-button {
+  min-width: 48px;
+  height: 24px;
+  border: 0;
+  border-left: 1px solid rgb(139 148 158 / 24%);
+  padding: 0 8px;
+  background: transparent;
+  color: rgb(238 241 245 / 52%);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.watch-view-button:first-child {
+  border-left: 0;
+}
+
+.watch-view-button:hover,
+.watch-view-button:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  color: rgb(238 241 245 / 84%);
+}
+
+.watch-view-button.is-active {
+  background: rgb(88 166 255 / 16%);
+  color: #79c0ff;
+}
+
 .header h1 {
   max-width: 100%;
   overflow: hidden;
@@ -91,13 +131,8 @@ input {
   white-space: nowrap;
 }
 
-.header-title.is-warning {
+.header-title {
   color: #f0c36a;
-}
-
-.header-title.is-success,
-.header-title.is-pending {
-  color: #aeb6c1;
 }
 
 .header p {
@@ -368,7 +403,7 @@ input {
   --tree-leading-width: 22px;
   --tree-column-gap: 4px;
   --tree-actions-width: 63px;
-  --repo-actions-width: 96px;
+  --repo-actions-width: 120px;
   --scrollbar-gutter-width: 14px;
 
   display: flex;
@@ -460,7 +495,7 @@ input {
 .watch-group-subscribe-button,
 .watch-group-workflow-button,
 .watch-group-pr-button,
-.watch-group-remove-button {
+.watch-group-triage-button {
   display: inline-grid;
   width: 18px;
   height: 18px;
@@ -476,7 +511,7 @@ input {
 .watch-group-subscribe-button,
 .watch-group-workflow-button,
 .watch-group-pr-button,
-.watch-group-remove-button {
+.watch-group-triage-button {
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
@@ -485,11 +520,11 @@ input {
 .watch-group-header:hover .watch-group-subscribe-button,
 .watch-group-header:hover .watch-group-workflow-button,
 .watch-group-header:hover .watch-group-pr-button,
-.watch-group-header:hover .watch-group-remove-button,
+.watch-group-header:hover .watch-group-triage-button,
 .watch-group-header:focus-within .watch-group-subscribe-button,
 .watch-group-header:focus-within .watch-group-workflow-button,
 .watch-group-header:focus-within .watch-group-pr-button,
-.watch-group-header:focus-within .watch-group-remove-button,
+.watch-group-header:focus-within .watch-group-triage-button,
 .watch-group-subscribe-button[aria-expanded="true"],
 .watch-group-workflow-button[aria-expanded="true"],
 .watch-group-pr-button[aria-expanded="true"] {
@@ -508,20 +543,10 @@ input {
 .watch-group-star:hover,
 .watch-group-subscribe-button:hover,
 .watch-group-workflow-button:hover,
-.watch-group-pr-button:hover {
+.watch-group-pr-button:hover,
+.watch-group-triage-button:hover {
   background: rgb(255 255 255 / 7%);
   color: rgb(238 241 245 / 78%);
-}
-
-.watch-group-remove-button:hover,
-.watch-group-remove-button:focus-visible {
-  background: rgb(248 81 73 / 12%);
-  color: #ff7b72;
-  opacity: 1;
-}
-
-.watch-group-confirm-button {
-  min-width: 56px;
 }
 
 .watch-group-star.is-favorite {
@@ -575,7 +600,8 @@ input {
 
 .watch-group-subscribe-button svg,
 .watch-group-workflow-button svg,
-.watch-group-pr-button svg {
+.watch-group-pr-button svg,
+.watch-group-triage-button svg {
   width: 12px;
   height: 12px;
   display: block;
@@ -1016,7 +1042,7 @@ button.repo-ci-status:focus-visible {
   border-radius: 5px;
   padding: 0;
   background: transparent;
-  color: #ff7b72;
+  color: rgb(238 241 245 / 60%);
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
@@ -1034,8 +1060,7 @@ button.repo-ci-status:focus-visible {
 
 .watch-tree-action-button:hover,
 .watch-tree-action-button:focus-visible {
-  background: rgb(248 81 73 / 12%);
-  color: #ff7b72;
+  background: rgb(255 255 255 / 7%);
   opacity: 1;
 }
 
@@ -1043,11 +1068,6 @@ button.repo-ci-status:focus-visible {
   width: 12px;
   height: 12px;
   display: block;
-}
-
-.watch-tree-confirm-button {
-  min-width: 56px;
-  height: 20px;
 }
 
 .watch {
@@ -1435,17 +1455,14 @@ button.repo-ci-status:focus-visible {
   opacity: 0.6;
 }
 
-.watch .watch-action-button.rerun-button,
-.watch .watch-action-button.remove-button {
+.watch .watch-action-button {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
 }
 
-.watch:hover .watch-action-button.rerun-button,
-.watch:focus-within .watch-action-button.rerun-button,
-.watch:hover .watch-action-button.remove-button,
-.watch:focus-within .watch-action-button.remove-button {
+.watch:hover .watch-action-button,
+.watch:focus-within .watch-action-button {
   visibility: visible;
   opacity: 0.6;
   pointer-events: auto;
@@ -1465,14 +1482,24 @@ button.repo-ci-status:focus-visible {
   color: #d29922;
 }
 
-.remove-button {
+.watch-triage-button {
+  color: rgb(238 241 245 / 60%);
+}
+
+.watch-clear-done-button {
   color: #ff7b72;
 }
 
-.watch-action-button.remove-button:hover,
-.watch-action-button.remove-button:focus-visible {
+.watch-clear-done-button:hover,
+.watch-clear-done-button:focus-visible {
   background: rgb(248 81 73 / 12%);
   color: #ff7b72;
+}
+
+.watch-triage-button:hover,
+.watch-triage-button:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  opacity: 1;
 }
 
 .confirm-button {
@@ -1499,20 +1526,6 @@ button.repo-ci-status:focus-visible {
   color: #f0c674;
 }
 
-.confirm-button-remove {
-  background: rgb(248 81 73 / 15%);
-  color: #ff7b72;
-}
-
-.confirm-button-remove:hover {
-  background: rgb(248 81 73 / 24%);
-  color: #ffa198;
-}
-
-.remove-icon {
-  line-height: 1;
-}
-
 .unseen-dot {
   position: absolute;
   width: 7px;
@@ -1535,6 +1548,12 @@ button.repo-ci-status:focus-visible {
   display: grid;
   max-width: 320px;
   justify-items: center;
+  gap: 12px;
+}
+
+.empty-label {
+  color: rgb(238 241 245 / 52%);
+  font-size: 13px;
 }
 
 .empty-action {

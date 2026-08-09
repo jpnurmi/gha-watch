@@ -2,6 +2,8 @@ import type { PrWatchTarget, RunWatchTarget, WatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
 
 export type PrSourceState = "draft" | "ready" | "merged" | "closed";
+export type WatchTriageState = "inbox" | "saved" | "done";
+export const watchRetentionMonths = 5;
 
 export type WatchTiming = {
   queuedAt?: string;
@@ -32,6 +34,8 @@ export type WatchRecord = {
   lastSeenStatus?: string;
   lastState: WatchState | undefined;
   timing?: WatchTiming;
+  triageState?: WatchTriageState;
+  doneAt?: string;
   active: boolean;
   error: string | undefined;
 };
@@ -99,8 +103,96 @@ export function addWatch(
   ];
 }
 
-export function removeWatch(watches: WatchRecord[], id: string): WatchRecord[] {
-  return watches.filter((watch) => watch.id !== id);
+export function getWatchTriageState(
+  watch: Pick<WatchRecord, "triageState">,
+): WatchTriageState {
+  return watch.triageState ?? "inbox";
+}
+
+export function setWatchesTriageState(
+  watches: WatchRecord[],
+  ids: string[],
+  triageState: WatchTriageState,
+  changedAt = new Date(),
+): WatchRecord[] {
+  const idSet = new Set(ids);
+  let changed = false;
+
+  const nextWatches = watches.map((watch) => {
+    if (!idSet.has(watch.id) || getWatchTriageState(watch) === triageState) {
+      return watch;
+    }
+
+    changed = true;
+    const nextWatch: WatchRecord = {
+      ...watch,
+      triageState,
+      ...(triageState === "done"
+        ? {
+            doneAt: changedAt.toISOString(),
+            lastSeenStatus: watch.status,
+          }
+        : {}),
+    };
+
+    if (triageState !== "done") {
+      delete nextWatch.doneAt;
+    }
+
+    return nextWatch;
+  });
+
+  return changed ? nextWatches : watches;
+}
+
+export function normalizeWatchDoneAt(watch: WatchRecord, now = new Date()): WatchRecord {
+  if (getWatchTriageState(watch) === "done") {
+    return watch.doneAt ? watch : { ...watch, doneAt: now.toISOString() };
+  }
+
+  if (!watch.doneAt) {
+    return watch;
+  }
+
+  const nextWatch = { ...watch };
+  delete nextWatch.doneAt;
+  return nextWatch;
+}
+
+export function clearDoneWatches(watches: WatchRecord[], ids: string[]): WatchRecord[] {
+  const idSet = new Set(ids);
+  const nextWatches = watches.filter(
+    (watch) => !idSet.has(watch.id) || getWatchTriageState(watch) !== "done",
+  );
+  return nextWatches.length === watches.length ? watches : nextWatches;
+}
+
+export function clearExpiredDoneWatches(
+  watches: WatchRecord[],
+  now = new Date(),
+): WatchRecord[] {
+  const nowMs = now.getTime();
+  const nextWatches = watches.filter((watch) => {
+    if (getWatchTriageState(watch) !== "done" || !watch.doneAt) {
+      return true;
+    }
+
+    return !isWatchRetentionExpired(watch.doneAt, nowMs);
+  });
+
+  return nextWatches.length === watches.length ? watches : nextWatches;
+}
+
+export function isWatchRetentionExpired(timestamp: string, now: Date | number): boolean {
+  const expiresAt = new Date(timestamp);
+
+  if (Number.isNaN(expiresAt.getTime())) {
+    return false;
+  }
+
+  expiresAt.setUTCMonth(expiresAt.getUTCMonth() + watchRetentionMonths);
+  const nowMs = typeof now === "number" ? now : now.getTime();
+  return expiresAt.getTime() <= nowMs;
 }
 
 export function moveWatchWithinRepo(

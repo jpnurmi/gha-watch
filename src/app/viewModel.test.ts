@@ -35,10 +35,9 @@ describe("createPopupViewModel", () => {
 
     expect(model.title).toBe("Some checks haven't completed yet");
     expect(model.subtitle).toBe("1 in progress, 1 successful, and 1 queued checks");
-    expect(model.headerTone).toBe("warning");
   });
 
-  it("uses a muted header tone when every check passed", () => {
+  it("summarizes when every check passed", () => {
     const model = createPopupViewModel([
       watch({
         status: "completed:success",
@@ -48,7 +47,6 @@ describe("createPopupViewModel", () => {
     ]);
 
     expect(model.title).toBe("All checks have passed");
-    expect(model.headerTone).toBe("success");
   });
 
   it("groups rows by repository in first-seen order", () => {
@@ -505,21 +503,14 @@ describe("createPopupViewModel", () => {
     expect(model.rows[0].canRerun).toBe(true);
   });
 
-  it("marks PR-sourced rows as normal removable rows", () => {
+  it("exposes the triage state for every row", () => {
     const model = createPopupViewModel([
       watch({
-        source: {
-          kind: "pr",
-          owner: "getsentry",
-          repo: "sentry",
-          prNumber: "51",
-          url: "https://github.com/getsentry/sentry/pull/51",
-        },
-        sourceState: "ready",
+        triageState: "saved",
       }),
     ]);
 
-    expect(model.rows[0].removeMode).toBe("remove");
+    expect(model.rows[0].triageState).toBe("saved");
   });
 
   it("presents cancelled checks distinctly from failed checks", () => {
