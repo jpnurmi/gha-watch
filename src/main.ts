@@ -3,6 +3,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
+import { getFreshnessState } from "./app/freshness";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
@@ -98,6 +99,7 @@ import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
 const pollIntervalMs = 30_000;
+const freshnessStaleAfterMs = pollIntervalMs * 2;
 const treeIndentStepPx = 26;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
 document.documentElement.dataset.platform = getUiPlatform(navigator.userAgent);
@@ -148,6 +150,8 @@ let suppressedTreeToggleUntilMs = 0;
 let suppressedWatchOpenId: string | undefined;
 let suppressedWatchOpenUntilMs = 0;
 let rateLimit: RateLimit | undefined;
+let lastSuccessfulRefreshAt: Date | undefined;
+let lastRefreshFailed = false;
 let settings = loadSettings();
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
@@ -276,7 +280,6 @@ controller.subscribe(() => {
 
 render();
 void updateTrayIndicator();
-void updateRateLimit();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void controller.refreshWatchMetadata();
@@ -350,7 +353,9 @@ window.addEventListener("keydown", (event) => {
 void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   isPopupOpen = focused;
 
-  if (!focused) {
+  if (focused) {
+    render();
+  } else {
     void acknowledgePopupDismissal();
   }
 });
@@ -381,7 +386,7 @@ function getRateLimitTone(remaining: number): "critical" | "low" | "normal" {
 
 function renderRateLimitIndicator(): string {
   if (!rateLimit) {
-    return `<span class="rate-limit-indicator"></span>`;
+    return "";
   }
 
   const remaining = rateLimit.remaining;
@@ -394,6 +399,25 @@ function renderRateLimitIndicator(): string {
 
   return `<span class="rate-limit-indicator is-${tone}" title="GitHub API rate limit">
     ${String(rateLimit.used)} / ${String(rateLimit.limit)} &middot; ${resetFormatted}
+  </span>`;
+}
+
+function renderFreshnessIndicator(): string {
+  const freshness = getFreshnessState({
+    isRefreshing: isPolling,
+    lastRefreshFailed,
+    lastUpdatedAt: lastSuccessfulRefreshAt?.getTime(),
+    now: Date.now(),
+    staleAfterMs: freshnessStaleAfterMs,
+  });
+  const refreshTitle = lastSuccessfulRefreshAt
+    ? `Last updated at ${lastSuccessfulRefreshAt.toLocaleTimeString()}${lastRefreshFailed ? ". Latest refresh failed." : ""}`
+    : lastRefreshFailed
+      ? "No successful update. Latest refresh failed."
+      : "Waiting for the first update.";
+
+  return `<span class="freshness-indicator${freshness.stale ? " is-stale" : ""}" title="${escapeHtml(refreshTitle)}">
+    ${freshness.label}
   </span>`;
 }
 
@@ -415,8 +439,24 @@ function render(): void {
     <section class="shell">
       <header class="header">
         <div class="header-row">
-          <div>
+          <div class="header-brand">
             <h1 class="header-title">GHA Watch</h1>
+            <div class="header-freshness">
+              <button
+                class="icon-button refresh-button"
+                type="button"
+                data-action="refresh"
+                title="${isPolling ? "Refreshing" : "Refresh"}"
+                aria-label="Refresh status"
+                aria-busy="${isPolling ? "true" : "false"}"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M13.25 5.75A5.5 5.5 0 1 0 13.4 10" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.6"/>
+                  <path d="m10.6 3.45 2.65 2.3 2.1-2.8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
+                </svg>
+              </button>
+              ${renderFreshnessIndicator()}
+            </div>
           </div>
           ${renderWatchViewSwitcher()}
           <div class="header-actions">
@@ -1568,6 +1608,13 @@ function bindEvents(): void {
     "click",
     () => {
       void toggleAutoStart();
+    },
+  );
+
+  app.querySelector<HTMLButtonElement>('[data-action="refresh"]')?.addEventListener(
+    "click",
+    () => {
+      void poll();
     },
   );
 
@@ -2983,29 +3030,36 @@ async function updateRateLimit(): Promise<void> {
 }
 
 async function poll(): Promise<void> {
-  if (isDemoMode) {
-    await refreshListedRepositoryCiStatuses(true);
-    return;
-  }
-
   if (isPolling) {
     return;
   }
 
   isPolling = true;
+  render();
 
   try {
-    try {
-      await controller.syncWorkflowSubscriptions(settings.favoriteRepos);
-    } catch (error) {
-      console.warn("Could not sync workflow subscriptions.", error);
+    if (isDemoMode) {
+      await refreshListedRepositoryCiStatuses(true);
+    } else {
+      try {
+        await controller.syncWorkflowSubscriptions(settings.favoriteRepos);
+      } catch (error) {
+        console.warn("Could not sync workflow subscriptions.", error);
+      }
+
+      await controller.pollNow();
+      await refreshListedRepositoryCiStatuses(true);
+      await updateRateLimit();
     }
 
-    await controller.pollNow();
-    await refreshListedRepositoryCiStatuses(true);
-    await updateRateLimit();
+    lastSuccessfulRefreshAt = new Date();
+    lastRefreshFailed = false;
+  } catch (error) {
+    lastRefreshFailed = true;
+    console.warn("Could not refresh GitHub status.", error);
   } finally {
     isPolling = false;
+    render();
   }
 }
 
