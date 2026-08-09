@@ -3,6 +3,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
+import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
 import { shouldRefreshRepoCiStatus } from "./app/repoCiRefresh";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
@@ -125,6 +126,9 @@ const app = appRoot;
 const isDemoMode =
   window.location.hostname === "127.0.0.1" &&
   new URLSearchParams(window.location.search).get("demo") === "checks";
+const getAuthenticatedUserLogin = createAuthenticatedUserLoginProvider(
+  isDemoMode ? async () => "jpnurmi" : fetchAuthenticatedUserLogin,
+);
 let isAdding = false;
 let addError: string | undefined;
 let isPolling = false;
@@ -259,7 +263,7 @@ const controller = createWatchController(
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     fetchUserActiveWorkflowRuns: isDemoMode
       ? fetchDemoUserActiveWorkflowRuns
-      : async (target) => fetchUserActiveWorkflowRuns(target, await fetchAuthenticatedUserLogin()),
+      : async (target) => fetchUserActiveWorkflowRuns(target, await getAuthenticatedUserLogin()),
     fetchWorkflowDefinitions: isDemoMode ? fetchDemoWorkflowDefinitions : fetchWorkflowDefinitions,
     notificationsPaused: () => isPopupOpen,
     notify: notifyStatusChange,
@@ -2775,7 +2779,7 @@ async function toggleWorkflowSubscriptions(repo: Pick<FavoriteRepo, "owner" | "r
     const [workflows, defaultBranch, userLogin] = await Promise.all([
       controller.listWorkflowDefinitions(repo),
       getCachedRepositoryDefaultBranch(repo),
-      isDemoMode ? Promise.resolve("jpnurmi") : fetchAuthenticatedUserLogin(),
+      getAuthenticatedUserLogin(),
     ]);
 
     if (workflowSubscriptionMenu?.repoKey === repoKey) {
@@ -3024,7 +3028,7 @@ async function parseWatchInput(input: string): Promise<ParsedGitHubTarget> {
     return parseGitHubActionsUrl(input);
   }
 
-  return parseGitHubActionsUrl(input, { defaultOwner: await fetchAuthenticatedUserLogin() });
+  return parseGitHubActionsUrl(input, { defaultOwner: await getAuthenticatedUserLogin() });
 }
 
 async function updateRateLimit(): Promise<void> {
