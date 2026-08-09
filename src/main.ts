@@ -4,6 +4,7 @@ import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
 import { getFreshnessState } from "./app/freshness";
+import { shouldRefreshRepoCiStatus } from "./app/repoCiRefresh";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
@@ -155,6 +156,9 @@ let lastRefreshFailed = false;
 let settings = loadSettings();
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
+const repoCiStatusUpdatedAt = new Map<string, number>();
+const repoDefaultBranches = new Map<string, string>();
+const repoDefaultBranchRefreshes = new Map<string, Promise<string>>();
 
 type RepoDragState = {
   sourceKey: string;
@@ -251,7 +255,7 @@ const controller = createWatchController(
     fetchPullRequestDetails: isDemoMode
       ? async () => ({ state: "ready", title: "Demo pull request" })
       : fetchPullRequestDetails,
-    fetchRepositoryDefaultBranch: isDemoMode ? async () => "main" : fetchRepositoryDefaultBranch,
+    fetchRepositoryDefaultBranch: getCachedRepositoryDefaultBranch,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     fetchUserActiveWorkflowRuns: isDemoMode
       ? fetchDemoUserActiveWorkflowRuns
@@ -356,6 +360,7 @@ void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
 
   if (focused) {
     render();
+    void refreshListedRepositoryCiStatuses();
   } else {
     void acknowledgePopupDismissal();
   }
@@ -1616,7 +1621,7 @@ function bindEvents(): void {
   app.querySelector<HTMLButtonElement>('[data-action="refresh"]')?.addEventListener(
     "click",
     () => {
-      void poll();
+      void poll(true);
     },
   );
 
@@ -2769,7 +2774,7 @@ async function toggleWorkflowSubscriptions(repo: Pick<FavoriteRepo, "owner" | "r
   try {
     const [workflows, defaultBranch, userLogin] = await Promise.all([
       controller.listWorkflowDefinitions(repo),
-      isDemoMode ? Promise.resolve("main") : fetchRepositoryDefaultBranch(repo),
+      getCachedRepositoryDefaultBranch(repo),
       isDemoMode ? Promise.resolve("jpnurmi") : fetchAuthenticatedUserLogin(),
     ]);
 
@@ -3031,7 +3036,7 @@ async function updateRateLimit(): Promise<void> {
   }
 }
 
-async function poll(): Promise<void> {
+async function poll(forceVisibleData = false): Promise<void> {
   if (isPolling) {
     return;
   }
@@ -3041,7 +3046,7 @@ async function poll(): Promise<void> {
 
   try {
     if (isDemoMode) {
-      await refreshListedRepositoryCiStatuses(true);
+      await refreshListedRepositoryCiStatuses(forceVisibleData);
     } else {
       try {
         await controller.syncWorkflowSubscriptions(settings.favoriteRepos);
@@ -3050,7 +3055,7 @@ async function poll(): Promise<void> {
       }
 
       await controller.pollNow();
-      await refreshListedRepositoryCiStatuses(true);
+      await refreshListedRepositoryCiStatuses(forceVisibleData);
       await updateRateLimit();
     }
 
@@ -3077,13 +3082,33 @@ async function refreshListedRepositoryCiStatuses(force = false): Promise<void> {
     render();
   }
 
+  for (const repoKey of repoCiStatusUpdatedAt.keys()) {
+    if (!listedKeys.has(repoKey)) {
+      repoCiStatusUpdatedAt.delete(repoKey);
+    }
+  }
+
+  for (const repoKey of repoDefaultBranches.keys()) {
+    if (!listedKeys.has(repoKey)) {
+      repoDefaultBranches.delete(repoKey);
+    }
+  }
+
   await Promise.all(repos.map((repo) => refreshRepositoryCiStatus(repo, force)));
 }
 
 async function refreshRepositoryCiStatus(repo: Pick<FavoriteRepo, "owner" | "repo">, force: boolean): Promise<void> {
   const repoKey = getFavoriteRepoKey(repo);
 
-  if (repoCiStatusRefreshes.has(repoKey) || (!force && repoCiStatuses[repoKey])) {
+  if (
+    repoCiStatusRefreshes.has(repoKey) ||
+    !shouldRefreshRepoCiStatus({
+      force,
+      lastUpdatedAt: repoCiStatusUpdatedAt.get(repoKey),
+      now: Date.now(),
+      popupOpen: isPopupOpen,
+    })
+  ) {
     return;
   }
 
@@ -3103,7 +3128,12 @@ async function refreshRepositoryCiStatus(repo: Pick<FavoriteRepo, "owner" | "rep
   }
 
   try {
-    const status = isDemoMode ? await fetchDemoRepositoryDefaultBranchCiStatus(repo) : await fetchRepositoryDefaultBranchCiStatus(repo);
+    const status = isDemoMode
+      ? await fetchDemoRepositoryDefaultBranchCiStatus(repo)
+      : await fetchRepositoryDefaultBranchCiStatus(
+          repo,
+          { defaultBranch: await getCachedRepositoryDefaultBranch(repo, force) },
+        );
 
     repoCiStatuses = {
       ...repoCiStatuses,
@@ -3120,8 +3150,41 @@ async function refreshRepositoryCiStatus(repo: Pick<FavoriteRepo, "owner" | "rep
       },
     };
   } finally {
+    repoCiStatusUpdatedAt.set(repoKey, Date.now());
     repoCiStatusRefreshes.delete(repoKey);
     render();
+  }
+}
+
+async function getCachedRepositoryDefaultBranch(
+  repo: Pick<FavoriteRepo, "owner" | "repo">,
+  force = false,
+): Promise<string> {
+  const repoKey = getFavoriteRepoKey(repo);
+  const cached = repoDefaultBranches.get(repoKey);
+
+  if (cached && !force) {
+    return cached;
+  }
+
+  const pending = repoDefaultBranchRefreshes.get(repoKey);
+
+  if (pending) {
+    return pending;
+  }
+
+  const refresh = (isDemoMode ? Promise.resolve("main") : fetchRepositoryDefaultBranch(repo)).then(
+    (defaultBranch) => {
+      repoDefaultBranches.set(repoKey, defaultBranch);
+      return defaultBranch;
+    },
+  );
+  repoDefaultBranchRefreshes.set(repoKey, refresh);
+
+  try {
+    return await refresh;
+  } finally {
+    repoDefaultBranchRefreshes.delete(repoKey);
   }
 }
 

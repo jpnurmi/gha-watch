@@ -534,15 +534,8 @@ describe("fetchRepositoryDefaultBranch", () => {
 });
 
 describe("fetchRepositoryDefaultBranchCiStatus", () => {
-  it("summarizes the latest default branch workflow run", async () => {
+  it("summarizes the latest known default branch workflow run in two requests", async () => {
     const { executor, calls } = createSequenceExecutor([
-      {
-        code: 0,
-        stdout: JSON.stringify({
-          default_branch: "main",
-        }),
-        stderr: "",
-      },
       {
         code: 0,
         stdout: JSON.stringify({
@@ -586,7 +579,13 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       },
     ]);
 
-    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toEqual({
+    await expect(
+      fetchRepositoryDefaultBranchCiStatus(
+        { owner: "getsentry", repo: "sentry" },
+        { defaultBranch: "main" },
+        executor,
+      ),
+    ).resolves.toEqual({
       tone: "success",
       label: "Passing",
       description: "main: 2 workflows passed",
@@ -615,10 +614,6 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
     });
 
     expect(calls).toEqual([
-      {
-        program: "gh",
-        args: ["api", "repos/getsentry/sentry"],
-      },
       {
         program: "gh",
         args: ["api", "repos/getsentry/sentry/commits/main"],
@@ -702,7 +697,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       },
     ]);
 
-    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toMatchObject({
+    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, {}, executor)).resolves.toMatchObject({
       tone: "success",
       label: "Passing",
       description: "main: 1 workflow passed",
@@ -756,7 +751,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       },
     ]);
 
-    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toMatchObject({
+    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, {}, executor)).resolves.toMatchObject({
       tone: "pending",
       label: "Pending",
       description: "main: 1 workflow pending",
@@ -810,7 +805,7 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       },
     ]);
 
-    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toMatchObject({
+    await expect(fetchRepositoryDefaultBranchCiStatus({ owner: "getsentry", repo: "sentry" }, {}, executor)).resolves.toMatchObject({
       tone: "failure",
       label: "Failing",
       description: "main: 1 workflow failing",

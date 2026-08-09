@@ -127,6 +127,10 @@ export type RepositoryCiStatus = {
   url?: string;
 };
 
+export type RepositoryCiStatusOptions = {
+  defaultBranch?: string;
+};
+
 export type RepositoryCiWorkflowStatus = {
   tone: RepositoryCiStatusTone;
   label: string;
@@ -253,10 +257,11 @@ export async function fetchRepositoryDefaultBranch(
 
 export async function fetchRepositoryDefaultBranchCiStatus(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  options: RepositoryCiStatusOptions = {},
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<RepositoryCiStatus> {
   try {
-    const defaultBranch = await fetchRepositoryDefaultBranch(target, executor);
+    const defaultBranch = options.defaultBranch ?? await fetchRepositoryDefaultBranch(target, executor);
     const commitResult = await executor.execute("gh", [
       "api",
       `repos/${target.owner}/${target.repo}/commits/${encodeURIComponent(defaultBranch)}`,
