@@ -3,6 +3,7 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
   fetchRepositoryIconUrl,
@@ -374,6 +375,46 @@ describe("fetchWatchState", () => {
         executor,
       ),
     ).rejects.toThrow("gh is not authenticated. Run `gh auth login` and try again.");
+  });
+});
+
+describe("fetchRateLimit", () => {
+  it("returns the most depleted API quota", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        resources: {
+          core: {
+            limit: 5000,
+            used: 500,
+            remaining: 4500,
+            reset: 1786273200,
+          },
+          graphql: {
+            limit: 5000,
+            used: 4950,
+            remaining: 50,
+            reset: 1786275000,
+          },
+        },
+      }),
+      stderr: "",
+    });
+
+    await expect(fetchRateLimit(executor)).resolves.toEqual({
+      resource: "GraphQL",
+      limit: 5000,
+      used: 4950,
+      remaining: 50,
+      reset: 1786275000,
+    });
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "/rate_limit"],
+      },
+    ]);
   });
 });
 

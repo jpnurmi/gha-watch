@@ -59,16 +59,23 @@ input {
 }
 
 .header {
+  position: relative;
   display: flex;
-  min-height: 92px;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid rgb(255 255 255 / 12%);
-  padding: 18px 20px;
+  flex-direction: column;
+  padding: 8px 0 16px;
 }
 
-.header > div:first-child {
+.header-row {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 20px;
+  position: relative;
+}
+
+.header-row > div:first-child {
   min-width: 0;
 }
 
@@ -98,6 +105,41 @@ input {
   color: rgb(238 241 245 / 68%);
   font-size: 13px;
   line-height: 1.35;
+}
+
+.rate-limit-indicator {
+  position: absolute;
+  right: 0;
+  bottom: -12px;
+  padding-right: 4px;
+  font-size: 10px;
+  line-height: 1;
+  color: rgb(238 241 245 / 20%);
+  white-space: nowrap;
+}
+
+.rate-limit-indicator.is-low {
+  color: #d29922;
+}
+
+.rate-limit-indicator.is-critical {
+  color: #f85149;
+}
+
+.rate-limit-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  height: 2px;
+  background: linear-gradient(to right, #3fb950, #d29922, #f85149);
+}
+
+.rate-limit-bar-cover {
+  height: 100%;
+  background: #161b22;
+  margin-left: auto;
 }
 
 .header-actions {

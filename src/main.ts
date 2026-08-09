@@ -71,6 +71,7 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
   fetchRepositoryIconUrl,
@@ -79,6 +80,7 @@ import {
   fetchWorkflowDefinitions,
   type ActiveWorkflowRun,
   type OpenPullRequest,
+  type RateLimit,
   type RepositoryCiStatus,
   type WorkflowDefinition,
   rerunFailedWatch,
@@ -140,6 +142,7 @@ let suppressedTreeToggleKey: string | undefined;
 let suppressedTreeToggleUntilMs = 0;
 let suppressedWatchOpenId: string | undefined;
 let suppressedWatchOpenUntilMs = 0;
+let rateLimit: RateLimit | undefined;
 let settings = loadSettings();
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
@@ -273,6 +276,7 @@ controller.subscribe(() => {
 
 render();
 void updateTrayIndicator();
+void updateRateLimit();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void controller.refreshWatchMetadata();
@@ -353,6 +357,48 @@ void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   }
 });
 
+function renderRateLimitBar(): string {
+  const usedPct = rateLimit ? Math.round((rateLimit.used / rateLimit.limit) * 100) : 0;
+  const remainingPct = 100 - usedPct;
+  const title = rateLimit
+    ? `GitHub API: ${String(rateLimit.remaining)} of ${String(rateLimit.limit)} remaining`
+    : "";
+
+  return `<div class="rate-limit-bar" title="${title}">
+    <div class="rate-limit-bar-cover" style="width:${remainingPct}%"></div>
+  </div>`;
+}
+
+function getRateLimitTone(remaining: number): "critical" | "low" | "normal" {
+  if (remaining < 100) {
+    return "critical";
+  }
+
+  if (remaining < 1000) {
+    return "low";
+  }
+
+  return "normal";
+}
+
+function renderRateLimitIndicator(): string {
+  if (!rateLimit) {
+    return `<span class="rate-limit-indicator"></span>`;
+  }
+
+  const remaining = rateLimit.remaining;
+  const tone = getRateLimitTone(remaining);
+  const resetTime = new Date(rateLimit.reset * 1000);
+  const resetFormatted = resetTime.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return `<span class="rate-limit-indicator is-${tone}" title="GitHub API rate limit">
+    ${String(rateLimit.used)} / ${String(rateLimit.limit)} &middot; ${resetFormatted}
+  </span>`;
+}
+
 function render(): void {
   const watches = controller.getWatches();
   const viewModel = createPopupViewModel(watches, new Date(), settings.favoriteRepos, settings.repoOrder, repoCiStatuses);
@@ -362,39 +408,42 @@ function render(): void {
   replacePopupHtmlPreservingScroll(app, `
     <section class="shell">
       <header class="header">
-        <div>
-          <h1 class="header-title is-${viewModel.headerTone}">${escapeHtml(viewModel.title)}</h1>
-          <p>${escapeHtml(viewModel.subtitle)}</p>
-        </div>
-        <div class="header-actions">
-          <button class="icon-button" type="button" data-action="toggle-add" title="Add" aria-label="Add repository or watch">
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 3.25v9.5M3.25 8h9.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
-            </svg>
-          </button>
-          <div class="clear-menu">
-            <button
-              class="icon-button menu-button"
-              type="button"
-              data-action="toggle-clear-menu"
-              title="More"
-              aria-label="More options"
-              aria-haspopup="menu"
-              aria-expanded="${isClearMenuOpen ? "true" : "false"}"
-            >
+        <div class="header-row">
+          <div>
+            <h1 class="header-title is-${viewModel.headerTone}">GHA Watch</h1>
+          </div>
+          <div class="header-actions">
+            <button class="icon-button" type="button" data-action="toggle-add" title="Add" aria-label="Add repository or watch">
               <svg viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="3.75" r="1.25" fill="currentColor"/>
-                <circle cx="8" cy="8" r="1.25" fill="currentColor"/>
-                <circle cx="8" cy="12.25" r="1.25" fill="currentColor"/>
+                <path d="M8 3.25v9.5M3.25 8h9.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
               </svg>
             </button>
-            ${
-              isClearMenuOpen
-                ? renderClearMenu(hasWatches, hasFinishedWatches)
-                : ""
-            }
+            <div class="clear-menu">
+              <button
+                class="icon-button menu-button"
+                type="button"
+                data-action="toggle-clear-menu"
+                title="More"
+                aria-label="More options"
+                aria-haspopup="menu"
+                aria-expanded="${isClearMenuOpen ? "true" : "false"}"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="8" cy="3.75" r="1.25" fill="currentColor"/>
+                  <circle cx="8" cy="8" r="1.25" fill="currentColor"/>
+                  <circle cx="8" cy="12.25" r="1.25" fill="currentColor"/>
+                </svg>
+              </button>
+              ${
+                isClearMenuOpen
+                  ? renderClearMenu(hasWatches, hasFinishedWatches)
+                  : ""
+              }
+            </div>
           </div>
+          ${renderRateLimitIndicator()}
         </div>
+        ${renderRateLimitBar()}
       </header>
 
       ${getPopupBodySections(isAdding)
@@ -2997,6 +3046,15 @@ async function parseWatchInput(input: string): Promise<ParsedGitHubTarget> {
   return parseGitHubActionsUrl(input, { defaultOwner: await fetchAuthenticatedUserLogin() });
 }
 
+async function updateRateLimit(): Promise<void> {
+  try {
+    rateLimit = await fetchRateLimit();
+    render();
+  } catch (error) {
+    console.warn("Could not fetch GitHub rate limit.", error);
+  }
+}
+
 async function poll(): Promise<void> {
   if (isDemoMode) {
     await refreshListedRepositoryCiStatuses(true);
@@ -3018,6 +3076,7 @@ async function poll(): Promise<void> {
 
     await controller.pollNow();
     await refreshListedRepositoryCiStatuses(true);
+    await updateRateLimit();
   } finally {
     isPolling = false;
   }

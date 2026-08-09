@@ -718,6 +718,47 @@ function getRunDatabaseId(value: number | string | undefined): string | undefine
   return undefined;
 }
 
+type RateLimitValues = {
+  limit: number;
+  used: number;
+  remaining: number;
+  reset: number;
+};
+
+export type RateLimit = RateLimitValues & {
+  resource: "REST" | "GraphQL";
+};
+
+type RateLimitResponse = {
+  resources: {
+    core: RateLimitValues;
+    graphql: RateLimitValues;
+  };
+};
+
+function getRemainingRateLimitRatio(rateLimit: RateLimitValues): number {
+  return rateLimit.limit > 0 ? rateLimit.remaining / rateLimit.limit : 0;
+}
+
+export async function fetchRateLimit(
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<RateLimit> {
+  try {
+    const result = await executor.execute("gh", ["api", "/rate_limit"]);
+
+    assertSuccessfulGhResult(result);
+    const response = parseJson<RateLimitResponse>(result.stdout);
+    const core: RateLimit = { resource: "REST", ...response.resources.core };
+    const graphql: RateLimit = { resource: "GraphQL", ...response.resources.graphql };
+
+    return getRemainingRateLimitRatio(graphql) < getRemainingRateLimitRatio(core)
+      ? graphql
+      : core;
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
 export async function rerunFailedWatch(
   target: CheckWatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
