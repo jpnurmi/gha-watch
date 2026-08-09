@@ -253,7 +253,7 @@ const controller = createWatchController(
     fetchActiveWorkflowRuns: isDemoMode ? fetchDemoActiveWorkflowRuns : fetchActiveWorkflowRuns,
     fetchOpenPullRequests: isDemoMode ? fetchDemoOpenPullRequests : fetchOpenPullRequests,
     fetchPullRequestDetails: isDemoMode
-      ? async () => ({ state: "ready", title: "Demo pull request" })
+      ? async (targets) => targets.map(() => ({ state: "ready" as const, title: "Demo pull request" }))
       : fetchPullRequestDetails,
     fetchRepositoryDefaultBranch: getCachedRepositoryDefaultBranch,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,

@@ -330,7 +330,7 @@ describe("watchController", () => {
     const controller = createWatchController({
       ...deps,
       async fetchPullRequestDetails() {
-        return { state: "ready", title: "Pull request #51" };
+        return [{ state: "ready", title: "Pull request #51" }];
       },
     });
 
@@ -391,9 +391,9 @@ describe("watchController", () => {
     const detailFetches: PrWatchTarget[] = [];
     const controller = createWatchController({
       ...deps,
-      async fetchPullRequestDetails(target) {
-        detailFetches.push(target);
-        return { state: "ready", title: "Fix epoch-sized check durations" };
+      async fetchPullRequestDetails(targets) {
+        detailFetches.push(...targets);
+        return targets.map(() => ({ state: "ready" as const, title: "Fix epoch-sized check durations" }));
       },
     });
 
@@ -433,7 +433,7 @@ describe("watchController", () => {
           throw new Error("No pull request details queued.");
         }
 
-        return detail;
+        return [detail];
       },
     });
 
@@ -484,9 +484,9 @@ describe("watchController", () => {
     const controller = createWatchController(
       {
         ...deps,
-        async fetchPullRequestDetails(target) {
-          detailFetches.push(target);
-          return { state: "closed", title: "Refine lifecycle icons" };
+        async fetchPullRequestDetails(targets) {
+          detailFetches.push(...targets);
+          return targets.map(() => ({ state: "closed" as const, title: "Refine lifecycle icons" }));
         },
       },
       [first, second, done],
@@ -519,8 +519,8 @@ describe("watchController", () => {
     const controller = createWatchController(
       {
         ...deps,
-        async fetchPullRequestDetails() {
-          return { state: "ready", title: "Refine lifecycle icons" };
+        async fetchPullRequestDetails(targets) {
+          return targets.map(() => ({ state: "ready" as const, title: "Refine lifecycle icons" }));
         },
       },
       [
@@ -1033,7 +1033,7 @@ describe("watchController", () => {
       {
         ...deps,
         async fetchPullRequestDetails() {
-          return { state: "merged", title: "Refine lifecycle icons" };
+          return [{ state: "merged", title: "Refine lifecycle icons" }];
         },
       },
       [{ ...existingWatch(), active: true }],

@@ -68,10 +68,18 @@ type PrCheckResponse = {
 };
 
 type PullRequestDetailsResponse = {
-  draft?: boolean;
-  merged_at?: string | null;
+  isDraft?: boolean;
   state?: string;
   title?: string;
+};
+
+type PullRequestDetailsQueryResponse = {
+  data?: Record<
+    string,
+    {
+      pullRequest?: PullRequestDetailsResponse | null;
+    } | null
+  >;
 };
 
 type RepositoryViewResponse = {
@@ -102,6 +110,8 @@ export type PullRequestDetails = {
   state: PrSourceState;
   title: string;
 };
+
+export type PullRequestDetailsBatch = Array<PullRequestDetails | undefined>;
 
 export type ActiveWorkflowRun = {
   runId: string;
@@ -336,22 +346,27 @@ export async function fetchOpenPullRequests(
 }
 
 export async function fetchPullRequestDetails(
-  target: PrWatchTarget,
+  targets: PrWatchTarget[],
   executor: ShellExecutor = createTauriShellExecutor(),
-): Promise<PullRequestDetails> {
+): Promise<PullRequestDetailsBatch> {
+  const batchSize = 50;
+  const details: PullRequestDetailsBatch = [];
+
   try {
-    const result = await executor.execute("gh", [
-      "api",
-      `repos/${target.owner}/${target.repo}/pulls/${target.prNumber}`,
-    ]);
+    for (let offset = 0; offset < targets.length; offset += batchSize) {
+      const batch = targets.slice(offset, offset + batchSize);
+      const query = createPullRequestDetailsQuery(batch);
+      const result = await executor.execute("gh", query.args);
 
-    assertSuccessfulGhResult(result);
-    const response = parseJson<PullRequestDetailsResponse>(result.stdout);
+      assertSuccessfulGhResult(result);
+      const response = parseJson<PullRequestDetailsQueryResponse>(result.stdout);
 
-    return {
-      state: getPullRequestState(response),
-      title: requiredString(response.title?.trim(), "pull request title"),
-    };
+      details.push(
+        ...batch.map((_, index) => normalizePullRequestDetails(response.data?.[`repository${index}`]?.pullRequest)),
+      );
+    }
+
+    return details;
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -1055,19 +1070,69 @@ function getPullRequestNumber(pullRequests: PullRequestReference[] | undefined):
   return undefined;
 }
 
+function createPullRequestDetailsQuery(targets: PrWatchTarget[]): { args: string[] } {
+  const variableDefinitions: string[] = [];
+  const selections: string[] = [];
+  const args = ["api", "graphql"];
+
+  targets.forEach((target, index) => {
+    if (!/^[1-9]\d*$/.test(target.prNumber)) {
+      throw new Error("Pull request details need a positive pull request number.");
+    }
+
+    variableDefinitions.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
+    selections.push(
+      `repository${index}: repository(owner: $owner${index}, name: $repo${index}) { ` +
+        `pullRequest(number: $number${index}) { title state isDraft } }`,
+    );
+  });
+
+  args.push("-f", `query=query(${variableDefinitions.join(", ")}) { ${selections.join(" ")} }`);
+
+  targets.forEach((target, index) => {
+    args.push(
+      "-f",
+      `owner${index}=${target.owner}`,
+      "-f",
+      `repo${index}=${target.repo}`,
+      "-F",
+      `number${index}=${target.prNumber}`,
+    );
+  });
+
+  return { args };
+}
+
+function normalizePullRequestDetails(
+  response: PullRequestDetailsResponse | null | undefined,
+): PullRequestDetails | undefined {
+  if (!response) {
+    return undefined;
+  }
+
+  try {
+    return {
+      state: getPullRequestState(response),
+      title: requiredString(response.title?.trim(), "pull request title"),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function getPullRequestState(response: PullRequestDetailsResponse): PrSourceState {
-  if (response.merged_at) {
+  const state = response.state?.trim().toUpperCase();
+
+  if (state === "MERGED") {
     return "merged";
   }
 
-  const state = response.state?.trim().toLowerCase();
-
-  if (state === "closed") {
+  if (state === "CLOSED") {
     return "closed";
   }
 
-  if (state === "open") {
-    return response.draft === true ? "draft" : "ready";
+  if (state === "OPEN") {
+    return response.isDraft === true ? "draft" : "ready";
   }
 
   throw new Error("gh returned a response without pull request state.");

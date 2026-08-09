@@ -43,7 +43,7 @@ export type WatchControllerDeps = {
   fetchState(target: WatchTarget): Promise<WatchSnapshot>;
   fetchActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   fetchOpenPullRequests?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
-  fetchPullRequestDetails?(target: PrWatchTarget): Promise<PullRequestDetails>;
+  fetchPullRequestDetails?(targets: PrWatchTarget[]): Promise<Array<PullRequestDetails | undefined>>;
   fetchRepositoryDefaultBranch?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<string>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   fetchUserActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
@@ -219,14 +219,24 @@ export function createWatchController(
 
     const uniqueTargets = new Map(targets.map((target) => [getPullRequestKey(target), target]));
     const detailsByKey = new Map<string, PullRequestDetails>();
+    const batch = [...uniqueTargets.values()];
 
-    for (const target of uniqueTargets.values()) {
-      try {
-        const details = await deps.fetchPullRequestDetails(target);
-        detailsByKey.set(getPullRequestKey(target), details);
-      } catch {
-        // Missing PR metadata should not interfere with check polling.
-      }
+    try {
+      const details = await deps.fetchPullRequestDetails(batch);
+
+      batch.forEach((target, index) => {
+        const result = details[index];
+
+        if (result) {
+          detailsByKey.set(getPullRequestKey(target), result);
+        }
+      });
+    } catch {
+      // Missing PR metadata should not interfere with check polling.
+    }
+
+    if (detailsByKey.size === 0) {
+      return;
     }
 
     const nextWatches = watches.map((watch) => {

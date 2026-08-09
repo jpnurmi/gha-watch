@@ -285,56 +285,87 @@ describe("fetchWatchState", () => {
     ]);
   });
 
-  it.each([
-    ["draft", { draft: true, merged_at: null, state: "open" }],
-    ["ready", { draft: false, merged_at: null, state: "open" }],
-    ["merged", { draft: false, merged_at: "2026-08-09T18:00:00Z", state: "closed" }],
-    ["closed", { draft: false, merged_at: null, state: "closed" }],
-  ] as const)("fetches %s pull request details", async (state, response) => {
+  it("fetches pull request lifecycle details in one batch", async () => {
     const { executor, calls } = createExecutor({
       code: 0,
-      stdout: JSON.stringify({ ...response, title: "Fix epoch-sized check durations" }),
+      stdout: JSON.stringify({
+        data: {
+          repository0: {
+            pullRequest: { isDraft: true, state: "OPEN", title: "Draft pull request" },
+          },
+          repository1: {
+            pullRequest: { isDraft: false, state: "OPEN", title: "Ready pull request" },
+          },
+          repository2: {
+            pullRequest: { isDraft: false, state: "MERGED", title: "Merged pull request" },
+          },
+          repository3: {
+            pullRequest: { isDraft: false, state: "CLOSED", title: "Closed pull request" },
+          },
+        },
+      }),
       stderr: "",
     });
-    const target = {
+    const targets = ["51", "52", "53", "54"].map((prNumber) => ({
       kind: "pr" as const,
       owner: "getsentry",
       repo: "sentry",
-      prNumber: "51",
-      url: "https://github.com/getsentry/sentry/pull/51",
-    };
+      prNumber,
+      url: `https://github.com/getsentry/sentry/pull/${prNumber}`,
+    }));
 
-    await expect(fetchPullRequestDetails(target, executor)).resolves.toEqual({
-      state,
-      title: "Fix epoch-sized check durations",
-    });
-    expect(calls).toEqual([
-      {
-        program: "gh",
-        args: ["api", "repos/getsentry/sentry/pulls/51"],
-      },
+    await expect(fetchPullRequestDetails(targets, executor)).resolves.toEqual([
+      { state: "draft", title: "Draft pull request" },
+      { state: "ready", title: "Ready pull request" },
+      { state: "merged", title: "Merged pull request" },
+      { state: "closed", title: "Closed pull request" },
     ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].program).toBe("gh");
+    expect(calls[0].args.slice(0, 4)).toEqual([
+      "api",
+      "graphql",
+      "-f",
+      expect.stringContaining("pullRequest(number: $number3)"),
+    ]);
+    expect(calls[0].args).toContain("number3=54");
   });
 
-  it("rejects pull request details without a lifecycle state", async () => {
+  it("keeps missing pull request details isolated within a batch", async () => {
     const { executor } = createExecutor({
       code: 0,
-      stdout: JSON.stringify({ title: "Fix epoch-sized check durations" }),
+      stdout: JSON.stringify({
+        data: {
+          repository0: { pullRequest: null },
+          repository1: {
+            pullRequest: { isDraft: false, state: "OPEN", title: "Ready pull request" },
+          },
+        },
+      }),
       stderr: "",
     });
 
     await expect(
       fetchPullRequestDetails(
-        {
-          kind: "pr",
-          owner: "getsentry",
-          repo: "sentry",
-          prNumber: "51",
-          url: "https://github.com/getsentry/sentry/pull/51",
-        },
+        [
+          {
+            kind: "pr",
+            owner: "getsentry",
+            repo: "sentry",
+            prNumber: "51",
+            url: "https://github.com/getsentry/sentry/pull/51",
+          },
+          {
+            kind: "pr",
+            owner: "getsentry",
+            repo: "sentry",
+            prNumber: "52",
+            url: "https://github.com/getsentry/sentry/pull/52",
+          },
+        ],
         executor,
       ),
-    ).rejects.toThrow("pull request state");
+    ).resolves.toEqual([undefined, { state: "ready", title: "Ready pull request" }]);
   });
 
   it("treats failed pull request checks as a parsed watch state", async () => {
