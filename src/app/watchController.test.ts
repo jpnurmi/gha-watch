@@ -327,7 +327,12 @@ describe("watchController", () => {
         url: prTarget.url,
       },
     ]);
-    const controller = createWatchController(deps);
+    const controller = createWatchController({
+      ...deps,
+      async fetchPullRequestDetails() {
+        return { state: "ready", title: "Pull request #51" };
+      },
+    });
 
     await controller.add(prTarget);
 
@@ -366,7 +371,7 @@ describe("watchController", () => {
     });
   });
 
-  it("fetches a PR title once and keeps it during check polling", async () => {
+  it("fetches PR details once and keeps them during check polling", async () => {
     const { deps } = createDeps([
       {
         status: "queued",
@@ -383,25 +388,157 @@ describe("watchController", () => {
         url: prTarget.url,
       },
     ]);
-    const titleFetches: PrWatchTarget[] = [];
+    const detailFetches: PrWatchTarget[] = [];
     const controller = createWatchController({
       ...deps,
-      async fetchPullRequestTitle(target) {
-        titleFetches.push(target);
-        return "Fix epoch-sized check durations";
+      async fetchPullRequestDetails(target) {
+        detailFetches.push(target);
+        return { state: "ready", title: "Fix epoch-sized check durations" };
       },
     });
 
     await controller.add(prTarget);
     await controller.pollNow();
 
-    expect(titleFetches).toEqual([prTarget]);
+    expect(detailFetches).toEqual([prTarget]);
     expect(controller.getWatches()[0]).toMatchObject({
       label: "Fix epoch-sized check durations",
+      sourceState: "ready",
       metadata: {
         prTitle: "Fix epoch-sized check durations",
       },
     });
+  });
+
+  it("tracks pull request lifecycle changes", async () => {
+    const { deps } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "Pull request #51",
+        prNumber: "51",
+        url: prTarget.url,
+      },
+    ]);
+    const details = [
+      { state: "draft" as const, title: "Refine lifecycle icons" },
+      { state: "merged" as const, title: "Refine lifecycle icons" },
+    ];
+    const controller = createWatchController({
+      ...deps,
+      async fetchPullRequestDetails() {
+        const detail = details.shift();
+
+        if (!detail) {
+          throw new Error("No pull request details queued.");
+        }
+
+        return detail;
+      },
+    });
+
+    await controller.add(prTarget);
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      label: "Refine lifecycle icons",
+      sourceState: "draft",
+    });
+
+    await controller.refreshWatchMetadata();
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      label: "Refine lifecycle icons",
+      sourceState: "merged",
+    });
+  });
+
+  it("refreshes pull request details once for associated watches", async () => {
+    const { deps } = createDeps([]);
+    const detailFetches: PrWatchTarget[] = [];
+    const first = {
+      ...existingWatch(),
+      target: {
+        ...runTarget,
+        prNumber: "51",
+      },
+    };
+    const second = {
+      ...existingWatch(),
+      id: "getsentry/sentry/job/456",
+      target: {
+        ...jobTarget,
+        prNumber: "51",
+      },
+    };
+    const done = {
+      ...existingWatch(),
+      id: "getsentry/sentry/run/789",
+      target: {
+        ...prRunTarget,
+      },
+      sourceState: "draft" as const,
+      metadata: { prTitle: "Archived title" },
+      triageState: "done" as const,
+      doneAt: "2026-08-01T12:00:00.000Z",
+    };
+    const controller = createWatchController(
+      {
+        ...deps,
+        async fetchPullRequestDetails(target) {
+          detailFetches.push(target);
+          return { state: "closed", title: "Refine lifecycle icons" };
+        },
+      },
+      [first, second, done],
+    );
+
+    await controller.refreshWatchMetadata();
+
+    expect(detailFetches).toEqual([prTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        source: prTarget,
+        sourceState: "closed",
+        metadata: { prTitle: "Refine lifecycle icons" },
+      },
+      {
+        source: prTarget,
+        sourceState: "closed",
+        metadata: { prTitle: "Refine lifecycle icons" },
+      },
+      {
+        sourceState: "draft",
+        metadata: { prTitle: "Archived title" },
+        triageState: "done",
+      },
+    ]);
+  });
+
+  it("does not save unchanged pull request details again", async () => {
+    const { deps, saves } = createDeps([]);
+    const controller = createWatchController(
+      {
+        ...deps,
+        async fetchPullRequestDetails() {
+          return { state: "ready", title: "Refine lifecycle icons" };
+        },
+      },
+      [
+        {
+          ...existingWatch(),
+          target: {
+            ...runTarget,
+            prNumber: "51",
+          },
+        },
+      ],
+    );
+
+    await controller.refreshWatchMetadata();
+    const saveCount = saves.length;
+    await controller.refreshWatchMetadata();
+
+    expect(saves).toHaveLength(saveCount);
   });
 
   it("reorders watches inside one repository without changing other repository slots", () => {

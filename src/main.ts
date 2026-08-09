@@ -70,7 +70,7 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
-  fetchPullRequestTitle,
+  fetchPullRequestDetails,
   fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
@@ -248,7 +248,9 @@ const controller = createWatchController(
       : fetchWatchState,
     fetchActiveWorkflowRuns: isDemoMode ? fetchDemoActiveWorkflowRuns : fetchActiveWorkflowRuns,
     fetchOpenPullRequests: isDemoMode ? fetchDemoOpenPullRequests : fetchOpenPullRequests,
-    fetchPullRequestTitle: isDemoMode ? async () => "Demo pull request" : fetchPullRequestTitle,
+    fetchPullRequestDetails: isDemoMode
+      ? async () => ({ state: "ready", title: "Demo pull request" })
+      : fetchPullRequestDetails,
     fetchRepositoryDefaultBranch: isDemoMode ? async () => "main" : fetchRepositoryDefaultBranch,
     fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
     fetchUserActiveWorkflowRuns: isDemoMode
@@ -282,7 +284,6 @@ render();
 void updateTrayIndicator();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
-void controller.refreshWatchMetadata();
 void refreshListedRepositoryCiStatuses();
 void listenForDesktopNotificationClicks((click) => {
   controller.markSeen(click.watchId);
@@ -1352,7 +1353,8 @@ function renderLeadingIcon(row: WatchRowViewModel): string {
   const markSeenOverlay = row.unseenStatusChange ? renderWatchSeenOverlay(row) : "";
 
   if (row.subject === "pull-request") {
-    return renderWatchLeadingSlot(getPrStateIconSvg(row.prState?.tone ?? "ready"), markSeenOverlay);
+    const prState = row.prState ?? { label: "Ready", tone: "ready" as const };
+    return renderWatchLeadingSlot(renderPrStateIcon(prState, "watch-leading-icon"), markSeenOverlay);
   }
 
   if (row.subject === "job") {
@@ -3047,6 +3049,7 @@ async function poll(): Promise<void> {
         console.warn("Could not sync workflow subscriptions.", error);
       }
 
+      await controller.refreshWatchMetadata();
       await controller.pollNow();
       await refreshListedRepositoryCiStatuses(true);
       await updateRateLimit();

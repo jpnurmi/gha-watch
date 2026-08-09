@@ -3,7 +3,7 @@ import {
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
-  fetchPullRequestTitle,
+  fetchPullRequestDetails,
   fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
@@ -285,10 +285,15 @@ describe("fetchWatchState", () => {
     ]);
   });
 
-  it("fetches the real pull request title", async () => {
+  it.each([
+    ["draft", { draft: true, merged_at: null, state: "open" }],
+    ["ready", { draft: false, merged_at: null, state: "open" }],
+    ["merged", { draft: false, merged_at: "2026-08-09T18:00:00Z", state: "closed" }],
+    ["closed", { draft: false, merged_at: null, state: "closed" }],
+  ] as const)("fetches %s pull request details", async (state, response) => {
     const { executor, calls } = createExecutor({
       code: 0,
-      stdout: JSON.stringify({ title: "Fix epoch-sized check durations" }),
+      stdout: JSON.stringify({ ...response, title: "Fix epoch-sized check durations" }),
       stderr: "",
     });
     const target = {
@@ -299,23 +304,37 @@ describe("fetchWatchState", () => {
       url: "https://github.com/getsentry/sentry/pull/51",
     };
 
-    await expect(fetchPullRequestTitle(target, executor)).resolves.toBe(
-      "Fix epoch-sized check durations",
-    );
+    await expect(fetchPullRequestDetails(target, executor)).resolves.toEqual({
+      state,
+      title: "Fix epoch-sized check durations",
+    });
     expect(calls).toEqual([
       {
         program: "gh",
-        args: [
-          "pr",
-          "view",
-          "51",
-          "-R",
-          "getsentry/sentry",
-          "--json",
-          "title",
-        ],
+        args: ["api", "repos/getsentry/sentry/pulls/51"],
       },
     ]);
+  });
+
+  it("rejects pull request details without a lifecycle state", async () => {
+    const { executor } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({ title: "Fix epoch-sized check durations" }),
+      stderr: "",
+    });
+
+    await expect(
+      fetchPullRequestDetails(
+        {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+        executor,
+      ),
+    ).rejects.toThrow("pull request state");
   });
 
   it("treats failed pull request checks as a parsed watch state", async () => {

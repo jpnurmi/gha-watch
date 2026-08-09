@@ -5,7 +5,7 @@ import type {
   WatchTarget,
 } from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
-import type { WatchMetadata, WatchTiming } from "../domain/watches";
+import type { PrSourceState, WatchMetadata, WatchTiming } from "../domain/watches";
 
 export type ShellResult = {
   code: number;
@@ -67,7 +67,10 @@ type PrCheckResponse = {
   startedAt?: string | null;
 };
 
-type PullRequestViewResponse = {
+type PullRequestDetailsResponse = {
+  draft?: boolean;
+  merged_at?: string | null;
+  state?: string;
   title?: string;
 };
 
@@ -93,6 +96,11 @@ export type OpenPullRequest = {
   headBranch?: string;
   updatedAt?: string;
   url: string;
+};
+
+export type PullRequestDetails = {
+  state: PrSourceState;
+  title: string;
 };
 
 export type ActiveWorkflowRun = {
@@ -322,26 +330,23 @@ export async function fetchOpenPullRequests(
   }
 }
 
-export async function fetchPullRequestTitle(
+export async function fetchPullRequestDetails(
   target: PrWatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
-): Promise<string> {
+): Promise<PullRequestDetails> {
   try {
     const result = await executor.execute("gh", [
-      "pr",
-      "view",
-      target.prNumber,
-      "-R",
-      `${target.owner}/${target.repo}`,
-      "--json",
-      "title",
+      "api",
+      `repos/${target.owner}/${target.repo}/pulls/${target.prNumber}`,
     ]);
 
     assertSuccessfulGhResult(result);
-    return requiredString(
-      parseJson<PullRequestViewResponse>(result.stdout).title,
-      "pull request title",
-    );
+    const response = parseJson<PullRequestDetailsResponse>(result.stdout);
+
+    return {
+      state: getPullRequestState(response),
+      title: requiredString(response.title?.trim(), "pull request title"),
+    };
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -1043,6 +1048,24 @@ function getPullRequestNumber(pullRequests: PullRequestReference[] | undefined):
   }
 
   return undefined;
+}
+
+function getPullRequestState(response: PullRequestDetailsResponse): PrSourceState {
+  if (response.merged_at) {
+    return "merged";
+  }
+
+  const state = response.state?.trim().toLowerCase();
+
+  if (state === "closed") {
+    return "closed";
+  }
+
+  if (state === "open") {
+    return response.draft === true ? "draft" : "ready";
+  }
+
+  throw new Error("gh returned a response without pull request state.");
 }
 
 function normalizeConclusion(conclusion: string | null | undefined): string | null {

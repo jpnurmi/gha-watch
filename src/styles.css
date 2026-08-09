@@ -1239,12 +1239,17 @@ button.repo-ci-status:focus-visible {
 }
 
 .status-icon svg,
-.pr-state-icon svg,
 .watch-subject-icon svg {
   width: 18px;
   height: 18px;
   display: block;
   transform-origin: center;
+}
+
+.pr-state-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .status-icon-pending,
@@ -1272,7 +1277,7 @@ button.repo-ci-status:focus-visible {
 }
 
 .pr-state-icon-draft {
-  color: #8b949e;
+  color: #9198a1;
 }
 
 .pr-state-icon-ready {
@@ -1280,7 +1285,7 @@ button.repo-ci-status:focus-visible {
 }
 
 .pr-state-icon-merged {
-  color: #a371f7;
+  color: #ab7df8;
 }
 
 .pr-state-icon-closed {

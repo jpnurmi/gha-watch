@@ -27,7 +27,12 @@ import {
   type WatchTriageState,
 } from "../domain/watches";
 import type { WatchSnapshot } from "../platform/gh";
-import type { ActiveWorkflowRun, OpenPullRequest, WorkflowDefinition } from "../platform/gh";
+import type {
+  ActiveWorkflowRun,
+  OpenPullRequest,
+  PullRequestDetails,
+  WorkflowDefinition,
+} from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
 export type WatchControllerOptions = {
@@ -38,7 +43,7 @@ export type WatchControllerDeps = {
   fetchState(target: WatchTarget): Promise<WatchSnapshot>;
   fetchActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   fetchOpenPullRequests?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
-  fetchPullRequestTitle?(target: PrWatchTarget): Promise<string>;
+  fetchPullRequestDetails?(target: PrWatchTarget): Promise<PullRequestDetails>;
   fetchRepositoryDefaultBranch?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<string>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   fetchUserActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
@@ -206,27 +211,49 @@ export function createWatchController(
     }
   }
 
-  async function refreshPullRequestTitle(id: string, target: PrWatchTarget): Promise<void> {
-    if (!deps.fetchPullRequestTitle) {
+  async function refreshPullRequestDetails(targets = getTrackedPullRequestTargets(watches)): Promise<void> {
+    if (!deps.fetchPullRequestDetails) {
       return;
     }
 
-    try {
-      const title = await deps.fetchPullRequestTitle(target);
+    const uniqueTargets = new Map(targets.map((target) => [getPullRequestKey(target), target]));
+    const detailsByKey = new Map<string, PullRequestDetails>();
 
-      updateWatch(id, (watch) => ({
-        ...watch,
-        label: title,
-        metadata: mergeWatchMetadata(watch.metadata, { prTitle: title }),
-      }));
-    } catch {
-      // Missing PR metadata should not interfere with check polling.
+    for (const target of uniqueTargets.values()) {
+      try {
+        const details = await deps.fetchPullRequestDetails(target);
+        detailsByKey.set(getPullRequestKey(target), details);
+      } catch {
+        // Missing PR metadata should not interfere with check polling.
+      }
+    }
+
+    const nextWatches = watches.map((watch) => {
+      if (getWatchTriageState(watch) === "done") {
+        return watch;
+      }
+
+      const target = getWatchPullRequestTarget(watch);
+      const details = target ? detailsByKey.get(getPullRequestKey(target)) : undefined;
+      return target && details ? withPullRequestDetails(watch, target, details) : watch;
+    });
+
+    if (nextWatches.some((watch, index) => watch !== watches[index])) {
+      setWatches(nextWatches);
+    }
+  }
+
+  async function refreshWatchPullRequestDetails(id: string): Promise<void> {
+    const watch = watches.find((item) => item.id === id);
+    const target = watch ? getWatchPullRequestTarget(watch) : undefined;
+
+    if (target) {
+      await refreshPullRequestDetails([target]);
     }
   }
 
   async function addWatchTarget(
     target: WatchTarget,
-    sourceState?: WatchRecord["sourceState"],
     reactivateExisting = false,
   ): Promise<void> {
     const id = getWatchId(target);
@@ -240,7 +267,7 @@ export function createWatchController(
     }
 
     const previous = watches;
-    const next = addWatch(watches, target, undefined, sourceState);
+    const next = addWatch(watches, target);
 
     if (next === previous) {
       if (reactivateExisting) {
@@ -261,8 +288,8 @@ export function createWatchController(
   }
 
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
-    await addWatchTarget(source, "ready", true);
-    await refreshPullRequestTitle(getWatchId(source), source);
+    await addWatchTarget(source, true);
+    await refreshPullRequestDetails([source]);
   }
 
   function applyAutoDoneFinishedWatches(): void {
@@ -356,12 +383,8 @@ export function createWatchController(
         return;
       }
 
-      if (target.kind === "run") {
-        await addWatchTarget(target, undefined, true);
-        return;
-      }
-
-      await addWatchTarget(target, undefined, true);
+      await addWatchTarget(target, true);
+      await refreshWatchPullRequestDetails(getWatchId(target));
     },
 
     setTriageState(ids, state) {
@@ -443,17 +466,6 @@ export function createWatchController(
     },
 
     async refreshWatchMetadata() {
-      const pullRequestsMissingTitles = watches.filter(
-        (watch): watch is WatchRecord & { target: PrWatchTarget } =>
-          getWatchTriageState(watch) !== "done" &&
-          watch.target.kind === "pr" &&
-          !hasPullRequestTitle(watch),
-      );
-
-      for (const watch of pullRequestsMissingTitles) {
-        await refreshPullRequestTitle(watch.id, watch.target);
-      }
-
       const watchesMissingMetadata = watches.filter(
         (watch) => getWatchTriageState(watch) !== "done" && !watch.target.prNumber,
       );
@@ -484,6 +496,8 @@ export function createWatchController(
           // Metadata refresh should not turn existing watches into error rows.
         }
       }
+
+      await refreshPullRequestDetails();
     },
 
     async listActiveWorkflowRuns(target) {
@@ -643,15 +657,6 @@ function getSnapshotLabel(watch: WatchRecord, snapshot: WatchSnapshot): string {
     snapshot.title;
 }
 
-function hasPullRequestTitle(watch: WatchRecord): boolean {
-  if (watch.target.kind !== "pr") {
-    return false;
-  }
-
-  const title = watch.metadata?.prTitle?.trim();
-  return Boolean(title && title !== `Pull request #${watch.target.prNumber}`);
-}
-
 function mergeWatchMetadata(
   current: WatchRecord["metadata"],
   snapshot: WatchRecord["metadata"],
@@ -662,4 +667,63 @@ function mergeWatchMetadata(
   };
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
+function getTrackedPullRequestTargets(watches: WatchRecord[]): PrWatchTarget[] {
+  return watches
+    .filter((watch) => getWatchTriageState(watch) !== "done")
+    .map(getWatchPullRequestTarget)
+    .filter((target): target is PrWatchTarget => Boolean(target));
+}
+
+function getWatchPullRequestTarget(watch: WatchRecord): PrWatchTarget | undefined {
+  if (watch.target.kind === "pr") {
+    return watch.target;
+  }
+
+  if (watch.source) {
+    return watch.source;
+  }
+
+  if (!watch.target.prNumber) {
+    return undefined;
+  }
+
+  return {
+    kind: "pr",
+    owner: watch.target.owner,
+    repo: watch.target.repo,
+    prNumber: watch.target.prNumber,
+    url: `https://github.com/${watch.target.owner}/${watch.target.repo}/pull/${watch.target.prNumber}`,
+  };
+}
+
+function withPullRequestDetails(
+  watch: WatchRecord,
+  target: PrWatchTarget,
+  details: PullRequestDetails,
+): WatchRecord {
+  const source = watch.target.kind === "pr" ? watch.source : watch.source ?? target;
+  const label = watch.target.kind === "pr" ? details.title : watch.label;
+
+  if (
+    watch.sourceState === details.state &&
+    watch.label === label &&
+    watch.metadata?.prTitle === details.title &&
+    watch.source === source
+  ) {
+    return watch;
+  }
+
+  return {
+    ...watch,
+    ...(source ? { source } : {}),
+    sourceState: details.state,
+    label,
+    metadata: mergeWatchMetadata(watch.metadata, { prTitle: details.title }),
+  };
+}
+
+function getPullRequestKey(target: PrWatchTarget): string {
+  return `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}#${target.prNumber}`;
 }
