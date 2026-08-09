@@ -31,11 +31,19 @@ describe("createTrayState", () => {
     });
   });
 
-  it("ignores done watches", () => {
+  it("ignores watches outside the inbox", () => {
     expect(
       createTrayState([
         watch({
           triageState: "done",
+          active: false,
+          status: "completed:failure",
+          lastSeenStatus: "in_progress",
+          lastState: { status: "completed", conclusion: "failure" },
+        }),
+        watch({
+          id: "getsentry/sentry/run/456",
+          triageState: "saved",
           active: false,
           status: "completed:failure",
           lastSeenStatus: "in_progress",
@@ -47,6 +55,28 @@ describe("createTrayState", () => {
       hasUnseenChanges: false,
       label: "No watches",
       tooltip: "GHA Watch",
+    });
+  });
+
+  it("does not let a saved failure override a successful inbox", () => {
+    expect(
+      createTrayState([
+        watch({
+          active: false,
+          status: "completed:success",
+          lastState: { status: "completed", conclusion: "success" },
+        }),
+        watch({
+          id: "getsentry/sentry/run/456",
+          triageState: "saved",
+          active: false,
+          status: "completed:failure",
+          lastState: { status: "completed", conclusion: "failure" },
+        }),
+      ]),
+    ).toMatchObject({
+      status: "success",
+      hasUnseenChanges: false,
     });
   });
 

@@ -11,19 +11,19 @@ export type TrayState = {
 };
 
 export function createTrayState(watches: WatchRecord[]): TrayState {
-  const watched = watches.filter((watch) => getWatchTriageState(watch) !== "done");
-  const hasUnseenChanges = watched.some(hasUnseenStatusChange);
-  const active = watched.filter((watch) => watch.active);
-  const errors = watched.filter((watch) => Boolean(watch.error));
-  const watchStates = watched.map((watch) => getWatchState(watch));
-  const failures = watched.filter(
+  const inbox = watches.filter((watch) => getWatchTriageState(watch) === "inbox");
+  const hasUnseenChanges = inbox.some(hasUnseenStatusChange);
+  const active = inbox.filter((watch) => watch.active);
+  const errors = inbox.filter((watch) => Boolean(watch.error));
+  const watchStates = inbox.map((watch) => getWatchState(watch));
+  const failures = inbox.filter(
     (_watch, index) =>
       watchStates[index]?.status === "completed" &&
       watchStates[index].conclusion !== "success" &&
       watchStates[index].conclusion !== "cancelled" &&
       watchStates[index].conclusion !== "skipped",
   );
-  const cancelled = watched.filter(
+  const cancelled = inbox.filter(
     (_watch, index) => watchStates[index]?.status === "completed" && watchStates[index].conclusion === "cancelled",
   );
 
@@ -54,7 +54,7 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
     };
   }
 
-  if (watched.length > 0) {
+  if (inbox.length > 0) {
     return {
       status: "success",
       hasUnseenChanges,
