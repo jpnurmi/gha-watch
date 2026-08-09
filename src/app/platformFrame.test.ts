@@ -17,6 +17,14 @@ describe("platform frame styling", () => {
     );
   });
 
+  it("clips rounded macOS frame corners", () => {
+    expect(styles).toMatch(/\.shell\s*\{[^}]*border-radius:\s*12px;/s);
+    expect(rustSource).toContain("configure_macos_window_frame");
+    expect(rustSource).toContain("view.setWantsLayer(true)");
+    expect(rustSource).toContain("layer.setCornerRadius(MACOS_POPUP_CORNER_RADIUS)");
+    expect(rustSource).toContain("layer.setMasksToBounds(true)");
+  });
+
   it("keeps user-resized Linux window dimensions", () => {
     expect(mainSource).toContain('if (document.documentElement.dataset.platform === "linux")');
     expect(mainSource).toContain("return;\n  }\n\n  const nextHeight = calculatePopupHeight");

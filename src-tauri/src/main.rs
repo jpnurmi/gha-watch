@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 
 #[cfg(target_os = "macos")]
+use objc2_app_kit::NSView;
+#[cfg(target_os = "macos")]
 use tauri::Emitter;
 #[cfg(any(not(target_os = "linux"), test))]
 use tauri::PhysicalPosition;
@@ -18,6 +20,8 @@ use tauri_plugin_notification::NotificationExt;
 
 #[cfg(target_os = "macos")]
 const DESKTOP_NOTIFICATION_CLICKED_EVENT: &str = "desktop-notification-clicked";
+#[cfg(target_os = "macos")]
+const MACOS_POPUP_CORNER_RADIUS: f64 = 12.0;
 
 const TRAY_ID: &str = "gha-watch";
 
@@ -277,6 +281,24 @@ fn configure_linux_window_controls(window: &tauri::WebviewWindow) {
             }
         }
     });
+}
+
+#[cfg(target_os = "macos")]
+fn configure_macos_window_frame(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    let ns_view = window.ns_view()?;
+
+    // Tauri exposes the content NSView here and runs setup on the main thread.
+    unsafe {
+        let view: &NSView = &*ns_view.cast();
+        view.setWantsLayer(true);
+
+        if let Some(layer) = view.layer() {
+            layer.setCornerRadius(MACOS_POPUP_CORNER_RADIUS);
+            layer.setMasksToBounds(true);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -601,6 +623,11 @@ fn main() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                configure_macos_window_frame(&window)?;
+            }
 
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {

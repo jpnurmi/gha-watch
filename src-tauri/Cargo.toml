@@ -18,6 +18,8 @@ tauri-plugin-shell = "2.3.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6.12"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSView", "objc2-quartz-core"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CALayer", "objc2-core-foundation"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
