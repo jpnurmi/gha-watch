@@ -39,6 +39,19 @@ build: | node_modules
 	case "$$(uname -s)" in \
 		Linux*) \
 			$(NPM) run tauri -- build --config src-tauri/tauri.linux.conf.json --bundles deb; \
+			deb=''; \
+			for candidate in "$(CURDIR)"/src-tauri/target/release/bundle/deb/*.deb; do \
+				if [ -f "$$candidate" ]; then deb=$$candidate; break; fi; \
+			done; \
+			if [ -z "$$deb" ]; then \
+				printf '%s\n' 'Missing Linux .deb package under src-tauri/target/release/bundle/deb/' >&2; \
+				exit 1; \
+			fi; \
+			printf '\033[1;32m%s\033[0m %s \033[1;33m%s\033[0m:\n%s\n' \
+				'    Install' \
+				'and' \
+				'restart' \
+				"        pkill -x gha-watch || true; sudo dpkg -i '$$deb' && (nohup gha-watch >/dev/null 2>&1 &)"; \
 			;; \
 		MINGW*|MSYS*|CYGWIN*) \
 			$(NPM) run tauri -- build --config src-tauri/tauri.windows.conf.json; \
