@@ -1073,6 +1073,70 @@ describe("watchController", () => {
     expect(fetches).toEqual([pullRequestTarget]);
   });
 
+  it("rechecks inactive authored PRs when workflow reruns do not update the PR", async () => {
+    const pullRequestTarget = {
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry-native",
+      prNumber: "1972",
+      url: "https://github.com/getsentry/sentry-native/pull/1972",
+    } as const;
+    const updatedAt = "2026-08-10T15:58:03Z";
+    const { deps, fetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "Pull request #1972",
+        prNumber: "1972",
+        url: pullRequestTarget.url,
+      },
+    ]);
+    deps.fetchOpenPullRequests = async () => [
+      {
+        number: "1972",
+        title: "fix(crashpad): Respect consent for external crash reporters",
+        isDraft: false,
+        authorLogin: "jpnurmi",
+        headBranch: "jpnurmi/fix/crashpad-consent",
+        updatedAt,
+        url: pullRequestTarget.url,
+      },
+    ];
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry-native/pull/1972",
+        target: pullRequestTarget,
+        sourceState: "ready",
+        label: "fix(crashpad): Respect consent for external crash reporters",
+        metadata: {
+          prTitle: "fix(crashpad): Respect consent for external crash reporters",
+          prUpdatedAt: updatedAt,
+          branchName: "jpnurmi/fix/crashpad-consent",
+        },
+        status: "completed:failure",
+        lastSeenStatus: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry-native",
+      },
+    ]);
+
+    expect(fetches).toEqual([pullRequestTarget]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "in_progress",
+      lastSeenStatus: "in_progress",
+      lastState: { status: "in_progress", conclusion: null },
+      active: true,
+    });
+  });
+
   it("requires a workflow run listing dependency before loading active workflow runs", async () => {
     const { deps } = createDeps([]);
     const controller = createWatchController({ ...deps, fetchActiveWorkflowRuns: undefined });

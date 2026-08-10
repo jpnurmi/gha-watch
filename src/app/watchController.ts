@@ -419,7 +419,7 @@ export function createWatchController(
     ]);
     for (const pullRequest of openPullRequests) {
       if (pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()) {
-        await syncSubscribedPullRequest(favorite, pullRequest);
+        await syncSubscribedPullRequest(favorite, pullRequest, true);
       }
     }
 
