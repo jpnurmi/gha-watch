@@ -896,19 +896,29 @@ describe("watchController", () => {
     expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/789"]);
   });
 
-  it("reuses a tracked PR for a subscribed workflow run", async () => {
-    const { deps, fetches } = createDeps([
+  it("reuses a tracked PR without overwriting its active aggregate state", async () => {
+    const subscribedRunSnapshot = {
+      status: "in_progress",
+      conclusion: null,
+      title: "CI: Refine lifecycle icons",
+      metadata: {
+        workflowName: "CI",
+        runTitle: "Refine lifecycle icons",
+      },
+      prNumber: "51",
+      url: prRunTarget.url,
+    };
+    const { deps, fetches, notifications } = createDeps([
+      subscribedRunSnapshot,
       {
         status: "in_progress",
         conclusion: null,
-        title: "CI: Refine lifecycle icons",
-        metadata: {
-          workflowName: "CI",
-          runTitle: "Refine lifecycle icons",
-        },
+        hasFailedChildren: true,
+        title: "Pull request #51",
         prNumber: "51",
-        url: prRunTarget.url,
+        url: prTarget.url,
       },
+      subscribedRunSnapshot,
     ]);
     const controller = createWatchController(deps, [
       {
@@ -946,6 +956,31 @@ describe("watchController", () => {
         active: true,
       },
     ]);
+
+    await controller.pollNow();
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        userWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(fetches).toMatchObject([
+      { kind: "run", runId: "789" },
+      { kind: "pr", prNumber: "51" },
+      { kind: "run", runId: "789" },
+    ]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/pull/51",
+        status: "in_progress:failure",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null, hasFailedChildren: true },
+        active: true,
+      },
+    ]);
+    expect(notifications).toEqual([]);
   });
 
   it("requires a workflow run listing dependency before loading active workflow runs", async () => {

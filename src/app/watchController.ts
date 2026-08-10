@@ -482,22 +482,22 @@ export function createWatchController(
       return;
     }
 
+    const nextTrackedPullRequest = trackedPullRequest.active
+      ? trackedPullRequest
+      : {
+          ...trackedPullRequest,
+          status: subscribedWatch.status,
+          lastSeenStatus: subscribedWatch.lastSeenStatus,
+          lastState: subscribedWatch.lastState,
+          timing: subscribedWatch.timing,
+          active: true,
+          error: subscribedWatch.error,
+        };
+
     setWatches(
       watches
         .filter((watch) => watch.id !== subscribedWatch.id)
-        .map((watch) =>
-          watch.id === trackedPullRequest.id
-            ? {
-                ...watch,
-                status: subscribedWatch.status,
-                lastSeenStatus: subscribedWatch.lastSeenStatus,
-                lastState: subscribedWatch.lastState,
-                timing: subscribedWatch.timing,
-                active: true,
-                error: subscribedWatch.error,
-              }
-            : watch,
-        ),
+        .map((watch) => (watch.id === trackedPullRequest.id ? nextTrackedPullRequest : watch)),
     );
   }
 

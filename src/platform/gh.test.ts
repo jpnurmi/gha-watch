@@ -398,6 +398,31 @@ describe("fetchWatchState", () => {
     });
   });
 
+  it("keeps a pull request active while failed checks have unfinished siblings", async () => {
+    const { executor } = createExecutor({
+      code: 1,
+      stdout: JSON.stringify([{ bucket: "fail" }, { bucket: "pending" }]),
+      stderr: "",
+    });
+
+    await expect(
+      fetchWatchState(
+        {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry-native",
+          prNumber: "1968",
+          url: "https://github.com/getsentry/sentry-native/pull/1968",
+        },
+        executor,
+      ),
+    ).resolves.toMatchObject({
+      status: "in_progress",
+      conclusion: null,
+      hasFailedChildren: true,
+    });
+  });
+
   it("does not duplicate matching workflow and run titles", async () => {
     const { executor } = createExecutor({
       code: 0,

@@ -973,16 +973,20 @@ function getPrChecksState(checks: PrCheckResponse[]): WatchState {
     return { status: "pending", conclusion: null };
   }
 
+  if (buckets.includes("pending")) {
+    return {
+      status: "in_progress",
+      conclusion: null,
+      ...(buckets.includes("fail") ? { hasFailedChildren: true } : {}),
+    };
+  }
+
   if (buckets.includes("fail")) {
     return { status: "completed", conclusion: "failure" };
   }
 
   if (buckets.includes("cancel")) {
     return { status: "completed", conclusion: "cancelled" };
-  }
-
-  if (buckets.includes("pending")) {
-    return { status: "in_progress", conclusion: null };
   }
 
   if (buckets.every((bucket) => bucket === "skipping")) {
