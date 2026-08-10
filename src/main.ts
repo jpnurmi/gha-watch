@@ -27,7 +27,7 @@ import {
   type PendingWatchAction,
 } from "./app/watchActionConfirmation";
 import { getClickedUnseenWatchIds } from "./app/watchSeenAction";
-import { getWatchTriageActions, getWatchViewFavoriteRepos } from "./app/watchTriage";
+import { getWatchTriageActions } from "./app/watchTriage";
 import { createTrayState } from "./app/trayState";
 import {
   createPopupViewModel,
@@ -440,11 +440,10 @@ function render(): void {
   const allWatches = controller.getWatches();
   const watches = allWatches.filter((watch) => getWatchTriageState(watch) === currentWatchView);
   const showRepositoryTools = currentWatchView === "inbox";
-  const favoriteRepos = getWatchViewFavoriteRepos(settings.favoriteRepos, watches, currentWatchView);
   const viewModel = createPopupViewModel(
     watches,
     new Date(),
-    favoriteRepos,
+    showRepositoryTools ? settings.favoriteRepos : [],
     settings.repoOrder,
     showRepositoryTools ? repoCiStatuses : {},
   );
@@ -773,6 +772,19 @@ function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderA
 }
 
 function renderFavoriteRepoButton(group: WatchGroupViewModel): string {
+  if (currentWatchView !== "inbox") {
+    return `
+      <span class="watch-group-star is-static" aria-hidden="true">
+        <span class="watch-group-icon">
+          ${renderRepoIcon(group)}
+        </span>
+        <span class="watch-group-drag-glyph">
+          ${renderDragGripIcon()}
+        </span>
+      </span>
+    `;
+  }
+
   return `
     <button
       class="watch-group-star${group.favorite ? " is-favorite" : ""}"

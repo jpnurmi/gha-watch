@@ -571,13 +571,17 @@ input {
   justify-self: center;
 }
 
-.watch-group-star:hover,
+.watch-group-star:not(.is-static):hover,
 .watch-group-subscribe-button:hover,
 .watch-group-workflow-button:hover,
 .watch-group-pr-button:hover,
 .watch-group-triage-button:hover {
   background: rgb(255 255 255 / 7%);
   color: rgb(238 241 245 / 78%);
+}
+
+.watch-group-star.is-static {
+  cursor: default;
 }
 
 .watch-group-star.is-favorite {
