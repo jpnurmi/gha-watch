@@ -69,7 +69,12 @@ describe("fetchWatchState", () => {
         run_started_at: "2026-05-16T12:02:00Z",
         updated_at: "2026-05-16T12:03:00Z",
         html_url: "https://github.com/getsentry/sentry/actions/runs/123",
-        pull_requests: [{ number: 51 }],
+        pull_requests: [
+          {
+            number: 51,
+            base: { repo: { url: "https://api.github.com/repos/getsentry/sentry" } },
+          },
+        ],
       }),
       stderr: "",
     });
@@ -108,6 +113,40 @@ describe("fetchWatchState", () => {
         args: ["api", "repos/getsentry/sentry/actions/runs/123"],
       },
     ]);
+  });
+
+  it("ignores pull request references from another base repository", async () => {
+    const { executor } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        status: "completed",
+        conclusion: "success",
+        display_title: "feat: report SDK integrations (#1969)",
+        name: "CI",
+        head_branch: "master",
+        html_url: "https://github.com/getsentry/sentry-native/actions/runs/31382160146",
+        pull_requests: [
+          {
+            number: 22,
+            base: { repo: { url: "https://api.github.com/repos/mystaff/sentry-native" } },
+          },
+        ],
+      }),
+      stderr: "",
+    });
+
+    await expect(
+      fetchWatchState(
+        {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry-native",
+          runId: "31382160146",
+          url: "https://github.com/getsentry/sentry-native/actions/runs/31382160146",
+        },
+        executor,
+      ),
+    ).resolves.not.toHaveProperty("prNumber");
   });
 
   it("marks in-progress run state when a child job has already failed", async () => {
@@ -1118,7 +1157,7 @@ describe("fetchActiveWorkflowRuns", () => {
           "--limit",
           "20",
           "--json",
-          "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
       },
       {
@@ -1133,25 +1172,36 @@ describe("fetchActiveWorkflowRuns", () => {
           "--limit",
           "20",
           "--json",
-          "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
       },
     ]);
   });
 
-  it("fetches active workflow runs triggered by a user", async () => {
+  it("fetches active pull request workflow runs triggered by a user", async () => {
     const { executor, calls } = createSequenceExecutor([
       {
         code: 0,
         stdout: JSON.stringify([
           {
             databaseId: 101,
-            displayTitle: "Manual run",
+            displayTitle: "Pull request run",
+            event: "pull_request",
             workflowName: "CI",
-            headBranch: "main",
+            headBranch: "feature/pr-watch",
             status: "queued",
             updatedAt: "2026-05-17T10:05:00Z",
             url: "https://github.com/getsentry/sentry/actions/runs/101",
+          },
+          {
+            databaseId: 102,
+            displayTitle: "Merged pull request (#51)",
+            event: "push",
+            workflowName: "CI",
+            headBranch: "main",
+            status: "queued",
+            updatedAt: "2026-05-17T10:06:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/102",
           },
         ]),
         stderr: "",
@@ -1168,10 +1218,11 @@ describe("fetchActiveWorkflowRuns", () => {
     ).resolves.toEqual([
       {
         runId: "101",
-        title: "CI: Manual run",
+        title: "CI: Pull request run",
+        event: "pull_request",
         workflowName: "CI",
         status: "queued",
-        branchName: "main",
+        branchName: "feature/pr-watch",
         updatedAt: "2026-05-17T10:05:00Z",
         url: "https://github.com/getsentry/sentry/actions/runs/101",
       },
@@ -1192,7 +1243,7 @@ describe("fetchActiveWorkflowRuns", () => {
           "--user",
           "jpnurmi",
           "--json",
-          "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
       },
       {
@@ -1209,7 +1260,7 @@ describe("fetchActiveWorkflowRuns", () => {
           "--user",
           "jpnurmi",
           "--json",
-          "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
       },
     ]);

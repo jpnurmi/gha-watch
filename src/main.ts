@@ -915,7 +915,9 @@ function renderWorkflowSubscriptionToggle(
   const checked = workflowIsSubscribed(group, workflowName, scope);
   const cleanDefaultBranch = defaultBranch?.trim() || "default branch";
   const displayLabel = scope === "defaultBranch" ? cleanDefaultBranch : userLogin?.trim() || "PRs";
-  const label = scope === "defaultBranch" ? cleanDefaultBranch : `runs triggered by ${displayLabel}`;
+  const label = scope === "defaultBranch"
+    ? cleanDefaultBranch
+    : `pull request runs triggered by ${displayLabel}`;
 
   return `
     <button
@@ -3302,6 +3304,7 @@ async function fetchDemoActiveWorkflowRuns(): Promise<ActiveWorkflowRun[]> {
     {
       runId: "21",
       title: "CI: Build and test",
+      event: "pull_request",
       workflowName: "CI",
       status: "in_progress",
       branchName: "feat/tray-badges",
@@ -3325,6 +3328,7 @@ async function fetchDemoUserActiveWorkflowRuns(): Promise<ActiveWorkflowRun[]> {
     {
       runId: "21",
       title: "CI: Build and test",
+      event: "pull_request",
       workflowName: "CI",
       status: "in_progress",
       branchName: "feat/tray-badges",

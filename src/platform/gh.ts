@@ -118,6 +118,7 @@ export type PullRequestDetailsBatch = Array<PullRequestDetails | undefined>;
 export type ActiveWorkflowRun = {
   runId: string;
   title: string;
+  event?: string;
   workflowName?: string;
   status: string;
   branchName?: string;
@@ -189,6 +190,11 @@ type WorkflowListResponse = {
 };
 
 type PullRequestReference = {
+  base?: {
+    repo?: {
+      url?: string;
+    };
+  };
   number?: number | string;
 };
 
@@ -224,7 +230,7 @@ export async function fetchWatchState(
         ? await fetchRunFailedChildren(target, executor)
         : undefined;
 
-      return toRunSnapshot(target.url, response, failedChildren);
+      return toRunSnapshot(target, response, failedChildren);
     }
 
     const result = await executor.execute("gh", [
@@ -420,13 +426,19 @@ export async function fetchUserActiveWorkflowRuns(
     throw new Error("User workflow subscriptions need an authenticated GitHub user.");
   }
 
-  return fetchActiveWorkflowRunsWithArgs(target, ["--user", cleanUserLogin], executor);
+  return fetchActiveWorkflowRunsWithArgs(
+    target,
+    ["--user", cleanUserLogin],
+    executor,
+    (run) => run.event === "pull_request" || run.event === "pull_request_target",
+  );
 }
 
 async function fetchActiveWorkflowRunsWithArgs(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
   extraArgs: string[],
   executor: ShellExecutor,
+  includeRun: (run: WorkflowRunListResponse) => boolean = () => true,
 ): Promise<ActiveWorkflowRun[]> {
   try {
     const results = await Promise.all(
@@ -442,7 +454,7 @@ async function fetchActiveWorkflowRunsWithArgs(
           "20",
           ...extraArgs,
           "--json",
-          "databaseId,displayTitle,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ]);
 
         assertSuccessfulGhResult(result);
@@ -452,6 +464,7 @@ async function fetchActiveWorkflowRunsWithArgs(
 
     return results
       .flat()
+      .filter(includeRun)
       .map(normalizeActiveWorkflowRun)
       .filter((run): run is ActiveWorkflowRun => Boolean(run))
       .sort(compareWorkflowRunsByUpdatedAt);
@@ -462,6 +475,7 @@ async function fetchActiveWorkflowRunsWithArgs(
 
 function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWorkflowRun | undefined {
   const runId = getRunDatabaseId(response.databaseId);
+  const event = response.event?.trim();
   const workflowName = response.workflowName?.trim();
   const title = joinTitle(workflowName, response.displayTitle);
   const status = response.status?.trim();
@@ -476,6 +490,7 @@ function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWo
   return {
     runId,
     title,
+    ...(event ? { event } : {}),
     ...(workflowName ? { workflowName } : {}),
     status,
     ...(branchName ? { branchName } : {}),
@@ -902,14 +917,18 @@ function runJobsHaveFailures(response: RunJobsResponse): boolean {
   return Boolean(response.jobs?.some((job) => job.status === "completed" && isFailureConclusion(job.conclusion)));
 }
 
-function toRunSnapshot(fallbackUrl: string, response: RunViewResponse, failedChildren = false): WatchSnapshot {
+function toRunSnapshot(
+  target: Extract<WatchTarget, { kind: "run" }>,
+  response: RunViewResponse,
+  failedChildren = false,
+): WatchSnapshot {
   const status = requiredString(response.status, "run status");
   const timing = compactTiming({
     queuedAt: response.created_at,
     startedAt: response.run_started_at,
     completedAt: status === "completed" ? response.updated_at : undefined,
   });
-  const prNumber = getPullRequestNumber(response.pull_requests);
+  const prNumber = getPullRequestNumber(response.pull_requests, target);
 
   return {
     status,
@@ -923,7 +942,7 @@ function toRunSnapshot(fallbackUrl: string, response: RunViewResponse, failedChi
     ...(failedChildren ? { hasFailedChildren: true } : {}),
     ...(prNumber ? { prNumber } : {}),
     ...(timing ? { timing } : {}),
-    url: response.html_url || fallbackUrl,
+    url: response.html_url || target.url,
   };
 }
 
@@ -1062,8 +1081,25 @@ function joinTitle(prefix: string | undefined, title: string | undefined): strin
   return cleanTitle || cleanPrefix || "GitHub Actions";
 }
 
-function getPullRequestNumber(pullRequests: PullRequestReference[] | undefined): string | undefined {
-  const number = pullRequests?.[0]?.number;
+function getPullRequestNumber(
+  pullRequests: PullRequestReference[] | undefined,
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+): string | undefined {
+  const expectedPath = `/repos/${target.owner}/${target.repo}`.toLowerCase();
+  const reference = pullRequests?.find((pullRequest) => {
+    const repositoryUrl = pullRequest.base?.repo?.url;
+
+    if (!repositoryUrl) {
+      return false;
+    }
+
+    try {
+      return new URL(repositoryUrl).pathname.replace(/\/$/, "").toLowerCase() === expectedPath;
+    } catch {
+      return false;
+    }
+  });
+  const number = reference?.number;
 
   if (typeof number === "number" && Number.isInteger(number) && number > 0) {
     return String(number);

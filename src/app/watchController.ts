@@ -460,23 +460,31 @@ export function createWatchController(
     } as const;
 
     await addWatchTarget(target);
-    reuseTrackedPullRequestForSubscribedRun(target);
+    reuseTrackedPullRequestForSubscribedRun(target, run);
   }
 
-  function reuseTrackedPullRequestForSubscribedRun(target: CheckWatchTarget): void {
+  function reuseTrackedPullRequestForSubscribedRun(
+    target: CheckWatchTarget,
+    run: ActiveWorkflowRun,
+  ): void {
     const subscribedWatch = watches.find((watch) => watch.id === getWatchId(target));
-    const pullRequestTarget = subscribedWatch ? getWatchPullRequestTarget(subscribedWatch) : undefined;
 
-    if (!subscribedWatch || !pullRequestTarget) {
+    if (!subscribedWatch) {
       return;
     }
 
-    const trackedPullRequest = watches.find(
-      (watch) =>
+    const trackedPullRequests = watches.filter(
+      (watch): watch is WatchRecord & { target: PrWatchTarget } =>
         watch.target.kind === "pr" &&
         getWatchTriageState(watch) !== "done" &&
-        getPullRequestKey(watch.target) === getPullRequestKey(pullRequestTarget),
+        getRepositoryKey(watch.target) === getRepositoryKey(target),
     );
+    const pullRequestTarget = getWatchPullRequestTarget(subscribedWatch);
+    const trackedPullRequest = pullRequestTarget
+      ? trackedPullRequests.find(
+          (watch) => getPullRequestKey(watch.target) === getPullRequestKey(pullRequestTarget),
+        )
+      : findTrackedPullRequestByBranch(trackedPullRequests, subscribedWatch, run);
 
     if (!trackedPullRequest) {
       return;
@@ -840,6 +848,27 @@ function withPullRequestDetails(
 
 function getPullRequestKey(target: PrWatchTarget): string {
   return `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}#${target.prNumber}`;
+}
+
+function findTrackedPullRequestByBranch(
+  trackedPullRequests: Array<WatchRecord & { target: PrWatchTarget }>,
+  subscribedWatch: WatchRecord,
+  run: ActiveWorkflowRun,
+): WatchRecord | undefined {
+  if (run.event !== "pull_request" && run.event !== "pull_request_target") {
+    return undefined;
+  }
+
+  const branchName = subscribedWatch.metadata?.branchName?.trim() || run.branchName?.trim();
+
+  if (!branchName) {
+    return undefined;
+  }
+
+  const matches = trackedPullRequests.filter(
+    (watch) => watch.metadata?.branchName?.trim() === branchName,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function getRepositoryKey(target: Pick<ParsedWatchTarget, "owner" | "repo">): string {

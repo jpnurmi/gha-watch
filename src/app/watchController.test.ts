@@ -983,6 +983,73 @@ describe("watchController", () => {
     expect(notifications).toEqual([]);
   });
 
+  it("reuses a uniquely matching PR branch when GitHub omits the PR reference", async () => {
+    const branchName = "jpnurmi/feat/integration-names";
+    const pullRequestTarget = {
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry-native",
+      prNumber: "1969",
+      url: "https://github.com/getsentry/sentry-native/pull/1969",
+    } as const;
+    const { deps } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: feat: report SDK integrations",
+        metadata: {
+          workflowName: "CI",
+          runTitle: "feat: report SDK integrations",
+          branchName,
+        },
+        url: "https://github.com/getsentry/sentry-native/actions/runs/31372026291",
+      },
+    ]);
+    deps.fetchUserActiveWorkflowRuns = async () => [
+      {
+        runId: "31372026291",
+        title: "CI: feat: report SDK integrations",
+        event: "pull_request",
+        workflowName: "CI",
+        status: "in_progress",
+        branchName,
+        url: "https://github.com/getsentry/sentry-native/actions/runs/31372026291",
+      },
+    ];
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry-native/pull/1969",
+        target: pullRequestTarget,
+        sourceState: "ready",
+        label: "feat: report SDK integrations",
+        metadata: { prTitle: "feat: report SDK integrations", branchName },
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry-native",
+        userWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry-native/pull/1969",
+        target: pullRequestTarget,
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        active: true,
+      },
+    ]);
+  });
+
   it("requires a workflow run listing dependency before loading active workflow runs", async () => {
     const { deps } = createDeps([]);
     const controller = createWatchController({ ...deps, fetchActiveWorkflowRuns: undefined });
