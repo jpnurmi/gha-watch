@@ -13,6 +13,7 @@ export type WatchTiming = {
 
 export type WatchMetadata = {
   prTitle?: string;
+  prUpdatedAt?: string;
   workflowName?: string;
   runTitle?: string;
   jobName?: string;

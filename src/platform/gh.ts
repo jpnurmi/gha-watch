@@ -102,6 +102,7 @@ export type OpenPullRequest = {
   number: string;
   title: string;
   isDraft: boolean;
+  authorLogin?: string;
   headBranch?: string;
   updatedAt?: string;
   url: string;
@@ -160,6 +161,9 @@ export type WorkflowDefinition = {
 };
 
 type PullRequestListResponse = {
+  author?: {
+    login?: string;
+  };
   headRefName?: string;
   isDraft?: boolean;
   number?: number | string;
@@ -337,9 +341,9 @@ export async function fetchOpenPullRequests(
       "--state",
       "open",
       "--limit",
-      "20",
+      "100",
       "--json",
-      "number,title,isDraft,headRefName,updatedAt,url",
+      "number,title,isDraft,author,headRefName,updatedAt,url",
     ]);
 
     assertSuccessfulGhResult(result);
@@ -430,7 +434,7 @@ export async function fetchUserActiveWorkflowRuns(
     target,
     ["--user", cleanUserLogin],
     executor,
-    (run) => run.event === "pull_request" || run.event === "pull_request_target",
+    (run) => run.event === "workflow_dispatch",
   );
 }
 
@@ -517,6 +521,7 @@ function normalizeOpenPullRequest(response: PullRequestListResponse): OpenPullRe
     number,
     title,
     isDraft: response.isDraft === true,
+    ...(response.author?.login?.trim() ? { authorLogin: response.author.login.trim() } : {}),
     ...(response.headRefName?.trim() ? { headBranch: response.headRefName.trim() } : {}),
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
     url,

@@ -48,6 +48,7 @@ export type WatchControllerDeps = {
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   fetchUserActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   fetchWorkflowDefinitions?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
+  getAuthenticatedUserLogin?(): Promise<string>;
   notificationsPaused?(): boolean;
   notify(notification: WatchNotification): Promise<void>;
   rerunFailed?(target: CheckWatchTarget): Promise<void>;
@@ -384,8 +385,18 @@ export function createWatchController(
     const defaultBranchWorkflowNames = favorite.defaultBranchWorkflowNames ?? [];
     const userWorkflowNames = favorite.userWorkflowNames ?? [];
 
-    if (defaultBranchWorkflowNames.length === 0 && userWorkflowNames.length === 0) {
-      return;
+    if (!deps.fetchOpenPullRequests || !deps.getAuthenticatedUserLogin) {
+      throw new Error("Favorite repository PR subscriptions need GitHub PR listing support.");
+    }
+
+    const [openPullRequests, userLogin] = await Promise.all([
+      deps.fetchOpenPullRequests(favorite),
+      deps.getAuthenticatedUserLogin(),
+    ]);
+    for (const pullRequest of openPullRequests) {
+      if (pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()) {
+        await syncSubscribedPullRequest(favorite, pullRequest);
+      }
     }
 
     const targets = new Map<string, ActiveWorkflowRun>();
@@ -420,7 +431,22 @@ export function createWatchController(
       const runs = await deps.fetchUserActiveWorkflowRuns(favorite);
 
       for (const run of runs) {
-        if (workflowNameIsSelected(run.workflowName, userWorkflowNames)) {
+        if (
+          run.event !== "workflow_dispatch" ||
+          !workflowNameIsSelected(run.workflowName, userWorkflowNames)
+        ) {
+          continue;
+        }
+
+        const pullRequest = openPullRequests.find(
+          (candidate) => candidate.headBranch?.trim() === run.branchName,
+        );
+
+        if (pullRequest) {
+          if (pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()) {
+            await syncSubscribedPullRequest(favorite, pullRequest, true);
+          }
+        } else {
           targets.set(run.runId, run);
         }
       }
@@ -429,6 +455,65 @@ export function createWatchController(
     for (const run of targets.values()) {
       await addSubscribedWorkflowRun(favorite, run);
     }
+  }
+
+  async function syncSubscribedPullRequest(
+    repo: Pick<FavoriteRepo, "owner" | "repo">,
+    pullRequest: OpenPullRequest,
+    refreshInactive = false,
+  ): Promise<void> {
+    const target = {
+      kind: "pr",
+      owner: repo.owner,
+      repo: repo.repo,
+      prNumber: pullRequest.number,
+      url: pullRequest.url,
+    } as const;
+    const id = getWatchId(target);
+    const existingWatch = watches.find((watch) => watch.id === id);
+
+    if (existingWatch && getWatchTriageState(existingWatch) === "done") {
+      return;
+    }
+
+    if (!existingWatch) {
+      await addWatchTarget(target);
+    } else if (
+      (refreshInactive && !existingWatch.active) ||
+      (pullRequest.updatedAt && pullRequest.updatedAt !== existingWatch.metadata?.prUpdatedAt)
+    ) {
+      await loadBaselineState(id, target);
+    }
+
+    const currentWatch = watches.find((watch) => watch.id === id);
+
+    if (!currentWatch) {
+      return;
+    }
+
+    const metadata = mergeWatchMetadata(currentWatch.metadata, {
+      prTitle: pullRequest.title,
+      ...(pullRequest.updatedAt ? { prUpdatedAt: pullRequest.updatedAt } : {}),
+      ...(pullRequest.headBranch ? { branchName: pullRequest.headBranch } : {}),
+    });
+    const sourceState = pullRequest.isDraft ? "draft" : "ready";
+
+    if (
+      currentWatch.label === pullRequest.title &&
+      currentWatch.metadata?.prTitle === metadata?.prTitle &&
+      currentWatch.metadata?.prUpdatedAt === metadata?.prUpdatedAt &&
+      currentWatch.metadata?.branchName === metadata?.branchName &&
+      currentWatch.sourceState === sourceState
+    ) {
+      return;
+    }
+
+    updateWatch(id, (watch) => ({
+      ...watch,
+      label: pullRequest.title,
+      metadata,
+      sourceState,
+    }));
   }
 
   async function addSubscribedWorkflowRun(
@@ -924,7 +1009,11 @@ function findTrackedPullRequestByBranch(
   branchName: string | undefined,
   run: ActiveWorkflowRun,
 ): WatchRecord | undefined {
-  if (run.event !== "pull_request" && run.event !== "pull_request_target") {
+  if (
+    run.event !== "pull_request" &&
+    run.event !== "pull_request_target" &&
+    run.event !== "workflow_dispatch"
+  ) {
     return undefined;
   }
 

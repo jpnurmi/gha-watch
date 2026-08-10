@@ -956,6 +956,7 @@ describe("fetchOpenPullRequests", () => {
           number: 51,
           title: "Older PR",
           isDraft: false,
+          author: { login: "octocat" },
           headRefName: "older-pr",
           updatedAt: "2026-05-16T12:00:00Z",
           url: "https://github.com/getsentry/sentry/pull/51",
@@ -964,6 +965,7 @@ describe("fetchOpenPullRequests", () => {
           number: 52,
           title: "Newer PR",
           isDraft: true,
+          author: { login: "jpnurmi" },
           headRefName: "newer-pr",
           updatedAt: "2026-05-17T12:00:00Z",
           url: "https://github.com/getsentry/sentry/pull/52",
@@ -985,6 +987,7 @@ describe("fetchOpenPullRequests", () => {
         number: "52",
         title: "Newer PR",
         isDraft: true,
+        authorLogin: "jpnurmi",
         headBranch: "newer-pr",
         updatedAt: "2026-05-17T12:00:00Z",
         url: "https://github.com/getsentry/sentry/pull/52",
@@ -993,6 +996,7 @@ describe("fetchOpenPullRequests", () => {
         number: "51",
         title: "Older PR",
         isDraft: false,
+        authorLogin: "octocat",
         headBranch: "older-pr",
         updatedAt: "2026-05-16T12:00:00Z",
         url: "https://github.com/getsentry/sentry/pull/51",
@@ -1010,9 +1014,9 @@ describe("fetchOpenPullRequests", () => {
           "--state",
           "open",
           "--limit",
-          "20",
+          "100",
           "--json",
-          "number,title,isDraft,headRefName,updatedAt,url",
+          "number,title,isDraft,author,headRefName,updatedAt,url",
         ],
       },
     ]);
@@ -1178,15 +1182,15 @@ describe("fetchActiveWorkflowRuns", () => {
     ]);
   });
 
-  it("fetches active pull request workflow runs triggered by a user", async () => {
+  it("fetches active manually dispatched workflow runs triggered by a user", async () => {
     const { executor, calls } = createSequenceExecutor([
       {
         code: 0,
         stdout: JSON.stringify([
           {
             databaseId: 101,
-            displayTitle: "Pull request run",
-            event: "pull_request",
+            displayTitle: "Manual run",
+            event: "workflow_dispatch",
             workflowName: "CI",
             headBranch: "feature/pr-watch",
             status: "queued",
@@ -1195,8 +1199,8 @@ describe("fetchActiveWorkflowRuns", () => {
           },
           {
             databaseId: 102,
-            displayTitle: "Merged pull request (#51)",
-            event: "push",
+            displayTitle: "Pull request run",
+            event: "pull_request",
             workflowName: "CI",
             headBranch: "main",
             status: "queued",
@@ -1218,8 +1222,8 @@ describe("fetchActiveWorkflowRuns", () => {
     ).resolves.toEqual([
       {
         runId: "101",
-        title: "CI: Pull request run",
-        event: "pull_request",
+        title: "CI: Manual run",
+        event: "workflow_dispatch",
         workflowName: "CI",
         status: "queued",
         branchName: "feature/pr-watch",

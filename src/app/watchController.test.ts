@@ -150,7 +150,7 @@ function createDeps(
           {
             runId: "789",
             title: "CI: Build",
-            event: "pull_request",
+            event: "workflow_dispatch",
             workflowName: "CI",
             status: "in_progress",
             branchName: "feature/tray-popup",
@@ -160,7 +160,7 @@ function createDeps(
           {
             runId: "790",
             title: "CodeQL: Analyze",
-            event: "pull_request",
+            event: "workflow_dispatch",
             workflowName: "CodeQL",
             status: "in_progress",
             branchName: "feature/tray-popup",
@@ -172,6 +172,9 @@ function createDeps(
       async fetchRepositoryDefaultBranch(target) {
         defaultBranchFetches.push(target);
         return "main";
+      },
+      async getAuthenticatedUserLogin() {
+        return "jpnurmi";
       },
       async fetchWorkflowDefinitions(target) {
         workflowDefinitionFetches.push(target);
@@ -871,7 +874,7 @@ describe("watchController", () => {
     expect(suppressionSaves.at(-1)).toEqual([]);
   });
 
-  it("subscribes to selected workflow runs triggered by the authenticated user", async () => {
+  it("subscribes to selected manually dispatched runs on non-PR branches", async () => {
     const { deps, userActiveWorkflowRunFetches } = createDeps([
       {
         status: "in_progress",
@@ -990,7 +993,7 @@ describe("watchController", () => {
     expect(emittedWatchIds.every((ids) => !ids.includes("getsentry/sentry/run/789"))).toBe(true);
   });
 
-  it("reuses a uniquely matching PR branch when GitHub omits the PR reference", async () => {
+  it("automatically watches authored PRs instead of dispatch runs on their branches", async () => {
     const branchName = "jpnurmi/feat/integration-names";
     const pullRequestTarget = {
       kind: "pr",
@@ -999,45 +1002,45 @@ describe("watchController", () => {
       prNumber: "1969",
       url: "https://github.com/getsentry/sentry-native/pull/1969",
     } as const;
-    const { deps } = createDeps([
+    const { deps, fetches } = createDeps([
       {
         status: "in_progress",
         conclusion: null,
-        title: "CI: feat: report SDK integrations",
-        metadata: {
-          workflowName: "CI",
-          runTitle: "feat: report SDK integrations",
-          branchName,
-        },
-        url: "https://github.com/getsentry/sentry-native/actions/runs/31372026291",
+        title: "Pull request #1969",
+        prNumber: "1969",
+        url: pullRequestTarget.url,
       },
     ]);
+    deps.fetchOpenPullRequests = async () => [
+      {
+        number: "1969",
+        title: "feat: report SDK integrations",
+        isDraft: false,
+        authorLogin: "jpnurmi",
+        headBranch: branchName,
+        updatedAt: "2026-08-10T12:54:47Z",
+        url: pullRequestTarget.url,
+      },
+    ];
     deps.fetchUserActiveWorkflowRuns = async () => [
       {
         runId: "31372026291",
         title: "CI: feat: report SDK integrations",
-        event: "pull_request",
+        event: "workflow_dispatch",
         workflowName: "CI",
         status: "in_progress",
         branchName,
         url: "https://github.com/getsentry/sentry-native/actions/runs/31372026291",
       },
     ];
-    const controller = createWatchController(deps, [
+    const controller = createWatchController(deps);
+
+    await controller.syncWorkflowSubscriptions([
       {
-        id: "getsentry/sentry-native/pull/1969",
-        target: pullRequestTarget,
-        sourceState: "ready",
-        label: "feat: report SDK integrations",
-        metadata: { prTitle: "feat: report SDK integrations", branchName },
-        status: "completed:success",
-        lastSeenStatus: "completed:success",
-        lastState: { status: "completed", conclusion: "success" },
-        active: false,
-        error: undefined,
+        owner: "getsentry",
+        repo: "sentry-native",
       },
     ]);
-
     await controller.syncWorkflowSubscriptions([
       {
         owner: "getsentry",
@@ -1050,11 +1053,18 @@ describe("watchController", () => {
       {
         id: "getsentry/sentry-native/pull/1969",
         target: pullRequestTarget,
+        label: "feat: report SDK integrations",
+        metadata: {
+          prTitle: "feat: report SDK integrations",
+          prUpdatedAt: "2026-08-10T12:54:47Z",
+          branchName,
+        },
         status: "in_progress",
         lastSeenStatus: "in_progress",
         active: true,
       },
     ]);
+    expect(fetches).toEqual([pullRequestTarget]);
   });
 
   it("requires a workflow run listing dependency before loading active workflow runs", async () => {

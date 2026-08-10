@@ -265,6 +265,7 @@ const controller = createWatchController(
       : fetchPullRequestDetails,
     fetchRepositoryDefaultBranch: getCachedRepositoryDefaultBranch,
     fetchRepositoryIconUrl: getRepositoryIconUrl,
+    getAuthenticatedUserLogin,
     fetchUserActiveWorkflowRuns: isDemoMode
       ? fetchDemoUserActiveWorkflowRuns
       : async (target) => fetchUserActiveWorkflowRuns(target, await getAuthenticatedUserLogin()),
@@ -917,7 +918,7 @@ function renderWorkflowSubscriptionToggle(
   const displayLabel = scope === "defaultBranch" ? cleanDefaultBranch : userLogin?.trim() || "PRs";
   const label = scope === "defaultBranch"
     ? cleanDefaultBranch
-    : `pull request runs triggered by ${displayLabel}`;
+    : `manually dispatched runs triggered by ${displayLabel}`;
 
   return `
     <button
@@ -3284,6 +3285,7 @@ async function fetchDemoOpenPullRequests(): Promise<OpenPullRequest[]> {
       number: "12",
       title: "Add favorite repo quick watches",
       isDraft: false,
+      authorLogin: "jpnurmi",
       headBranch: "feat/tray-badges",
       updatedAt: "2026-05-17T12:45:00Z",
       url: "https://github.com/getsentry/sentry/pull/12",
@@ -3292,6 +3294,7 @@ async function fetchDemoOpenPullRequests(): Promise<OpenPullRequest[]> {
       number: "13",
       title: "Refine tray popup spacing",
       isDraft: true,
+      authorLogin: "jpnurmi",
       headBranch: "feat/popup-spacing",
       updatedAt: "2026-05-17T11:30:00Z",
       url: "https://github.com/getsentry/sentry/pull/13",
@@ -3328,7 +3331,7 @@ async function fetchDemoUserActiveWorkflowRuns(): Promise<ActiveWorkflowRun[]> {
     {
       runId: "21",
       title: "CI: Build and test",
-      event: "pull_request",
+      event: "workflow_dispatch",
       workflowName: "CI",
       status: "in_progress",
       branchName: "feat/tray-badges",
