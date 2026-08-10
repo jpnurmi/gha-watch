@@ -66,7 +66,7 @@ describe("watch tree group actions", () => {
   it("keeps job rows on the same vertical rhythm as PR and workflow rows", () => {
     expect(styles).toMatch(/\.watch-tree-header\s*\{[^}]*min-height:\s*52px;/s);
     expect(styles).toMatch(/\.watch\s*\{[^}]*min-height:\s*52px;/s);
-    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*27px;/s);
+    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*8px;/s);
   });
 
   it("keeps branch context compact without wrapping and exposes full labels", () => {
@@ -76,18 +76,19 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain(
       '<span class="watch-title-text" title="${escapeHtml(node.label)}">${escapeHtml(node.label)}</span>',
     );
+    expect(mainSource).toContain("renderWatchMetadataContent(items, row.branchName)");
+    expect(mainSource).toContain("renderWatchMetadataContent(items, node.branchName)");
+    expect(mainSource).not.toContain('watch-label${row.branchName');
+    expect(mainSource).not.toContain('watch-label${node.branchName');
     expect(styles).toMatch(
-      /\.watch-label\.has-branch-badge\s*\{[^}]*position:\s*relative;/s,
+      /\.watch-meta\.has-branch-badge\s*\{[^}]*position:\s*relative;/s,
     );
-    expect(styles).not.toMatch(/\.watch-label\.has-branch-badge\s*\{[^}]*flex-wrap:/s);
+    expect(styles).not.toMatch(/\.watch-meta\.has-branch-badge\s*\{[^}]*flex-wrap:/s);
     expect(styles).toMatch(
-      /\.watch-label\.has-branch-badge \.watch-title-cluster\s*\{[^}]*flex:\s*0 1 auto;/s,
+      /\.watch-meta \.watch-branch-badge\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*max-content;[^}]*flex:\s*1 0 56px;[^}]*margin-left:\s*auto;/s,
     );
     expect(styles).toMatch(
-      /\.watch-label \.watch-branch-badge\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*max-content;[^}]*flex:\s*1 0 56px;[^}]*margin-left:\s*auto;/s,
-    );
-    expect(styles).toMatch(
-      /\.watch-label \.watch-branch-badge:hover\s*\{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*max-width:\s*100%;/s,
+      /\.watch-meta \.watch-branch-badge:hover\s*\{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*max-width:\s*100%;/s,
     );
   });
 
@@ -250,7 +251,7 @@ describe("watch tree group actions", () => {
     expect(styles).toMatch(
       /\.watch\s*\{[^}]*padding:\s*8px calc\(6px \+ var\(--scrollbar-gutter-width\)\) 8px\s*calc\(\s*var\(--tree-left-padding\) \+ var\(--tree-chevron-width\) \+ var\(--tree-column-gap\) \+\s*var\(--watch-indent,\s*0px\)\s*\);/s,
     );
-    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*27px;/s);
+    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*8px;/s);
   });
 
   it("only reveals row actions for the hovered or focused row", () => {

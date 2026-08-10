@@ -1195,12 +1195,11 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
           aria-label="${escapeHtml(actionLabel)}"
           ${treeToggleAttributes}
         >
-          <span class="watch-label${node.branchName ? " has-branch-badge" : ""}">
+          <span class="watch-label">
             <span class="watch-title-cluster">
               <span class="watch-title-text" title="${escapeHtml(node.label)}">${escapeHtml(node.label)}</span>
               ${node.referenceLabel ? `<span class="watch-title-reference">${escapeHtml(node.referenceLabel)}</span>` : ""}
             </span>
-            ${renderBranchBadge(node.branchName)}
           </span>
           ${renderWatchTreeMetadata(node)}
         </button>
@@ -1317,7 +1316,7 @@ function renderWatchTreeMetadata(node: WatchTreeNodeViewModel): string {
     items.push(`<span class="watch-meta-text">${escapeHtml(detail)}</span>`);
   }
 
-  return `<span class="watch-meta">${items.join(renderMetaSeparator())}</span>`;
+  return renderWatchMetadataContent(items, node.branchName);
 }
 
 function renderWatchTreeActions(node: WatchTreeNodeViewModel): string {
@@ -1350,12 +1349,11 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
     >
       ${renderLeadingIcon(row)}
       <div class="watch-main">
-        <span class="watch-label${row.branchName ? " has-branch-badge" : ""}">
+        <span class="watch-label">
           <span class="watch-title-cluster">
             <span class="watch-title-text" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>
             ${row.prReference ? `<span class="watch-title-reference">${escapeHtml(row.prReference)}</span>` : ""}
           </span>
-          ${renderBranchBadge(row.branchName)}
         </span>
         ${renderMetadata(row)}
       </div>
@@ -1402,7 +1400,13 @@ function renderMetadata(row: WatchRowViewModel): string {
     items.push(`<span class="watch-meta-text">${escapeHtml(detail)}</span>`);
   }
 
-  return items.length > 0 ? `<span class="watch-meta">${items.join(renderMetaSeparator())}</span>` : "";
+  return renderWatchMetadataContent(items, row.branchName);
+}
+
+function renderWatchMetadataContent(items: string[], branchName: string | undefined): string {
+  const content = items.join(renderMetaSeparator()) + renderBranchBadge(branchName);
+
+  return `<span class="watch-meta${branchName ? " has-branch-badge" : ""}">${content}</span>`;
 }
 
 function renderMetaSeparator(): string {

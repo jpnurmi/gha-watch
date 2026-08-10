@@ -1340,12 +1340,8 @@ button.repo-ci-status:focus-visible {
   white-space: nowrap;
 }
 
-.watch-label.has-branch-badge {
+.watch-meta.has-branch-badge {
   position: relative;
-}
-
-.watch-label.has-branch-badge .watch-title-cluster {
-  flex: 0 1 auto;
 }
 
 .watch-title-cluster {
@@ -1389,14 +1385,14 @@ button.repo-ci-status:focus-visible {
   white-space: nowrap;
 }
 
-.watch-label .watch-branch-badge {
+.watch-meta .watch-branch-badge {
   min-width: 0;
   max-width: max-content;
   flex: 1 0 56px;
   margin-left: auto;
 }
 
-.watch-label .watch-branch-badge:hover {
+.watch-meta .watch-branch-badge:hover {
   position: absolute;
   z-index: 2;
   top: 50%;
@@ -1456,7 +1452,7 @@ button.repo-ci-status:focus-visible {
 .watch-actions {
   position: absolute;
   z-index: 1;
-  top: 27px;
+  top: 8px;
   right: calc(6px + var(--scrollbar-gutter-width));
   display: flex;
   width: var(--tree-actions-width);

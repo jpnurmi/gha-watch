@@ -38,7 +38,7 @@ describe("watch action confirmation layout", () => {
       /\.watch\.has-actions\s*\{[^}]*grid-template-columns:[^}]*var\(--tree-actions-width\);/s,
     );
     expect(styles).toMatch(
-      /\.watch-actions\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*1;[^}]*top:\s*27px;[^}]*right:\s*calc\(6px \+ var\(--scrollbar-gutter-width\)\);[^}]*width:\s*var\(--tree-actions-width\);[^}]*padding-right:\s*0;/s,
+      /\.watch-actions\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*1;[^}]*top:\s*8px;[^}]*right:\s*calc\(6px \+ var\(--scrollbar-gutter-width\)\);[^}]*width:\s*var\(--tree-actions-width\);[^}]*padding-right:\s*0;/s,
     );
     expect(styles).not.toMatch(/\.watch\.has-actions \.watch-actions\s*\{[^}]*position:\s*relative;/s);
     expect(styles).toMatch(
