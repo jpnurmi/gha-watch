@@ -27,7 +27,7 @@ import {
   type PendingWatchAction,
 } from "./app/watchActionConfirmation";
 import { getClickedUnseenWatchIds } from "./app/watchSeenAction";
-import { getWatchTriageActions } from "./app/watchTriage";
+import { getWatchTriageActions, getWatchViewFavoriteRepos } from "./app/watchTriage";
 import { createTrayState } from "./app/trayState";
 import {
   createPopupViewModel,
@@ -440,10 +440,11 @@ function render(): void {
   const allWatches = controller.getWatches();
   const watches = allWatches.filter((watch) => getWatchTriageState(watch) === currentWatchView);
   const showRepositoryTools = currentWatchView === "inbox";
+  const favoriteRepos = getWatchViewFavoriteRepos(settings.favoriteRepos, watches, currentWatchView);
   const viewModel = createPopupViewModel(
     watches,
     new Date(),
-    showRepositoryTools ? settings.favoriteRepos : [],
+    favoriteRepos,
     settings.repoOrder,
     showRepositoryTools ? repoCiStatuses : {},
   );

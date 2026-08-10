@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { getWatchTriageActions } from "./watchTriage";
+import { getWatchTriageActions, getWatchViewFavoriteRepos } from "./watchTriage";
 
 const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
@@ -39,5 +39,25 @@ describe("getWatchTriageActions", () => {
     expect(styles).toMatch(/\.watch-view-switcher\s*\{[^}]*display:\s*inline-flex;/s);
     expect(styles).toMatch(/\.watch-triage-button\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 60%\);/s);
     expect(styles).toMatch(/\.watch-clear-done-button\s*\{[^}]*color:\s*#ff7b72;/s);
+  });
+});
+
+describe("getWatchViewFavoriteRepos", () => {
+  const favorites = [
+    { owner: "getsentry", repo: "sentry" },
+    { owner: "jpnurmi", repo: "gha-watch" },
+  ];
+  const savedWatch = {
+    target: { owner: "getsentry", repo: "sentry" },
+  };
+
+  it("keeps every favorite available in the inbox", () => {
+    expect(getWatchViewFavoriteRepos(favorites, [savedWatch], "inbox")).toEqual(favorites);
+  });
+
+  it.each(["saved", "done"] as const)("marks visible repositories as favorites in %s", (state) => {
+    expect(getWatchViewFavoriteRepos(favorites, [savedWatch], state)).toEqual([
+      { owner: "getsentry", repo: "sentry" },
+    ]);
   });
 });
