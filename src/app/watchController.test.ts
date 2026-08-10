@@ -210,8 +210,8 @@ function existingWatch(): WatchRecord {
 }
 
 describe("watchController", () => {
-  it("adds a watch and fetches baseline state without notifying", async () => {
-    const { deps, notifications } = createDeps([
+  it("publishes a watch with its baseline state without notifying", async () => {
+    const { deps, notifications, saves } = createDeps([
       {
         status: "queued",
         conclusion: null,
@@ -223,6 +223,10 @@ describe("watchController", () => {
       },
     ]);
     const controller = createWatchController(deps);
+    const emittedStatuses: string[][] = [];
+    controller.subscribe(() => {
+      emittedStatuses.push(controller.getWatches().map((watch) => watch.status));
+    });
 
     await controller.add(runTarget);
 
@@ -239,6 +243,8 @@ describe("watchController", () => {
       },
     ]);
     expect(notifications).toEqual([]);
+    expect(emittedStatuses).toEqual([["queued"]]);
+    expect(saves.map((saved) => saved.map((watch) => watch.status))).toEqual([["queued"]]);
   });
 
   it("moves an explicitly re-added watch back to the inbox", async () => {

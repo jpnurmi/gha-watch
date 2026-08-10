@@ -230,6 +230,23 @@ export function createWatchController(
     }
   }
 
+  async function createBaselineWatch(target: WatchTarget): Promise<WatchRecord> {
+    const [watch] = addWatch([], target);
+
+    try {
+      const snapshot = await deps.fetchState(target);
+      metadataHydratedWatchIds.add(watch.id);
+      return withBaselineSnapshot(watch, snapshot);
+    } catch (error) {
+      return {
+        ...watch,
+        status: "error",
+        lastSeenStatus: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   async function refreshPullRequestDetails(targets = getTrackedPullRequestTargets(watches)): Promise<void> {
     if (!deps.fetchPullRequestDetails) {
       return;
@@ -335,10 +352,9 @@ export function createWatchController(
       setSuppressions(removeWatchSuppression(suppressions, id));
     }
 
-    const previous = watches;
-    const next = addWatch(watches, target);
+    const existingWatch = watches.find((watch) => watch.id === id);
 
-    if (next === previous) {
+    if (existingWatch) {
       if (reactivateExisting) {
         const reactivated = setWatchesTriageState(watches, [id], "inbox", getNow());
 
@@ -350,10 +366,18 @@ export function createWatchController(
       return;
     }
 
-    setWatches(next);
+    const baselineWatch = await createBaselineWatch(target);
+
+    if (
+      watches.some((watch) => watch.id === id) ||
+      (!reactivateExisting && isWatchSuppressed(suppressions, id))
+    ) {
+      return;
+    }
+
+    setWatches([...watches, baselineWatch]);
 
     void refreshRepositoryIcon(target);
-    await loadBaselineState(id, target);
   }
 
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
@@ -550,21 +574,7 @@ export function createWatchController(
       return;
     }
 
-    const [pendingWatch] = addWatch([], target);
-    let subscribedWatch: WatchRecord;
-
-    try {
-      const snapshot = await deps.fetchState(target);
-      metadataHydratedWatchIds.add(id);
-      subscribedWatch = withBaselineSnapshot(pendingWatch, snapshot);
-    } catch (error) {
-      subscribedWatch = {
-        ...pendingWatch,
-        status: "error",
-        lastSeenStatus: "error",
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
+    const subscribedWatch = await createBaselineWatch(target);
 
     const concurrentlyAddedWatch = watches.find((watch) => watch.id === id);
 
