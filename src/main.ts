@@ -465,8 +465,7 @@ function render(): void {
                 aria-busy="${isPolling ? "true" : "false"}"
               >
                 <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M13.25 5.75A5.5 5.5 0 1 0 13.4 10" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.6"/>
-                  <path d="m10.6 3.45 2.65 2.3 2.1-2.8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
+                  <path d="M13.4 10A5.5 5.5 0 1 1 13.25 5.75l2.1-2.8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"/>
                 </svg>
               </button>
               ${renderFreshnessIndicator()}
