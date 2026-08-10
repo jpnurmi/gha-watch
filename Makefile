@@ -17,6 +17,9 @@ help:
 deps:
 	$(NPM) install
 
+node_modules:
+	$(MAKE) deps
+
 dev:
 	$(NPM) run dev
 
@@ -31,7 +34,7 @@ check: typecheck test
 web-build:
 	$(NPM) run build
 
-build:
+build: | node_modules
 	@set -eu; \
 	case "$$(uname -s)" in \
 		Linux*) \
