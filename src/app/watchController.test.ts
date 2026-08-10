@@ -150,6 +150,7 @@ function createDeps(
           {
             runId: "789",
             title: "CI: Build",
+            event: "pull_request",
             workflowName: "CI",
             status: "in_progress",
             branchName: "feature/tray-popup",
@@ -159,6 +160,7 @@ function createDeps(
           {
             runId: "790",
             title: "CodeQL: Analyze",
+            event: "pull_request",
             workflowName: "CodeQL",
             status: "in_progress",
             branchName: "feature/tray-popup",
@@ -908,7 +910,7 @@ describe("watchController", () => {
       prNumber: "51",
       url: prRunTarget.url,
     };
-    const { deps, fetches, notifications } = createDeps([
+    const { deps, fetches, notifications, saves } = createDeps([
       subscribedRunSnapshot,
       {
         status: "in_progress",
@@ -926,7 +928,7 @@ describe("watchController", () => {
         target: prTarget,
         sourceState: "ready",
         label: "Refine lifecycle icons",
-        metadata: { prTitle: "Refine lifecycle icons" },
+        metadata: { prTitle: "Refine lifecycle icons", branchName: "feature/tray-popup" },
         status: "completed:success",
         lastSeenStatus: "completed:success",
         lastState: { status: "completed", conclusion: "success" },
@@ -934,6 +936,10 @@ describe("watchController", () => {
         error: undefined,
       },
     ]);
+    const emittedWatchIds: string[][] = [];
+    controller.subscribe(() => {
+      emittedWatchIds.push(controller.getWatches().map((watch) => watch.id));
+    });
 
     await controller.syncWorkflowSubscriptions([
       {
@@ -969,7 +975,6 @@ describe("watchController", () => {
     expect(fetches).toMatchObject([
       { kind: "run", runId: "789" },
       { kind: "pr", prNumber: "51" },
-      { kind: "run", runId: "789" },
     ]);
     expect(controller.getWatches()).toMatchObject([
       {
@@ -981,6 +986,8 @@ describe("watchController", () => {
       },
     ]);
     expect(notifications).toEqual([]);
+    expect(saves.every((saved) => saved.every((watch) => watch.id !== "getsentry/sentry/run/789"))).toBe(true);
+    expect(emittedWatchIds.every((ids) => !ids.includes("getsentry/sentry/run/789"))).toBe(true);
   });
 
   it("reuses a uniquely matching PR branch when GitHub omits the PR reference", async () => {

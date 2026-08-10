@@ -218,23 +218,7 @@ export function createWatchController(
   async function loadBaselineState(id: string, target: WatchTarget): Promise<void> {
     try {
       const snapshot = await deps.fetchState(target);
-      const status = formatWatchState(snapshot);
-      updateWatch(id, (watch) => ({
-        ...watch,
-        target: withSnapshotPrNumber(watch.target, snapshot.prNumber),
-        label: getSnapshotLabel(watch, snapshot),
-        metadata: mergeWatchMetadata(watch.metadata, snapshot.metadata),
-        status,
-        lastSeenStatus: status,
-        lastState: {
-          status: snapshot.status,
-          conclusion: snapshot.conclusion,
-          ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
-        },
-        timing: snapshot.timing,
-        active: !isTerminalStatus(snapshot),
-        error: undefined,
-      }));
+      updateWatch(id, (watch) => withBaselineSnapshot(watch, snapshot));
     } catch (error) {
       updateWatch(id, (watch) => ({
         ...watch,
@@ -459,35 +443,82 @@ export function createWatchController(
       url: run.url,
     } as const;
 
-    await addWatchTarget(target);
-    reuseTrackedPullRequestForSubscribedRun(target, run);
-  }
+    const id = getWatchId(target);
+    const existingWatch = watches.find((watch) => watch.id === id);
 
-  function reuseTrackedPullRequestForSubscribedRun(
-    target: CheckWatchTarget,
-    run: ActiveWorkflowRun,
-  ): void {
-    const subscribedWatch = watches.find((watch) => watch.id === getWatchId(target));
-
-    if (!subscribedWatch) {
+    if (existingWatch) {
+      reuseTrackedPullRequestForSubscribedRun(existingWatch, target, run);
       return;
     }
 
-    const trackedPullRequests = watches.filter(
-      (watch): watch is WatchRecord & { target: PrWatchTarget } =>
-        watch.target.kind === "pr" &&
-        getWatchTriageState(watch) !== "done" &&
-        getRepositoryKey(watch.target) === getRepositoryKey(target),
+    if (isWatchSuppressed(suppressions, id)) {
+      return;
+    }
+
+    const activeTrackedPullRequest = findTrackedPullRequestByBranch(
+      getTrackedPullRequests(target),
+      run.branchName,
+      run,
     );
+
+    if (activeTrackedPullRequest?.active) {
+      return;
+    }
+
+    const [pendingWatch] = addWatch([], target);
+    let subscribedWatch: WatchRecord;
+
+    try {
+      const snapshot = await deps.fetchState(target);
+      metadataHydratedWatchIds.add(id);
+      subscribedWatch = withBaselineSnapshot(pendingWatch, snapshot);
+    } catch (error) {
+      subscribedWatch = {
+        ...pendingWatch,
+        status: "error",
+        lastSeenStatus: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    const concurrentlyAddedWatch = watches.find((watch) => watch.id === id);
+
+    if (concurrentlyAddedWatch) {
+      reuseTrackedPullRequestForSubscribedRun(concurrentlyAddedWatch, target, run);
+      return;
+    }
+
+    if (isWatchSuppressed(suppressions, id)) {
+      return;
+    }
+
+    if (reuseTrackedPullRequestForSubscribedRun(subscribedWatch, target, run)) {
+      return;
+    }
+
+    setWatches([...watches, subscribedWatch]);
+    void refreshRepositoryIcon(target);
+  }
+
+  function reuseTrackedPullRequestForSubscribedRun(
+    subscribedWatch: WatchRecord,
+    target: CheckWatchTarget,
+    run: ActiveWorkflowRun,
+  ): boolean {
+    const trackedPullRequests = getTrackedPullRequests(target);
     const pullRequestTarget = getWatchPullRequestTarget(subscribedWatch);
     const trackedPullRequest = pullRequestTarget
       ? trackedPullRequests.find(
           (watch) => getPullRequestKey(watch.target) === getPullRequestKey(pullRequestTarget),
         )
-      : findTrackedPullRequestByBranch(trackedPullRequests, subscribedWatch, run);
+      : findTrackedPullRequestByBranch(
+          trackedPullRequests,
+          subscribedWatch.metadata?.branchName || run.branchName,
+          run,
+        );
 
     if (!trackedPullRequest) {
-      return;
+      return false;
     }
 
     const nextTrackedPullRequest = trackedPullRequest.active
@@ -502,10 +533,27 @@ export function createWatchController(
           error: subscribedWatch.error,
         };
 
-    setWatches(
-      watches
-        .filter((watch) => watch.id !== subscribedWatch.id)
-        .map((watch) => (watch.id === trackedPullRequest.id ? nextTrackedPullRequest : watch)),
+    const subscribedWatchIsPublished = watches.some((watch) => watch.id === subscribedWatch.id);
+
+    if (subscribedWatchIsPublished || nextTrackedPullRequest !== trackedPullRequest) {
+      setWatches(
+        watches
+          .filter((watch) => watch.id !== subscribedWatch.id)
+          .map((watch) => (watch.id === trackedPullRequest.id ? nextTrackedPullRequest : watch)),
+      );
+    }
+
+    return true;
+  }
+
+  function getTrackedPullRequests(
+    target: CheckWatchTarget,
+  ): Array<WatchRecord & { target: PrWatchTarget }> {
+    return watches.filter(
+      (watch): watch is WatchRecord & { target: PrWatchTarget } =>
+        watch.target.kind === "pr" &&
+        getWatchTriageState(watch) !== "done" &&
+        getRepositoryKey(watch.target) === getRepositoryKey(target),
     );
   }
 
@@ -753,6 +801,27 @@ function workflowNameIsSelected(workflowName: string | undefined, selectedWorkfl
   return Boolean(workflowName && selectedWorkflowNames.includes(workflowName));
 }
 
+function withBaselineSnapshot(watch: WatchRecord, snapshot: WatchSnapshot): WatchRecord {
+  const status = formatWatchState(snapshot);
+
+  return {
+    ...watch,
+    target: withSnapshotPrNumber(watch.target, snapshot.prNumber),
+    label: getSnapshotLabel(watch, snapshot),
+    metadata: mergeWatchMetadata(watch.metadata, snapshot.metadata),
+    status,
+    lastSeenStatus: status,
+    lastState: {
+      status: snapshot.status,
+      conclusion: snapshot.conclusion,
+      ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
+    },
+    timing: snapshot.timing,
+    active: !isTerminalStatus(snapshot),
+    error: undefined,
+  };
+}
+
 function withSnapshotPrNumber(target: WatchTarget, prNumber: string | undefined): WatchTarget {
   if (!prNumber || target.kind === "pr" || target.prNumber === prNumber) {
     return target;
@@ -852,21 +921,21 @@ function getPullRequestKey(target: PrWatchTarget): string {
 
 function findTrackedPullRequestByBranch(
   trackedPullRequests: Array<WatchRecord & { target: PrWatchTarget }>,
-  subscribedWatch: WatchRecord,
+  branchName: string | undefined,
   run: ActiveWorkflowRun,
 ): WatchRecord | undefined {
   if (run.event !== "pull_request" && run.event !== "pull_request_target") {
     return undefined;
   }
 
-  const branchName = subscribedWatch.metadata?.branchName?.trim() || run.branchName?.trim();
+  const cleanBranchName = branchName?.trim();
 
-  if (!branchName) {
+  if (!cleanBranchName) {
     return undefined;
   }
 
   const matches = trackedPullRequests.filter(
-    (watch) => watch.metadata?.branchName?.trim() === branchName,
+    (watch) => watch.metadata?.branchName?.trim() === cleanBranchName,
   );
   return matches.length === 1 ? matches[0] : undefined;
 }
