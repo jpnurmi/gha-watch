@@ -1,5 +1,4 @@
 NPM ?= npm
-MACOS_APP_DIR ?= $(HOME)/Applications
 
 .PHONY: help deps dev typecheck test check web-build build tauri-build clean
 
@@ -43,6 +42,11 @@ build:
 			;; \
 		*) \
 			$(NPM) run tauri build; \
+			printf '\033[1;32m%s\033[0m %s \033[1;33m%s\033[0m:\n%s\n' \
+				'    Install' \
+				'and' \
+				'restart' \
+				'        pkill -x gha-watch || true; ditto "$(CURDIR)/src-tauri/target/release/bundle/macos/GHA Watch.app" ~/Applications/"GHA Watch.app" && open ~/Applications/"GHA Watch.app"'; \
 			;; \
 	esac
 
