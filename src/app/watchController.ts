@@ -75,9 +75,14 @@ export type WatchController = {
   rerunFailed(id: string): Promise<void>;
   setOptions(options: WatchControllerOptions): void;
   syncWorkflowSubscriptions(favoriteRepos: FavoriteRepo[]): Promise<void>;
-  pollNow(): Promise<void>;
+  pollNow(options?: WatchPollOptions): Promise<void>;
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
+};
+
+export type WatchPollOptions = {
+  triageState?: Exclude<WatchTriageState, "done">;
+  includeInactive?: boolean;
 };
 
 export function createWatchController(
@@ -256,6 +261,10 @@ export function createWatchController(
     const detailsByKey = new Map<string, PullRequestDetails>();
     const batch = [...uniqueTargets.values()];
 
+    if (batch.length === 0) {
+      return;
+    }
+
     try {
       const details = await deps.fetchPullRequestDetails(batch);
 
@@ -298,10 +307,11 @@ export function createWatchController(
     }
   }
 
-  async function hydrateLegacyWatchMetadata(): Promise<void> {
+  async function hydrateLegacyWatchMetadata(triageState?: WatchTriageState): Promise<void> {
     const watchesMissingMetadata = watches.filter(
       (watch) =>
         getWatchTriageState(watch) !== "done" &&
+        (!triageState || getWatchTriageState(watch) === triageState) &&
         !watch.active &&
         watch.target.kind !== "pr" &&
         !watch.target.prNumber &&
@@ -496,7 +506,7 @@ export function createWatchController(
     const id = getWatchId(target);
     const existingWatch = watches.find((watch) => watch.id === id);
 
-    if (existingWatch && getWatchTriageState(existingWatch) === "done") {
+    if (existingWatch && getWatchTriageState(existingWatch) !== "inbox") {
       return;
     }
 
@@ -814,17 +824,24 @@ export function createWatchController(
       }
     },
 
-    async pollNow() {
+    async pollNow(pollOptions = {}) {
       const notificationTime = getNow();
+      const triageState = pollOptions.triageState ?? "inbox";
       pruneExpiredSuppressions(notificationTime);
       pruneExpiredDoneWatches(notificationTime);
-      const activeWatches = watches.filter(
-        (watch) => watch.active && getWatchTriageState(watch) !== "done",
+      const polledWatches = watches.filter(
+        (watch) =>
+          getWatchTriageState(watch) === triageState &&
+          (watch.active || pollOptions.includeInactive),
       );
-      await hydrateLegacyWatchMetadata();
+
+      if (!pollOptions.includeInactive) {
+        await hydrateLegacyWatchMetadata(triageState);
+      }
+
       const rowNotifications: WatchNotification[] = [];
 
-      for (const watch of activeWatches) {
+      for (const watch of polledWatches) {
         const snapshot = await deps.fetchState(watch.target);
         metadataHydratedWatchIds.add(watch.id);
         const nextState = {
@@ -861,10 +878,16 @@ export function createWatchController(
           continue;
         }
 
-        rowNotifications.push(createWatchNotification(changedWatch, notificationTime));
+        if (getWatchTriageState(changedWatch) === "inbox") {
+          rowNotifications.push(createWatchNotification(changedWatch, notificationTime));
+        }
       }
 
-      await refreshPullRequestDetails();
+      await refreshPullRequestDetails(
+        getTrackedPullRequestTargets(
+          watches.filter((watch) => getWatchTriageState(watch) === triageState),
+        ),
+      );
 
       if (deps.notificationsPaused?.()) {
         applyAutoDoneFinishedWatches();

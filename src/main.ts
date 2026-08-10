@@ -3055,7 +3055,14 @@ async function poll(forceVisibleData = false): Promise<void> {
         console.warn("Could not sync workflow subscriptions.", error);
       }
 
-      await controller.pollNow();
+      const watchView = forceVisibleData ? currentWatchView : "inbox";
+
+      if (watchView !== "done") {
+        await controller.pollNow({
+          triageState: watchView,
+          includeInactive: forceVisibleData,
+        });
+      }
       await refreshListedRepositoryCiStatuses(forceVisibleData);
       await updateRateLimit();
     }

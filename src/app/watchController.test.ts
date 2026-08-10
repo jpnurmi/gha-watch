@@ -1137,6 +1137,56 @@ describe("watchController", () => {
     });
   });
 
+  it("leaves saved authored PRs parked during subscription sync", async () => {
+    const pullRequestTarget = {
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry-native",
+      prNumber: "1972",
+      url: "https://github.com/getsentry/sentry-native/pull/1972",
+    } as const;
+    const savedWatch: WatchRecord = {
+      id: "getsentry/sentry-native/pull/1972",
+      target: pullRequestTarget,
+      sourceState: "ready",
+      label: "WIP: Respect consent",
+      metadata: {
+        prTitle: "WIP: Respect consent",
+        prUpdatedAt: "2026-08-10T15:58:03Z",
+        branchName: "jpnurmi/fix/crashpad-consent",
+      },
+      status: "completed:failure",
+      lastSeenStatus: "completed:failure",
+      lastState: { status: "completed", conclusion: "failure" },
+      triageState: "saved",
+      active: false,
+      error: undefined,
+    };
+    const { deps, fetches } = createDeps([]);
+    deps.fetchOpenPullRequests = async () => [
+      {
+        number: "1972",
+        title: "Respect consent for external crash reporters",
+        isDraft: false,
+        authorLogin: "jpnurmi",
+        headBranch: "jpnurmi/fix/crashpad-consent",
+        updatedAt: "2026-08-10T16:30:00Z",
+        url: pullRequestTarget.url,
+      },
+    ];
+    const controller = createWatchController(deps, [savedWatch]);
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry-native",
+      },
+    ]);
+
+    expect(fetches).toEqual([]);
+    expect(controller.getWatches()).toEqual([savedWatch]);
+  });
+
   it("requires a workflow run listing dependency before loading active workflow runs", async () => {
     const { deps } = createDeps([]);
     const controller = createWatchController({ ...deps, fetchActiveWorkflowRuns: undefined });
@@ -1343,6 +1393,85 @@ describe("watchController", () => {
         status: "completed:success",
         lastSeenStatus: "in_progress",
         active: false,
+      },
+    ]);
+  });
+
+  it("does not automatically refresh saved watches", async () => {
+    const { deps, fetches, notificationRecords } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "failure",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.add(runTarget);
+    controller.setTriageState(["getsentry/sentry/run/123"], "saved");
+    await controller.pollNow();
+
+    expect(notificationRecords).toEqual([]);
+    expect(fetches).toEqual([runTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        triageState: "saved",
+        status: "in_progress",
+        active: true,
+      },
+    ]);
+  });
+
+  it("refreshes saved watches on demand without notifying", async () => {
+    const { deps, notificationRecords } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "failure",
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.add(runTarget);
+    controller.setTriageState(["getsentry/sentry/run/123"], "saved");
+    await controller.pollNow({ triageState: "saved", includeInactive: true });
+
+    expect(notificationRecords).toEqual([]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        triageState: "saved",
+        status: "completed:failure",
+        active: false,
+      },
+    ]);
+
+    await controller.pollNow({ triageState: "saved", includeInactive: true });
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        triageState: "saved",
+        status: "in_progress",
+        active: true,
       },
     ]);
   });
