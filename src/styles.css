@@ -507,12 +507,8 @@ input {
   text-align: left;
 }
 
-.watch-group-toggle:hover:not([aria-disabled="true"]) {
+.watch-group-toggle:hover {
   color: rgb(238 241 245 / 70%);
-}
-
-.watch-group-toggle[aria-disabled="true"] {
-  cursor: default;
 }
 
 .watch-group-actions {

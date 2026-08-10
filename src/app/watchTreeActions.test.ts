@@ -137,7 +137,7 @@ describe("watch tree group actions", () => {
   });
 
   it("renders repository chevrons on the left with the same treatment as tree chevrons", () => {
-    expect(mainSource).toContain("${renderRepoGroupChevron(group, actions, isCollapsed)}");
+    expect(mainSource).toContain("${renderRepoGroupChevron(group, isCollapsed)}");
     expect(mainSource).toContain('class="watch-tree-chevron watch-group-toggle-chevron"');
     expect(mainSource).not.toContain('class="watch-group-chevron"');
     expect(styles).not.toContain(".watch-group-chevron");

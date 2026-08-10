@@ -610,10 +610,8 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
   const actions = getRepoHeaderActions({
     favorite: group.favorite,
     userCollapsed: collapsedGroups.has(group.repoLabel),
-    watchCount: group.rows.length,
   });
   const isCollapsed = actions.isCollapsed;
-  const collapseDisabled = actions.canToggleCollapse ? "" : `aria-disabled="true" data-disabled="true"`;
 
   return `
     <li
@@ -621,7 +619,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
       data-repo="${escapeHtml(group.repoLabel)}"
     >
       <div class="watch-group-header">
-        ${renderRepoGroupChevron(group, actions, isCollapsed)}
+        ${renderRepoGroupChevron(group, isCollapsed)}
         ${renderFavoriteRepoButton(group)}
         <span class="watch-group-meta">
           <button
@@ -630,7 +628,6 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
             data-action="toggle-group"
             data-repo="${escapeHtml(group.repoLabel)}"
             aria-expanded="${isCollapsed ? "false" : "true"}"
-            ${collapseDisabled}
           >
             <span class="watch-group-title">${escapeHtml(group.repoLabel)}</span>
           </button>
@@ -744,11 +741,8 @@ function renderRepoCiStatusGlyph(tone: RepoCiStatusViewModel["tone"]): string {
 
 function renderRepoGroupChevron(
   group: WatchGroupViewModel,
-  actions: RepoHeaderActions,
   isCollapsed: boolean,
 ): string {
-  const collapseDisabled = actions.canToggleCollapse ? "" : `aria-disabled="true" data-disabled="true"`;
-
   return `
     <button
       class="watch-tree-chevron watch-group-toggle-chevron"
@@ -758,7 +752,6 @@ function renderRepoGroupChevron(
       title="${isCollapsed ? "Expand" : "Collapse"}"
       aria-label="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(group.repoLabel)}"
       aria-expanded="${isCollapsed ? "false" : "true"}"
-      ${collapseDisabled}
     >
       ${renderChevronIcon(isCollapsed)}
     </button>
@@ -2129,12 +2122,6 @@ function getWatchReorderRowIds(element: HTMLElement): string[] {
 }
 
 function toggleRepoGroup(repoLabel: string): void {
-  const groupToggle = getRepoGroupElement(repoLabel)?.querySelector<HTMLElement>('[data-action="toggle-group"]');
-
-  if (groupToggle?.dataset.disabled === "true") {
-    return;
-  }
-
   collapsedGroups.toggle(repoLabel);
   isClearMenuOpen = false;
   repoCiStatusMenu = undefined;
