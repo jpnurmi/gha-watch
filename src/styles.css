@@ -433,8 +433,8 @@ input {
 }
 
 .watch-list {
-  --tree-left-padding: 4px;
-  --tree-chevron-width: 12px;
+  --tree-left-padding: 6px;
+  --tree-chevron-width: 10px;
   --tree-leading-width: 22px;
   --tree-column-gap: 4px;
   --tree-actions-width: 63px;
@@ -484,16 +484,12 @@ input {
   touch-action: none;
 }
 
-.watch-group-header:hover {
-  background: rgb(255 255 255 / 8%);
-}
-
 .watch-list.is-reordering .watch-group-header {
   background: rgb(88 166 255 / 7%);
   user-select: none;
 }
 
-.watch-group-toggle {
+.watch-group-link {
   display: grid;
   width: auto;
   max-width: 100%;
@@ -502,13 +498,14 @@ input {
   border: 0;
   padding: 0;
   background: transparent;
-  color: rgb(238 241 245 / 48%);
+  color: rgb(238 241 245 / 72%);
   cursor: pointer;
   text-align: left;
 }
 
-.watch-group-toggle:hover {
-  color: rgb(238 241 245 / 70%);
+.watch-group-link:hover,
+.watch-group-link:focus-visible {
+  color: rgb(238 241 245 / 92%);
 }
 
 .watch-group-actions {
@@ -575,7 +572,9 @@ input {
 .watch-group-subscribe-button:hover,
 .watch-group-workflow-button:hover,
 .watch-group-pr-button:hover,
-.watch-group-triage-button:hover {
+.watch-group-triage-button:hover,
+.watch-tree-chevron:hover:not([aria-disabled="true"]),
+.watch-tree-chevron:focus-visible:not([aria-disabled="true"]) {
   background: rgb(255 255 255 / 7%);
   color: rgb(238 241 245 / 78%);
 }
@@ -872,7 +871,6 @@ input {
   min-width: 0;
   overflow: hidden;
   flex: 0 1 auto;
-  color: rgb(238 241 245 / 72%);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.1;
@@ -976,23 +974,15 @@ button.repo-ci-status:focus-visible {
 }
 
 .watch-tree-chevron {
+  width: 18px;
+  height: 18px;
+  justify-self: center;
   border: 0;
+  border-radius: 6px;
   padding: 0;
   background: transparent;
   color: rgb(238 241 245 / 50%);
   cursor: pointer;
-}
-
-.watch-tree-chevron:hover:not([aria-disabled="true"]),
-.watch-tree-chevron:focus-visible:not([aria-disabled="true"]) {
-  color: rgb(238 241 245 / 80%);
-}
-
-.watch-group-header:hover .watch-tree-chevron:not([aria-disabled="true"]),
-.watch-group-header:focus-within .watch-tree-chevron:not([aria-disabled="true"]),
-.watch-tree-header:hover .watch-tree-chevron:not([aria-disabled="true"]),
-.watch-tree-header:focus-within .watch-tree-chevron:not([aria-disabled="true"]) {
-  color: rgb(238 241 245 / 80%);
 }
 
 .watch-tree-chevron[aria-disabled="true"] {
@@ -1015,6 +1005,10 @@ button.repo-ci-status:focus-visible {
   padding: 0;
   background: transparent;
   color: rgb(238 241 245 / 46%);
+  cursor: default;
+}
+
+button.watch-tree-leading {
   cursor: pointer;
 }
 
@@ -1032,10 +1026,6 @@ button.repo-ci-status:focus-visible {
   margin-top: 0;
 }
 
-.watch-tree-header:hover {
-  --watch-row-bg: #1a2028;
-}
-
 .watch-tree-main {
   display: flex;
   min-width: 0;
@@ -1045,7 +1035,7 @@ button.repo-ci-status:focus-visible {
   padding: 0;
   background: transparent;
   color: inherit;
-  cursor: pointer;
+  cursor: default;
   text-align: left;
 }
 
@@ -1120,16 +1110,7 @@ button.repo-ci-status:focus-visible {
         var(--watch-indent, 0px)
     );
   background: var(--watch-row-bg);
-  cursor: pointer;
-}
-
-.watch:hover {
-  --watch-row-bg: #1a2028;
-}
-
-.watch:focus-visible {
-  outline: 1px solid rgb(88 166 255 / 55%);
-  outline-offset: -1px;
+  cursor: default;
 }
 
 .watch.is-row-dragging,
@@ -1320,7 +1301,7 @@ button.repo-ci-status:focus-visible {
   padding: 0;
   background: transparent;
   color: inherit;
-  cursor: pointer;
+  cursor: default;
   text-align: left;
 }
 
@@ -1350,6 +1331,22 @@ button.repo-ci-status:focus-visible {
   align-items: center;
   gap: 6px;
   overflow: hidden;
+}
+
+.watch-title-link {
+  max-width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.watch-title-link:hover .watch-title-text,
+.watch-title-link:focus-visible .watch-title-text {
+  color: #58a6ff;
 }
 
 .watch-title-text {
@@ -1431,6 +1428,22 @@ button.repo-ci-status:focus-visible {
   align-items: center;
   gap: 4px;
   font-weight: 750;
+}
+
+button.watch-workflow-status {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+button.watch-workflow-status:hover,
+button.watch-workflow-status:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .watch-workflow-status svg {

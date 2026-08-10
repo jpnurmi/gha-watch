@@ -42,12 +42,12 @@ describe("watch tree group actions", () => {
     expect(styles).toMatch(/\.watch-group-header\s*\{[^}]*min-height:\s*28px;/s);
     expect(styles).toMatch(/\.watch-group-header\s*\{[^}]*background:\s*rgb\(255 255 255 \/ 6%\);/s);
     expect(styles).toMatch(/\.watch-group-title\s*\{[^}]*font-size:\s*12px;[^}]*font-weight:\s*750;/s);
-    expect(styles).toMatch(/\.watch-group-title\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 72%\);/s);
+    expect(styles).toMatch(/\.watch-group-link\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 72%\);/s);
   });
 
   it("uses one compact alignment grid for repository, tree, and leaf rows", () => {
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-left-padding:\s*4px;/s);
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-chevron-width:\s*12px;/s);
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-left-padding:\s*6px;/s);
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-chevron-width:\s*10px;/s);
     expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-column-gap:\s*4px;/s);
     expect(styles).toMatch(
       /\.watch-group-header\s*\{[^}]*grid-template-columns:\s*var\(--tree-chevron-width\) var\(--tree-leading-width\) minmax\(0,\s*1fr\) var\(\s*--repo-actions-width\s*\);/s,
@@ -71,11 +71,10 @@ describe("watch tree group actions", () => {
 
   it("keeps branch context compact without wrapping and exposes full labels", () => {
     expect(mainSource).toContain(
-      '<span class="watch-title-text" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>',
+      '<span class="watch-title-text" title="${escapeHtml(label)}">${escapeHtml(label)}</span>',
     );
-    expect(mainSource).toContain(
-      '<span class="watch-title-text" title="${escapeHtml(node.label)}">${escapeHtml(node.label)}</span>',
-    );
+    expect(mainSource).toContain("renderWatchTitleLink(row.label, row.prReference, row.url, [row.id])");
+    expect(mainSource).toContain("renderWatchTitleLink(node.label, node.referenceLabel, node.url, node.rowIds)");
     expect(mainSource).toContain("renderWatchMetadataContent(items, row.branchName)");
     expect(mainSource).toContain("renderWatchMetadataContent(items, node.branchName)");
     expect(mainSource).not.toContain('watch-label${row.branchName');
@@ -95,8 +94,8 @@ describe("watch tree group actions", () => {
   it("uses the same base background for PR, workflow, and job rows", () => {
     expect(styles).toMatch(/\.watch-tree-header\s*\{[^}]*background:\s*var\(--watch-row-bg\);/s);
     expect(styles).toMatch(/\.watch\s*\{[^}]*background:\s*var\(--watch-row-bg\);/s);
-    expect(styles).toMatch(/\.watch-tree-header:hover\s*\{[^}]*--watch-row-bg:\s*#1a2028;/s);
-    expect(styles).toMatch(/\.watch:hover\s*\{[^}]*--watch-row-bg:\s*#1a2028;/s);
+    expect(styles).not.toMatch(/\.watch-tree-header:hover\s*\{[^}]*--watch-row-bg:/s);
+    expect(styles).not.toMatch(/\.watch:hover\s*\{[^}]*--watch-row-bg:/s);
     expect(styles).not.toMatch(/\.watch-tree-node-workflow > \.watch-tree-header\s*\{[^}]*background:/s);
     expect(styles).not.toMatch(/\.watch-tree-header:hover\s*\{[^}]*background:/s);
   });
@@ -131,9 +130,12 @@ describe("watch tree group actions", () => {
     expect(mainSource).not.toContain("${chevron}");
     expect(mainSource).toContain('data-action="toggle-tree-node"');
     expect(styles).toMatch(
-      /\.watch-tree-header:hover \.watch-tree-chevron:not\(\[aria-disabled="true"\]\),[^{]*\.watch-tree-header:focus-within \.watch-tree-chevron:not\(\[aria-disabled="true"\]\)\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 80%\);/s,
+      /\.watch-tree-chevron\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*border-radius:\s*6px;/s,
     );
-    expect(styles).not.toMatch(/\.watch-tree-header:hover \.watch-tree-chevron[^{]*\{[^}]*background:/s);
+    expect(styles).toMatch(
+      /\.watch-group-triage-button:hover,\s*\.watch-tree-chevron:hover:not\(\[aria-disabled="true"\]\),\s*\.watch-tree-chevron:focus-visible:not\(\[aria-disabled="true"\]\)\s*\{[^}]*background:\s*rgb\(255 255 255 \/ 7%\);[^}]*color:\s*rgb\(238 241 245 \/ 78%\);/s,
+    );
+    expect(styles).not.toMatch(/\.watch-tree-header:hover \.watch-tree-chevron/s);
   });
 
   it("renders repository chevrons on the left with the same treatment as tree chevrons", () => {
@@ -145,11 +147,21 @@ describe("watch tree group actions", () => {
       /\.watch-group-header\s*\{[^}]*grid-template-columns:\s*var\(--tree-chevron-width\) var\(--tree-leading-width\) minmax\(0,\s*1fr\) var\(\s*--repo-actions-width\s*\);/s,
     );
     expect(mainSource).toContain(
-      'event.target.closest(".watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron, .repo-ci-status")',
+      "event.target.closest('.watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron, .repo-ci-status, [data-action=\"open-github-url\"]')",
     );
+    expect(styles).not.toMatch(/\.watch-group-header:hover \.watch-tree-chevron/s);
+  });
+
+  it("opens repository slugs without making repository backgrounds interactive", () => {
+    expect(mainSource).toContain('class="watch-group-link"');
+    expect(mainSource).toContain('data-url="${escapeHtml(getRepositoryUrl(group))}"');
+    expect(mainSource).not.toContain('header.addEventListener("click"');
+    expect(styles).not.toMatch(/\.watch-group-header:hover\s*\{[^}]*background:/s);
+    expect(styles).not.toMatch(/\.watch-group-link\s*\{[^}]*text-decoration:/s);
     expect(styles).toMatch(
-      /\.watch-group-header:hover \.watch-tree-chevron:not\(\[aria-disabled="true"\]\),[^{]*\.watch-group-header:focus-within \.watch-tree-chevron:not\(\[aria-disabled="true"\]\)/s,
+      /\.watch-group-link:hover,[^{]*\.watch-group-link:focus-visible\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 92%\);/s,
     );
+    expect(styles).not.toMatch(/\.watch-group-title\s*\{[^}]*color:/s);
   });
 
   it("renders repository triage controls and hides repo quick actions until hover", () => {
@@ -183,15 +195,22 @@ describe("watch tree group actions", () => {
     expect(mainSource).not.toContain("repo-ci-item-label");
   });
 
-  it("opens watches from row clicks instead of hover-only open-link actions", () => {
+  it("opens explicit titles and statuses without making row backgrounds clickable", () => {
     expect(mainSource).toContain("const hasVisibleChildren = node.children.length > 0 || node.rows.length > 0;");
-    expect(mainSource).toContain('data-url="${escapeHtml(row.url)}"');
-    expect(mainSource).toContain('role="button"');
-    expect(mainSource).toContain('tabindex="0"');
+    expect(mainSource).toContain('class="watch-title-cluster watch-title-link"');
+    expect(mainSource).toContain('data-action="open-github-url"');
+    expect(mainSource).toContain('title="Open Actions status"');
     expect(mainSource).toContain('class="watch-main"');
-    expect(mainSource).toContain("openWatchRow(row, event)");
+    expect(mainSource).not.toContain("openWatchRow(row, event)");
+    expect(mainSource).not.toContain('row.addEventListener("click"');
+    expect(mainSource).not.toContain('row.addEventListener("keydown"');
     expect(mainSource).not.toContain("renderOpenLinkButton");
-    expect(mainSource).not.toContain('data-action="open"');
+    expect(styles).toMatch(
+      /\.watch-title-link:hover \.watch-title-text,[^{]*\.watch-title-link:focus-visible \.watch-title-text\s*\{[^}]*color:\s*#58a6ff;/s,
+    );
+    expect(styles).not.toMatch(
+      /\.watch-title-link:hover \.watch-title-text,[^{]*\.watch-title-link:focus-visible \.watch-title-text\s*\{[^}]*text-decoration:/s,
+    );
     expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*63px;/s);
     expect(styles).toMatch(
       /\.watch \.watch-action-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
@@ -218,7 +237,8 @@ describe("watch tree group actions", () => {
   });
 
   it("renders unseen tree indicators on the leading icon and keeps triage controls available", () => {
-    expect(mainSource).toContain("renderWatchTreeLeading(node, depth, actionLabel, treeToggleAttributes, isCollapsed)");
+    expect(mainSource).toContain("renderWatchTreeLeading(node, depth, isCollapsed)");
+    expect(mainSource).toContain('return `<span class="${className}" aria-hidden="true">${leadingSlot}</span>`;');
     expect(mainSource).toContain("shouldShowWatchTreeUnseenIndicator(node, isCollapsed)");
     expect(mainSource).toContain("hasVisibleUnseenDescendantIndicator(node)");
     expect(mainSource).toContain('data-action="mark-seen"');
@@ -231,8 +251,8 @@ describe("watch tree group actions", () => {
 
   it("keeps action tooltips short while preserving descriptive accessible labels", () => {
     expect(mainSource).toContain('title="${action.label}"');
-    expect(mainSource).toContain('aria-label="Open ${escapeHtml(row.label)} in GitHub"');
-    expect(mainSource).not.toContain('title="Open ${escapeHtml(row.label)} in GitHub"');
+    expect(mainSource).toContain('aria-label="Open ${escapeHtml(label)} on GitHub"');
+    expect(mainSource).toContain('aria-label="Open Actions status for ${escapeHtml(link.label)}"');
   });
 
   it("aligns top-level group actions with row actions", () => {

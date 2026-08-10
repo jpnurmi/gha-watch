@@ -1,6 +1,5 @@
 export const repoReorderLongPressMs = 350;
 export const repoReorderMoveTolerancePx = 6;
-export const repoReorderClickSuppressMs = 500;
 
 export function isRepoReorderLongPress(durationMs: number): boolean {
   return durationMs >= repoReorderLongPressMs;
