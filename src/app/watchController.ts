@@ -96,6 +96,7 @@ export function createWatchController(
   let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
   let options: WatchControllerOptions = initialOptions;
   const metadataHydratedWatchIds = new Set<string>();
+  const repositoryIconRefreshes = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
 
   if (watches !== normalizedWatches) {
@@ -160,22 +161,54 @@ export function createWatchController(
     setSuppressions(clearExpiredWatchSuppressions(suppressions, now));
   }
 
-  async function refreshRepositoryIcon(id: string, target: ParsedWatchTarget): Promise<void> {
+  async function refreshRepositoryIcon(target: ParsedWatchTarget): Promise<void> {
     if (!deps.fetchRepositoryIconUrl) {
       return;
     }
 
-    const current = watches.find((watch) => watch.id === id);
+    const repoKey = getRepositoryKey(target);
+    const pending = repositoryIconRefreshes.get(repoKey);
 
-    if (!current || current.repoIconUrl) {
+    if (pending) {
+      return pending;
+    }
+
+    const refresh = refreshRepositoryIconNow(target);
+    repositoryIconRefreshes.set(repoKey, refresh);
+
+    try {
+      await refresh;
+    } finally {
+      if (repositoryIconRefreshes.get(repoKey) === refresh) {
+        repositoryIconRefreshes.delete(repoKey);
+      }
+    }
+  }
+
+  async function refreshRepositoryIconNow(target: ParsedWatchTarget): Promise<void> {
+    const repoKey = getRepositoryKey(target);
+    const repoWatches = watches.filter((watch) => getRepositoryKey(watch.target) === repoKey);
+
+    if (repoWatches.every((watch) => watch.repoIconUrl)) {
       return;
     }
 
     try {
-      const repoIconUrl = await deps.fetchRepositoryIconUrl(target);
+      const existingIcon = repoWatches.find((watch) => watch.repoIconUrl)?.repoIconUrl;
+      const repoIconUrl = existingIcon ?? await deps.fetchRepositoryIconUrl?.(target);
 
-      if (repoIconUrl) {
-        updateWatch(id, (watch) => ({ ...watch, repoIconUrl }));
+      if (!repoIconUrl) {
+        return;
+      }
+
+      const nextWatches = watches.map((watch) =>
+        getRepositoryKey(watch.target) === repoKey && !watch.repoIconUrl
+          ? { ...watch, repoIconUrl }
+          : watch,
+      );
+
+      if (nextWatches.some((watch, index) => watch !== watches[index])) {
+        setWatches(nextWatches);
       }
     } catch {
       // Missing avatars should not interfere with status watching.
@@ -334,7 +367,7 @@ export function createWatchController(
 
     setWatches(next);
 
-    void refreshRepositoryIcon(id, target);
+    void refreshRepositoryIcon(target);
     await loadBaselineState(id, target);
   }
 
@@ -513,7 +546,17 @@ export function createWatchController(
     },
 
     async refreshRepositoryIcons() {
-      await Promise.all(watches.map((watch) => refreshRepositoryIcon(watch.id, watch.target)));
+      const repositories = new Map<string, ParsedWatchTarget>();
+
+      for (const watch of watches) {
+        const repoKey = getRepositoryKey(watch.target);
+
+        if (!repositories.has(repoKey)) {
+          repositories.set(repoKey, watch.target);
+        }
+      }
+
+      await Promise.all([...repositories.values()].map(refreshRepositoryIcon));
     },
 
     async refreshWatchMetadata() {
@@ -751,4 +794,8 @@ function withPullRequestDetails(
 
 function getPullRequestKey(target: PrWatchTarget): string {
   return `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}#${target.prNumber}`;
+}
+
+function getRepositoryKey(target: Pick<ParsedWatchTarget, "owner" | "repo">): string {
+  return `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}`;
 }

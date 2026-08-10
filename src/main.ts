@@ -5,6 +5,7 @@ import { createCollapsedGroups } from "./app/collapsedGroups";
 import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
+import { createRepositoryIconProvider } from "./app/repositoryIcon";
 import { shouldRefreshRepoCiStatus } from "./app/repoCiRefresh";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
@@ -128,6 +129,9 @@ const isDemoMode =
   new URLSearchParams(window.location.search).get("demo") === "checks";
 const getAuthenticatedUserLogin = createAuthenticatedUserLoginProvider(
   isDemoMode ? async () => "jpnurmi" : fetchAuthenticatedUserLogin,
+);
+const getRepositoryIconUrl = createRepositoryIconProvider(
+  isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
 );
 let isAdding = false;
 let addError: string | undefined;
@@ -260,7 +264,7 @@ const controller = createWatchController(
       ? async (targets) => targets.map(() => ({ state: "ready" as const, title: "Demo pull request" }))
       : fetchPullRequestDetails,
     fetchRepositoryDefaultBranch: getCachedRepositoryDefaultBranch,
-    fetchRepositoryIconUrl: isDemoMode ? async () => undefined : fetchRepositoryIconUrl,
+    fetchRepositoryIconUrl: getRepositoryIconUrl,
     fetchUserActiveWorkflowRuns: isDemoMode
       ? fetchDemoUserActiveWorkflowRuns
       : async (target) => fetchUserActiveWorkflowRuns(target, await getAuthenticatedUserLogin()),
@@ -2658,7 +2662,7 @@ async function refreshFavoriteRepoIcon(repo: Pick<FavoriteRepo, "owner" | "repo"
   }
 
   try {
-    const repoIconUrl = await fetchRepositoryIconUrl(repo);
+    const repoIconUrl = await getRepositoryIconUrl(repo);
     const favoriteRepos = updateFavoriteRepoIcon(settings.favoriteRepos, repo, repoIconUrl);
 
     if (favoriteRepos !== settings.favoriteRepos) {

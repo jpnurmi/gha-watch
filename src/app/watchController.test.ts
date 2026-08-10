@@ -1605,26 +1605,55 @@ describe("watchController", () => {
     ]);
   });
 
-  it("refreshes missing repository icons for saved watches", async () => {
+  it("refreshes repository icons once per repository", async () => {
     const { deps } = createDeps([]);
+    let fetches = 0;
     const controller = createWatchController(
       {
         ...deps,
         async fetchRepositoryIconUrl(target) {
+          fetches += 1;
           expect(target).toBe(runTarget);
           return "https://avatars.githubusercontent.com/u/1396951?v=4";
         },
       },
-      [existingWatch()],
+      [existingWatch(), { ...existingWatch(), id: "getsentry/sentry/job/456", target: jobTarget }],
     );
 
     await controller.refreshRepositoryIcons();
 
+    expect(fetches).toBe(1);
     expect(controller.getWatches()).toMatchObject([
       {
         repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
       },
+      {
+        repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
+      },
     ]);
+  });
+
+  it("reuses a stored icon for other watches in the repository", async () => {
+    const { deps } = createDeps([]);
+    const controller = createWatchController(
+      {
+        ...deps,
+        async fetchRepositoryIconUrl() {
+          throw new Error("The stored icon should be reused.");
+        },
+      },
+      [
+        {
+          ...existingWatch(),
+          repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
+        },
+        { ...existingWatch(), id: "getsentry/sentry/job/456", target: jobTarget },
+      ],
+    );
+
+    await controller.refreshRepositoryIcons();
+
+    expect(controller.getWatches()[1].repoIconUrl).toBe("https://avatars.githubusercontent.com/u/1396951?v=4");
   });
 
   it("reruns failed jobs for an existing watch", async () => {
