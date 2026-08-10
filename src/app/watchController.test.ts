@@ -895,6 +895,58 @@ describe("watchController", () => {
     expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/789"]);
   });
 
+  it("reuses a tracked PR for a subscribed workflow run", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Refine lifecycle icons",
+        metadata: {
+          workflowName: "CI",
+          runTitle: "Refine lifecycle icons",
+        },
+        prNumber: "51",
+        url: prRunTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [
+      {
+        id: "getsentry/sentry/pull/51",
+        target: prTarget,
+        sourceState: "ready",
+        label: "Refine lifecycle icons",
+        metadata: { prTitle: "Refine lifecycle icons" },
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        userWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(fetches).toMatchObject([{ kind: "run", runId: "789" }]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/pull/51",
+        target: prTarget,
+        label: "Refine lifecycle icons",
+        metadata: { prTitle: "Refine lifecycle icons" },
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+    ]);
+  });
+
   it("requires a workflow run listing dependency before loading active workflow runs", async () => {
     const { deps } = createDeps([]);
     const controller = createWatchController({ ...deps, fetchActiveWorkflowRuns: undefined });

@@ -451,13 +451,54 @@ export function createWatchController(
     repo: Pick<FavoriteRepo, "owner" | "repo">,
     run: ActiveWorkflowRun,
   ): Promise<void> {
-    await addWatchTarget({
+    const target = {
       kind: "run",
       owner: repo.owner,
       repo: repo.repo,
       runId: run.runId,
       url: run.url,
-    });
+    } as const;
+
+    await addWatchTarget(target);
+    reuseTrackedPullRequestForSubscribedRun(target);
+  }
+
+  function reuseTrackedPullRequestForSubscribedRun(target: CheckWatchTarget): void {
+    const subscribedWatch = watches.find((watch) => watch.id === getWatchId(target));
+    const pullRequestTarget = subscribedWatch ? getWatchPullRequestTarget(subscribedWatch) : undefined;
+
+    if (!subscribedWatch || !pullRequestTarget) {
+      return;
+    }
+
+    const trackedPullRequest = watches.find(
+      (watch) =>
+        watch.target.kind === "pr" &&
+        getWatchTriageState(watch) !== "done" &&
+        getPullRequestKey(watch.target) === getPullRequestKey(pullRequestTarget),
+    );
+
+    if (!trackedPullRequest) {
+      return;
+    }
+
+    setWatches(
+      watches
+        .filter((watch) => watch.id !== subscribedWatch.id)
+        .map((watch) =>
+          watch.id === trackedPullRequest.id
+            ? {
+                ...watch,
+                status: subscribedWatch.status,
+                lastSeenStatus: subscribedWatch.lastSeenStatus,
+                lastState: subscribedWatch.lastState,
+                timing: subscribedWatch.timing,
+                active: true,
+                error: subscribedWatch.error,
+              }
+            : watch,
+        ),
+    );
   }
 
   return {
