@@ -330,7 +330,7 @@ describe("watchController", () => {
     const controller = createWatchController({
       ...deps,
       async fetchPullRequestDetails() {
-        return [{ state: "ready", title: "Pull request #51" }];
+        return [{ branchName: "feature/flaky-ci", state: "ready", title: "Pull request #51" }];
       },
     });
 
@@ -343,6 +343,7 @@ describe("watchController", () => {
         target: prTarget,
         sourceState: "ready",
         label: "Pull request #51",
+        metadata: { branchName: "feature/flaky-ci", prTitle: "Pull request #51" },
         status: "queued",
         lastSeenStatus: "queued",
       },

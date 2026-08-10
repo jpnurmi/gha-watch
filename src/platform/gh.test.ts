@@ -291,7 +291,12 @@ describe("fetchWatchState", () => {
       stdout: JSON.stringify({
         data: {
           repository0: {
-            pullRequest: { isDraft: true, state: "OPEN", title: "Draft pull request" },
+            pullRequest: {
+              headRefName: "feature/draft",
+              isDraft: true,
+              state: "OPEN",
+              title: "Draft pull request",
+            },
           },
           repository1: {
             pullRequest: { isDraft: false, state: "OPEN", title: "Ready pull request" },
@@ -315,7 +320,7 @@ describe("fetchWatchState", () => {
     }));
 
     await expect(fetchPullRequestDetails(targets, executor)).resolves.toEqual([
-      { state: "draft", title: "Draft pull request" },
+      { branchName: "feature/draft", state: "draft", title: "Draft pull request" },
       { state: "ready", title: "Ready pull request" },
       { state: "merged", title: "Merged pull request" },
       { state: "closed", title: "Closed pull request" },
@@ -329,6 +334,7 @@ describe("fetchWatchState", () => {
       expect.stringContaining("pullRequest(number: $number3)"),
     ]);
     expect(calls[0].args).toContain("number3=54");
+    expect(calls[0].args[3]).toContain("headRefName");
   });
 
   it("keeps missing pull request details isolated within a batch", async () => {

@@ -248,6 +248,7 @@ describe("createPopupViewModel", () => {
         sourceState: "ready",
         label: "Pull request #51",
         metadata: {
+          branchName: "feature/flaky-ci",
           prTitle: "Fix flaky CI",
         },
         status: "in_progress",
@@ -262,6 +263,7 @@ describe("createPopupViewModel", () => {
         row: {
           id: "getsentry/sentry/pull/51",
           label: "Fix flaky CI",
+          branchName: "feature/flaky-ci",
           prReference: "#51",
           prState: { label: "Ready", tone: "ready" },
           subject: "pull-request",

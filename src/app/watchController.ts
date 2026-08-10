@@ -814,11 +814,16 @@ function withPullRequestDetails(
 ): WatchRecord {
   const source = watch.target.kind === "pr" ? watch.source : watch.source ?? target;
   const label = watch.target.kind === "pr" ? details.title : watch.label;
+  const metadata = mergeWatchMetadata(watch.metadata, {
+    prTitle: details.title,
+    ...(details.branchName ? { branchName: details.branchName } : {}),
+  });
 
   if (
     watch.sourceState === details.state &&
     watch.label === label &&
-    watch.metadata?.prTitle === details.title &&
+    watch.metadata?.prTitle === metadata?.prTitle &&
+    watch.metadata?.branchName === metadata?.branchName &&
     watch.source === source
   ) {
     return watch;
@@ -829,7 +834,7 @@ function withPullRequestDetails(
     ...(source ? { source } : {}),
     sourceState: details.state,
     label,
-    metadata: mergeWatchMetadata(watch.metadata, { prTitle: details.title }),
+    metadata,
   };
 }
 

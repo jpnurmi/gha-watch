@@ -68,6 +68,7 @@ type PrCheckResponse = {
 };
 
 type PullRequestDetailsResponse = {
+  headRefName?: string;
   isDraft?: boolean;
   state?: string;
   title?: string;
@@ -107,6 +108,7 @@ export type OpenPullRequest = {
 };
 
 export type PullRequestDetails = {
+  branchName?: string;
   state: PrSourceState;
   title: string;
 };
@@ -1083,7 +1085,7 @@ function createPullRequestDetailsQuery(targets: PrWatchTarget[]): { args: string
     variableDefinitions.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
     selections.push(
       `repository${index}: repository(owner: $owner${index}, name: $repo${index}) { ` +
-        `pullRequest(number: $number${index}) { title state isDraft } }`,
+        `pullRequest(number: $number${index}) { title state isDraft headRefName } }`,
     );
   });
 
@@ -1111,7 +1113,10 @@ function normalizePullRequestDetails(
   }
 
   try {
+    const branchName = response.headRefName?.trim();
+
     return {
+      ...(branchName ? { branchName } : {}),
       state: getPullRequestState(response),
       title: requiredString(response.title?.trim(), "pull request title"),
     };
