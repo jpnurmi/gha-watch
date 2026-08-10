@@ -1194,7 +1194,7 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
         >
           <span class="watch-label${node.branchName ? " has-branch-badge" : ""}">
             <span class="watch-title-cluster">
-              <span class="watch-title-text">${escapeHtml(node.label)}</span>
+              <span class="watch-title-text" title="${escapeHtml(node.label)}">${escapeHtml(node.label)}</span>
               ${node.referenceLabel ? `<span class="watch-title-reference">${escapeHtml(node.referenceLabel)}</span>` : ""}
             </span>
             ${renderBranchBadge(node.branchName)}
@@ -1349,7 +1349,7 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
       <div class="watch-main">
         <span class="watch-label${row.branchName ? " has-branch-badge" : ""}">
           <span class="watch-title-cluster">
-            <span class="watch-title-text">${escapeHtml(row.label)}</span>
+            <span class="watch-title-text" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>
             ${row.prReference ? `<span class="watch-title-reference">${escapeHtml(row.prReference)}</span>` : ""}
           </span>
           ${renderBranchBadge(row.branchName)}

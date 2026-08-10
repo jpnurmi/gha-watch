@@ -30,27 +30,25 @@ describe("shouldDismissPendingWatchActionOnRowLeave", () => {
 });
 
 describe("watch action confirmation layout", () => {
-  it("keeps the title column stable while a confirmation button is visible", () => {
+  it("overlays row actions without reserving title width", () => {
     expect(styles).toMatch(
       /\.watch\s*\{[^}]*grid-template-columns:\s*var\(--tree-leading-width\) minmax\(0,\s*1fr\);/s,
     );
-    expect(styles).toMatch(
-      /\.watch\.has-actions\s*\{[^}]*grid-template-columns:\s*var\(--tree-leading-width\) minmax\(0,\s*1fr\) var\(--tree-actions-width\);/s,
+    expect(styles).not.toMatch(
+      /\.watch\.has-actions\s*\{[^}]*grid-template-columns:[^}]*var\(--tree-actions-width\);/s,
     );
     expect(styles).toMatch(
-      /\.watch-actions\s*\{[^}]*position:\s*absolute;[^}]*right:\s*calc\(6px \+ var\(--scrollbar-gutter-width\)\);[^}]*width:\s*var\(--tree-actions-width\);[^}]*padding-right:\s*0;/s,
+      /\.watch-actions\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*1;[^}]*top:\s*27px;[^}]*right:\s*calc\(6px \+ var\(--scrollbar-gutter-width\)\);[^}]*width:\s*var\(--tree-actions-width\);[^}]*padding-right:\s*0;/s,
     );
-    expect(styles).toMatch(
-      /\.watch\.has-actions \.watch-actions\s*\{[^}]*position:\s*relative;[^}]*right:\s*auto;[^}]*margin-top:\s*-2px;/s,
-    );
-    expect(styles).toMatch(
-      /\.watch\.has-actions\.has-confirmation \.watch-actions\s*\{[^}]*position:\s*absolute;[^}]*right:\s*calc\(6px \+ var\(--scrollbar-gutter-width\)\);[^}]*margin-top:\s*0;/s,
-    );
+    expect(styles).not.toMatch(/\.watch\.has-actions \.watch-actions\s*\{[^}]*position:\s*relative;/s);
     expect(styles).toMatch(
       /\.watch\.has-confirmation \.confirm-button\s*\{[^}]*position:\s*absolute;[^}]*top:\s*1px;[^}]*right:\s*0;[^}]*z-index:\s*1;[^}]*height:\s*18px;[^}]*margin-top:\s*0;/s,
     );
     expect(styles).toMatch(
-      /\.watch\.has-confirmation \.watch-actions::before\s*\{[^}]*right:\s*0;[^}]*width:\s*84px;[^}]*background:\s*linear-gradient\(90deg, transparent, var\(--watch-row-bg\) 24px\);/s,
+      /\.watch\.has-actions \.watch-actions::before\s*\{[^}]*right:\s*0;[^}]*width:\s*84px;[^}]*background:\s*linear-gradient\(90deg, transparent, var\(--watch-row-bg\) 24px\);[^}]*opacity:\s*0;/s,
+    );
+    expect(styles).toMatch(
+      /\.watch\.has-actions:hover \.watch-actions::before,[^{]*\.watch\.has-actions:focus-within \.watch-actions::before,[^{]*\.watch\.has-confirmation \.watch-actions::before\s*\{[^}]*opacity:\s*1;/s,
     );
   });
 });

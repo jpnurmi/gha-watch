@@ -1123,10 +1123,6 @@ button.repo-ci-status:focus-visible {
   cursor: pointer;
 }
 
-.watch.has-actions {
-  grid-template-columns: var(--tree-leading-width) minmax(0, 1fr) var(--tree-actions-width);
-}
-
 .watch:hover {
   --watch-row-bg: #1a2028;
 }
@@ -1345,8 +1341,11 @@ button.repo-ci-status:focus-visible {
 }
 
 .watch-label.has-branch-badge {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  position: relative;
+}
+
+.watch-label.has-branch-badge .watch-title-cluster {
+  flex: 0 1 auto;
 }
 
 .watch-title-cluster {
@@ -1388,6 +1387,24 @@ button.repo-ci-status:focus-visible {
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.watch-label .watch-branch-badge {
+  min-width: 0;
+  max-width: max-content;
+  flex: 1 0 56px;
+  margin-left: auto;
+}
+
+.watch-label .watch-branch-badge:hover {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: 0;
+  max-width: 100%;
+  background: #1d2734;
+  box-shadow: -18px 0 14px 6px var(--watch-row-bg);
+  transform: translateY(-50%);
 }
 
 .favorite-pr-item .watch-branch-badge {
@@ -1438,7 +1455,8 @@ button.repo-ci-status:focus-visible {
 
 .watch-actions {
   position: absolute;
-  top: 6px;
+  z-index: 1;
+  top: 27px;
   right: calc(6px + var(--scrollbar-gutter-width));
   display: flex;
   width: var(--tree-actions-width);
@@ -1451,21 +1469,7 @@ button.repo-ci-status:focus-visible {
   padding-right: 0;
 }
 
-.watch.has-actions .watch-actions {
-  position: relative;
-  top: auto;
-  right: auto;
-  margin-top: -2px;
-}
-
-.watch.has-actions.has-confirmation .watch-actions {
-  position: absolute;
-  top: 6px;
-  right: calc(6px + var(--scrollbar-gutter-width));
-  margin-top: 0;
-}
-
-.watch.has-confirmation .watch-actions::before {
+.watch.has-actions .watch-actions::before {
   position: absolute;
   top: 0;
   right: 0;
@@ -1473,7 +1477,14 @@ button.repo-ci-status:focus-visible {
   height: 100%;
   background: linear-gradient(90deg, transparent, var(--watch-row-bg) 24px);
   content: "";
+  opacity: 0;
   pointer-events: none;
+}
+
+.watch.has-actions:hover .watch-actions::before,
+.watch.has-actions:focus-within .watch-actions::before,
+.watch.has-confirmation .watch-actions::before {
+  opacity: 1;
 }
 
 .watch.has-confirmation .confirm-button {

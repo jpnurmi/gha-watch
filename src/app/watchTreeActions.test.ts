@@ -66,7 +66,29 @@ describe("watch tree group actions", () => {
   it("keeps job rows on the same vertical rhythm as PR and workflow rows", () => {
     expect(styles).toMatch(/\.watch-tree-header\s*\{[^}]*min-height:\s*52px;/s);
     expect(styles).toMatch(/\.watch\s*\{[^}]*min-height:\s*52px;/s);
-    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*margin-top:\s*-2px;/s);
+    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*27px;/s);
+  });
+
+  it("keeps branch context compact without wrapping and exposes full labels", () => {
+    expect(mainSource).toContain(
+      '<span class="watch-title-text" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>',
+    );
+    expect(mainSource).toContain(
+      '<span class="watch-title-text" title="${escapeHtml(node.label)}">${escapeHtml(node.label)}</span>',
+    );
+    expect(styles).toMatch(
+      /\.watch-label\.has-branch-badge\s*\{[^}]*position:\s*relative;/s,
+    );
+    expect(styles).not.toMatch(/\.watch-label\.has-branch-badge\s*\{[^}]*flex-wrap:/s);
+    expect(styles).toMatch(
+      /\.watch-label\.has-branch-badge \.watch-title-cluster\s*\{[^}]*flex:\s*0 1 auto;/s,
+    );
+    expect(styles).toMatch(
+      /\.watch-label \.watch-branch-badge\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*max-content;[^}]*flex:\s*1 0 56px;[^}]*margin-left:\s*auto;/s,
+    );
+    expect(styles).toMatch(
+      /\.watch-label \.watch-branch-badge:hover\s*\{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*max-width:\s*100%;/s,
+    );
   });
 
   it("uses the same base background for PR, workflow, and job rows", () => {
@@ -228,7 +250,7 @@ describe("watch tree group actions", () => {
     expect(styles).toMatch(
       /\.watch\s*\{[^}]*padding:\s*8px calc\(6px \+ var\(--scrollbar-gutter-width\)\) 8px\s*calc\(\s*var\(--tree-left-padding\) \+ var\(--tree-chevron-width\) \+ var\(--tree-column-gap\) \+\s*var\(--watch-indent,\s*0px\)\s*\);/s,
     );
-    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*margin-top:\s*-2px;/s);
+    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*27px;/s);
   });
 
   it("only reveals row actions for the hovered or focused row", () => {
