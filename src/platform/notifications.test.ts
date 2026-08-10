@@ -119,7 +119,7 @@ describe("sendDesktopNotification", () => {
       },
     };
 
-    const transientNotification = notification({ persistent: false });
+    const transientNotification = notification({ persistent: false, timeoutMs: 15_000 });
     await sendDesktopNotification(transientNotification, deps);
 
     expect(shownNotifications).toEqual([transientNotification]);

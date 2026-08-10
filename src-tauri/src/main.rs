@@ -1,5 +1,7 @@
 use std::sync::Mutex;
 
+#[cfg(not(target_os = "macos"))]
+use notify_rust::{Notification as NativeNotification, Timeout, Urgency};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSView;
 #[cfg(target_os = "macos")]
@@ -46,6 +48,7 @@ struct DesktopNotification {
     #[cfg(target_os = "macos")]
     url: String,
     persistent: bool,
+    timeout_ms: Option<u64>,
 }
 
 #[cfg(target_os = "macos")]
@@ -120,7 +123,18 @@ fn show_clickable_notification(
 
     std::thread::spawn(move || {
         let _ = mac_notification_sys::set_application(&bundle_identifier);
-        let _ = notification.persistent;
+
+        if !notification.persistent {
+            let title = notification.title.clone();
+            let body = notification.body.clone();
+            let timeout_ms = notification.timeout_ms.unwrap_or(15_000);
+
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(timeout_ms));
+                dismiss_macos_notification(&title, &body);
+            });
+        }
+
         let response = mac_notification_sys::Notification::new()
             .title(&notification.title)
             .message(&notification.body)
@@ -148,18 +162,54 @@ fn show_clickable_notification(
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+fn dismiss_macos_notification(title: &str, body: &str) {
+    let center = objc2_foundation::NSUserNotificationCenter::defaultUserNotificationCenter();
+    let delivered = center.deliveredNotifications();
+
+    for notification in delivered.iter() {
+        let matches_title = notification
+            .title()
+            .is_some_and(|value| value.to_string() == title);
+        let matches_body = notification
+            .informativeText()
+            .is_some_and(|value| value.to_string() == body);
+
+        if matches_title && matches_body {
+            center.removeDeliveredNotification(&notification);
+        }
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 fn show_clickable_notification(
     app: AppHandle,
     notification: DesktopNotification,
 ) -> Result<(), String> {
-    let _ = notification.persistent;
-    app.notification()
-        .builder()
-        .title(notification.title)
-        .body(notification.body)
-        .show()
-        .map_err(|error| error.to_string())
+    if !notification.persistent {
+        return app
+            .notification()
+            .builder()
+            .title(notification.title)
+            .body(notification.body)
+            .show()
+            .map_err(|error| error.to_string());
+    }
+
+    let mut native = NativeNotification::new();
+    native.summary(&notification.title).body(&notification.body);
+    native.timeout(Timeout::Never).urgency(Urgency::Critical);
+
+    #[cfg(windows)]
+    if !tauri::is_dev() {
+        native.app_id(&app.config().identifier);
+    }
+
+    #[cfg(not(windows))]
+    let _ = app;
+
+    native.show().map(|_| ()).map_err(|error| error.to_string())
 }
 
 fn tray_icon_for_status(status: &str, has_unseen_changes: bool) -> Result<Image<'static>, String> {

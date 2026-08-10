@@ -42,7 +42,8 @@ describe("createWatchNotification", () => {
         "Completed 1m ago · 7m",
       summary: "getsentry/sentry",
       group: "getsentry/sentry",
-      persistent: true,
+      persistent: false,
+      timeoutMs: 15_000,
     });
   });
 
@@ -67,7 +68,7 @@ describe("createWatchNotification", () => {
     });
   });
 
-  it("marks non-terminal status changes as transient", () => {
+  it("marks non-failure status changes as transient", () => {
     expect(
       createWatchNotification(
         watch({
@@ -80,6 +81,20 @@ describe("createWatchNotification", () => {
         }),
       ).persistent,
     ).toBe(false);
+  });
+
+  it("keeps failures persistent until they are confirmed", () => {
+    const notification = createWatchNotification(
+      watch({
+        status: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+      }),
+    );
+
+    expect(notification).toMatchObject({
+      persistent: true,
+    });
+    expect(notification).not.toHaveProperty("timeoutMs");
   });
 
   it("uses the exact watched URL for notification clicks", () => {
@@ -109,7 +124,8 @@ describe("createWatchNotification", () => {
       ),
     ).toMatchObject({
       body: expect.stringContaining("Skipped - This check was skipped."),
-      persistent: true,
+      persistent: false,
+      timeoutMs: 15_000,
     });
   });
 });

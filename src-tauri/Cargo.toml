@@ -20,9 +20,13 @@ tauri-plugin-shell = "2.3.5"
 mac-notification-sys = "0.6.12"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSView", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CALayer", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSString", "NSUserNotification"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+notify-rust = "4.17.0"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-autostart = "2.5.1"

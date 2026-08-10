@@ -9,9 +9,12 @@ export type WatchNotification = {
   body: string;
   largeBody?: string;
   persistent: boolean;
+  timeoutMs?: number;
   summary?: string;
   group?: string;
 };
+
+const transientNotificationTimeoutMs = 15_000;
 
 export function createWatchNotification(
   watch: WatchRecord,
@@ -25,6 +28,7 @@ export function createWatchNotification(
     row.timingText,
   ].filter(isString);
   const body = lines.join("\n");
+  const persistent = isPersistentNotification(row.tone);
 
   return {
     watchId: watch.id,
@@ -32,7 +36,8 @@ export function createWatchNotification(
     url: watch.target.url,
     body,
     largeBody: body,
-    persistent: isPersistentNotification(row.tone),
+    persistent,
+    ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary: repoLabel,
     group: repoLabel,
   };
@@ -53,6 +58,7 @@ export function createPullRequestNotification(
 
   const statusLine = [node.statusLabel, node.detailLabel].filter(isString).join(" - ");
   const body = [summary, statusLine, node.timingText].filter(isString).join("\n");
+  const persistent = isPersistentNotification(node.tone);
 
   return {
     watchId: getPullRequestNotificationId(source),
@@ -60,7 +66,8 @@ export function createPullRequestNotification(
     url: source.url,
     body,
     largeBody: body,
-    persistent: isPersistentNotification(node.tone),
+    persistent,
+    ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary,
     group: summary,
   };
@@ -80,6 +87,7 @@ export function createWorkflowNotification(
 
   const statusLine = [node.statusLabel, node.detailLabel].filter(isString).join(" - ");
   const body = [repoLabel, statusLine, node.timingText].filter(isString).join("\n");
+  const persistent = isPersistentNotification(node.tone);
 
   return {
     watchId: getWatchId(source),
@@ -87,7 +95,8 @@ export function createWorkflowNotification(
     url: source.url,
     body,
     largeBody: body,
-    persistent: isPersistentNotification(node.tone),
+    persistent,
+    ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary: repoLabel,
     group: repoLabel,
   };
@@ -149,13 +158,7 @@ function getPullRequestNotificationTitle(source: PrWatchTarget, label: string): 
 }
 
 function isPersistentNotification(tone: string): boolean {
-  return (
-    tone === "success" ||
-    tone === "failure" ||
-    tone === "cancelled" ||
-    tone === "skipped" ||
-    tone === "error"
-  );
+  return tone === "failure";
 }
 
 function isString(value: string | undefined): value is string {
