@@ -401,12 +401,12 @@ function renderRateLimitIndicator(): string {
   const remaining = rateLimit.remaining;
   const tone = getRateLimitTone(remaining);
   const resetTime = new Date(rateLimit.reset * 1000);
-  const resetFormatted = resetTime.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const resetHours = String(resetTime.getHours()).padStart(2, "0");
+  const resetMinutes = String(resetTime.getMinutes()).padStart(2, "0");
+  const resetFormatted = `${resetHours}:${resetMinutes}`;
+  const title = `GitHub API rate limit: ${String(rateLimit.used)} / ${String(rateLimit.limit)} used · resets ${resetFormatted}`;
 
-  return `<span class="rate-limit-indicator is-${tone}" title="GitHub API rate limit">
+  return `<span class="rate-limit-indicator is-${tone}" title="${title}">
     ${String(rateLimit.used)} / ${String(rateLimit.limit)} &middot; ${resetFormatted}
   </span>`;
 }
