@@ -1305,6 +1305,10 @@ button.watch-tree-leading {
   text-align: left;
 }
 
+.watch.has-done-candidate .watch-label {
+  opacity: 0.55;
+}
+
 .watch-label {
   display: flex;
   min-width: 0;
@@ -1492,6 +1496,7 @@ button.watch-workflow-status:focus-visible {
 
 .watch.has-actions:hover .watch-actions::before,
 .watch.has-actions:focus-within .watch-actions::before,
+.watch.has-done-candidate .watch-actions::before,
 .watch.has-confirmation .watch-actions::before {
   opacity: 1;
 }
@@ -1560,6 +1565,29 @@ button.watch-workflow-status:focus-visible {
 .watch-triage-button:focus-visible {
   background: rgb(255 255 255 / 7%);
   opacity: 1;
+}
+
+:is(.watch-group-triage-button, .watch-tree-action-button, .watch-action-button).is-done-candidate {
+  background: transparent;
+  color: rgb(238 241 245 / 60%);
+  opacity: 0.72;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+:is(.watch-group-triage-button, .watch-tree-action-button, .watch-action-button).is-done-candidate:hover,
+:is(.watch-group-triage-button, .watch-tree-action-button, .watch-action-button).is-done-candidate:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  opacity: 0.72;
+}
+
+.watch-group-header:hover .watch-group-triage-button.is-done-candidate,
+.watch-group-header:focus-within .watch-group-triage-button.is-done-candidate,
+.watch-tree-header.has-actions:hover .watch-tree-action-button.is-done-candidate,
+.watch-tree-header.has-actions:focus-within .watch-tree-action-button.is-done-candidate,
+.watch:hover .watch-action-button.is-done-candidate,
+.watch:focus-within .watch-action-button.is-done-candidate {
+  opacity: 0.72;
 }
 
 .confirm-button {

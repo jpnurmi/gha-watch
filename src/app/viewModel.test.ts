@@ -638,6 +638,44 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
+  it("suggests Done for standalone successful workflows and merged or closed pull requests", () => {
+    const model = createPopupViewModel([
+      watch({
+        status: "completed:success",
+        active: false,
+        lastState: { status: "completed", conclusion: "success" },
+      }),
+      watch({
+        id: "getsentry/sentry/run/456",
+        sourceState: "merged",
+        status: "completed:failure",
+        active: false,
+        lastState: { status: "completed", conclusion: "failure" },
+      }),
+      watch({
+        id: "getsentry/sentry/run/789",
+        sourceState: "closed",
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+      }),
+      watch({
+        id: "getsentry/sentry/run/790",
+        sourceState: "ready",
+        status: "completed:success",
+        active: false,
+        lastState: { status: "completed", conclusion: "success" },
+      }),
+      watch({
+        id: "getsentry/sentry/run/791",
+        status: "completed:cancelled",
+        active: false,
+        lastState: { status: "completed", conclusion: "cancelled" },
+      }),
+    ]);
+
+    expect(model.rows.map((row) => row.doneCandidate)).toEqual([true, true, true, false, false]);
+  });
+
   it("classifies leaf rows by watched check target even when they come from a PR", () => {
     const model = createPopupViewModel([
       watch({

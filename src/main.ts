@@ -757,12 +757,13 @@ function renderRepoGroupChevron(
 
 function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderActions): string {
   const rowIds = group.rows.map((row) => row.id);
+  const doneCandidate = group.rows.length > 0 && group.rows.every((row) => row.doneCandidate);
 
   return `
     <div class="watch-group-actions">
       ${actions.showOpenPullRequests ? renderPullRequestMenu(group) : ""}
       ${actions.showActiveWorkflowRuns ? renderActiveWorkflowRunMenu(group) : ""}
-      ${rowIds.length > 0 ? renderTriageButtons(currentWatchView, rowIds, "watch-group-triage-button", group.repoLabel) : ""}
+      ${rowIds.length > 0 ? renderTriageButtons(currentWatchView, rowIds, "watch-group-triage-button", group.repoLabel, doneCandidate) : ""}
     </div>
   `;
 }
@@ -1319,7 +1320,7 @@ function renderWatchTreeActions(node: WatchTreeNodeViewModel): string {
 
   return `
     <div class="watch-tree-actions">
-      ${renderTriageButtons(currentWatchView, node.rowIds, "watch-tree-action-button", node.label)}
+      ${renderTriageButtons(currentWatchView, node.rowIds, "watch-tree-action-button", node.label, node.doneCandidate)}
     </div>
   `;
 }
@@ -1327,10 +1328,11 @@ function renderWatchTreeActions(node: WatchTreeNodeViewModel): string {
 function renderWatch(row: WatchRowViewModel, depth = 0): string {
   const hasConfirmation = pendingWatchAction?.id === row.id;
   const hasActions = true;
+  const hasDoneCandidate = row.triageState !== "done" && row.doneCandidate;
 
   return `
     <li
-      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${hasConfirmation ? " has-confirmation" : ""}"
+      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${hasDoneCandidate ? " has-done-candidate" : ""}${hasConfirmation ? " has-confirmation" : ""}"
       data-id="${escapeHtml(row.id)}"
       data-reorder-key="${escapeHtml(row.id)}"
       data-row-ids="${escapeHtml(row.id)}"
@@ -1343,7 +1345,7 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
         </span>
         ${renderMetadata(row)}
       </div>
-      ${renderWatchActions(row)}
+      ${renderWatchActions(row, hasDoneCandidate)}
     </li>
   `;
 }
@@ -1473,7 +1475,7 @@ function getMetadataDetail(row: WatchRowViewModel): string | undefined {
   return row.tone === "error" ? row.description : undefined;
 }
 
-function renderWatchActions(row: WatchRowViewModel): string {
+function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean): string {
   if (pendingWatchAction?.id === row.id) {
     return `
       <div class="watch-actions">
@@ -1493,7 +1495,7 @@ function renderWatchActions(row: WatchRowViewModel): string {
             </button>`
           : ""
       }
-      ${renderTriageButtons(row.triageState, [row.id], "watch-action-button", row.label)}
+      ${renderTriageButtons(row.triageState, [row.id], "watch-action-button", row.label, hasDoneCandidate)}
     </div>
   `;
 }
@@ -1503,12 +1505,13 @@ function renderTriageButtons(
   rowIds: string[],
   className: string,
   subjectLabel: string,
+  doneCandidate = false,
 ): string {
   const triageButtons = getWatchTriageActions(currentState)
     .map(
       (action) => `
         <button
-          class="${className} watch-triage-button is-${action.state}"
+          class="${className} watch-triage-button is-${action.state}${action.state === "done" && doneCandidate ? " is-done-candidate" : ""}"
           type="button"
           data-action="triage-watch"
           data-triage-state="${action.state}"

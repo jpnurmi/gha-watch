@@ -306,6 +306,26 @@ describe("watch tree group actions", () => {
     expect(styles).not.toMatch(/\.watch\.has-unseen-change \.watch-action-button/);
   });
 
+  it("keeps suggested Done actions visible for eligible rows and groups", () => {
+    expect(mainSource).toContain("group.rows.every((row) => row.doneCandidate)");
+    expect(mainSource).toContain("node.label, node.doneCandidate");
+    expect(mainSource).toContain('row.triageState !== "done" && row.doneCandidate');
+    expect(mainSource).toContain('action.state === "done" && doneCandidate ? " is-done-candidate" : ""');
+    expect(styles).toMatch(
+      /:is\(\.watch-group-triage-button, \.watch-tree-action-button, \.watch-action-button\)\.is-done-candidate\s*\{[^}]*background:\s*transparent;[^}]*color:\s*rgb\(238 241 245 \/ 60%\);[^}]*visibility:\s*visible;/s,
+    );
+    expect(styles).toMatch(
+      /\.is-done-candidate:hover,[^{]*\.is-done-candidate:focus-visible\s*\{[^}]*background:\s*rgb\(255 255 255 \/ 7%\);[^}]*opacity:\s*0\.72;/s,
+    );
+    expect(styles).toMatch(
+      /\.watch:hover \.watch-action-button\.is-done-candidate,[^{]*\.watch:focus-within \.watch-action-button\.is-done-candidate\s*\{[^}]*opacity:\s*0\.72;/s,
+    );
+    expect(styles).toMatch(
+      /\.watch\.has-done-candidate \.watch-label\s*\{[^}]*opacity:\s*0\.55;/s,
+    );
+    expect(styles).toMatch(/\.watch\.has-done-candidate \.watch-actions::before/);
+  });
+
   it("uses the same neutral treatment for every triage action", () => {
     expect(styles).toMatch(/\.watch-triage-button\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 60%\);/s);
     expect(styles).not.toContain(".watch-triage-button.is-inbox");
