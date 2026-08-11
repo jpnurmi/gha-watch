@@ -11,8 +11,8 @@ describe("Linux packaging configuration", () => {
       maximizable: false,
       minimizable: false,
       decorations: true,
-      transparent: false,
-      backgroundColor: "#161b22",
+      transparent: true,
+      backgroundColor: "#00000000",
       alwaysOnTop: true,
       skipTaskbar: true,
     });

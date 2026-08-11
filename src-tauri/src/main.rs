@@ -26,6 +26,14 @@ use tauri_plugin_notification::NotificationExt;
 const DESKTOP_NOTIFICATION_CLICKED_EVENT: &str = "desktop-notification-clicked";
 #[cfg(target_os = "macos")]
 const MACOS_POPUP_CORNER_RADIUS: f64 = 12.0;
+#[cfg(target_os = "linux")]
+const LINUX_WINDOW_FRAME_CSS: &[u8] = br#"
+window.gha-watch-rounded:not(.maximized):not(.fullscreen):not(.tiled):not(.tiled-top):not(.tiled-right):not(.tiled-bottom):not(.tiled-left),
+window.gha-watch-rounded:not(.maximized):not(.fullscreen):not(.tiled):not(.tiled-top):not(.tiled-right):not(.tiled-bottom):not(.tiled-left) > decoration {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+"#;
 
 const TRAY_ID: &str = "gha-watch";
 
@@ -305,6 +313,32 @@ fn present_linux_window(window: &tauri::WebviewWindow) {
 
         if let Ok(gtk_window) = handle.gtk_window() {
             gtk_window.present();
+        }
+    });
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_window_frame(window: &tauri::WebviewWindow) {
+    let window = window.clone();
+    let handle = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use gtk::prelude::*;
+
+        if let Ok(gtk_window) = handle.gtk_window() {
+            let provider = gtk::CssProvider::new();
+            if let Err(error) = provider.load_from_data(LINUX_WINDOW_FRAME_CSS) {
+                eprintln!("Could not load Linux window frame CSS: {error}");
+                return;
+            }
+
+            if let Some(screen) = gtk::prelude::WidgetExt::screen(&gtk_window) {
+                gtk::StyleContext::add_provider_for_screen(
+                    &screen,
+                    &provider,
+                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                );
+            }
+            gtk_window.style_context().add_class("gha-watch-rounded");
         }
     });
 }
@@ -684,6 +718,7 @@ fn main() {
 
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
+                configure_linux_window_frame(&window);
                 configure_linux_window_controls(&window);
             }
 

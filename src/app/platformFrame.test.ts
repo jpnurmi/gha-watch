@@ -11,10 +11,18 @@ describe("platform frame styling", () => {
     expect(mainSource).toContain("if (/\\bLinux\\b/i.test(userAgent))");
   });
 
-  it("uses a square in-app frame on Linux", () => {
+  it("clips the Linux content to rounded bottom corners", () => {
     expect(styles).toMatch(
-      /:root\[data-platform="linux"\] \.shell\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*box-shadow:\s*none;/s,
+      /:root\[data-platform="linux"\] \.shell\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0 0 12px 12px;[^}]*box-shadow:\s*none;/s,
     );
+  });
+
+  it("rounds the native Linux window frame", () => {
+    expect(rustSource).toContain("configure_linux_window_frame");
+    expect(rustSource).toContain("gtk::CssProvider::new()");
+    expect(rustSource).toContain('add_class("gha-watch-rounded")');
+    expect(rustSource).toContain("border-bottom-left-radius: 12px");
+    expect(rustSource).toContain("border-bottom-right-radius: 12px");
   });
 
   it("clips rounded macOS frame corners", () => {
