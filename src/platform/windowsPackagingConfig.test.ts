@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import capabilities from "../../src-tauri/capabilities/default.json";
+import mainRs from "../../src-tauri/src/main.rs?raw";
 import config from "../../src-tauri/tauri.windows.conf.json";
 
 describe("Windows packaging configuration", () => {
+  it("does not open a console for release builds", () => {
+    expect(mainRs).toContain(
+      '#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]',
+    );
+  });
+
   it("uses native Windows rounding for the popup frame", () => {
     expect(config.app.windows[0]).toMatchObject({
       label: "main",
