@@ -1,7 +1,7 @@
 import type { WatchRecord } from "../domain/watches";
 import { getWatchState, getWatchTriageState, hasUnseenStatusChange } from "../domain/watches";
 
-export type TrayStatus = "idle" | "active" | "cancelled" | "error" | "success";
+export type TrayStatus = "idle" | "active" | "mixed" | "cancelled" | "error" | "success";
 
 export type TrayState = {
   status: TrayStatus;
@@ -26,6 +26,18 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
   const cancelled = inbox.filter(
     (_watch, index) => watchStates[index]?.status === "completed" && watchStates[index].conclusion === "cancelled",
   );
+  const hasActiveFailures = inbox.some(
+    (watch, index) => watch.active && Boolean(watchStates[index]?.hasFailedChildren),
+  );
+
+  if (hasActiveFailures || (active.length > 0 && (errors.length > 0 || failures.length > 0))) {
+    return {
+      status: "mixed",
+      hasUnseenChanges,
+      label: `Failures with ${active.length} active watch${active.length === 1 ? "" : "es"}`,
+      tooltip: `GHA Watch: failures detected; ${active.length} watch${active.length === 1 ? "" : "es"} still active`,
+    };
+  }
 
   if (errors.length > 0 || failures.length > 0) {
     return {

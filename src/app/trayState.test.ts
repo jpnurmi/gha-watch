@@ -89,6 +89,41 @@ describe("createTrayState", () => {
     });
   });
 
+  it("uses a mixed tray icon when an active watch has failed children", () => {
+    expect(
+      createTrayState([
+        watch({
+          status: "in_progress:failure",
+          lastState: { status: "in_progress", conclusion: null, hasFailedChildren: true },
+        }),
+      ]),
+    ).toEqual({
+      status: "mixed",
+      hasUnseenChanges: false,
+      label: "Failures with 1 active watch",
+      tooltip: "GHA Watch: failures detected; 1 watch still active",
+    });
+  });
+
+  it("uses a mixed tray icon when failed and active watches coexist", () => {
+    expect(
+      createTrayState([
+        watch({ active: true }),
+        watch({
+          id: "getsentry/sentry/run/456",
+          active: false,
+          status: "completed:failure",
+          lastState: { status: "completed", conclusion: "failure" },
+        }),
+      ]),
+    ).toEqual({
+      status: "mixed",
+      hasUnseenChanges: false,
+      label: "Failures with 1 active watch",
+      tooltip: "GHA Watch: failures detected; 1 watch still active",
+    });
+  });
+
   it("uses an error tray icon when any watch failed or errored", () => {
     expect(
       createTrayState([
