@@ -1,5 +1,4 @@
 import type {
-  CheckWatchTarget,
   ParsedWatchTarget,
   PrWatchTarget,
   WatchTarget,
@@ -16,6 +15,8 @@ export type ShellResult = {
 export type ShellExecutor = {
   execute(program: string, args: string[]): Promise<ShellResult>;
 };
+
+export type RerunMode = "all" | "failed";
 
 export type WatchSnapshot = WatchState & {
   title: string;
@@ -64,6 +65,7 @@ type JobViewResponse = {
 type PrCheckResponse = {
   bucket?: string;
   completedAt?: string | null;
+  link?: string;
   startedAt?: string | null;
 };
 
@@ -835,11 +837,17 @@ export async function fetchRateLimit(
   }
 }
 
-export async function rerunFailedWatch(
-  target: CheckWatchTarget,
+export async function rerunWatch(
+  target: WatchTarget,
+  mode: RerunMode,
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<void> {
-  const runId = target.kind === "run" ? target.runId : target.runId;
+  if (target.kind === "pr") {
+    await rerunPullRequestChecks(target, mode, executor);
+    return;
+  }
+
+  const runId = target.runId;
 
   if (!runId) {
     throw new Error("This job link does not include a workflow run id.");
@@ -847,17 +855,96 @@ export async function rerunFailedWatch(
 
   try {
     assertSuccessfulGhResult(
-      await executor.execute("gh", [
-        "run",
-        "rerun",
-        runId,
-        "--failed",
-        "-R",
-        `${target.owner}/${target.repo}`,
-      ]),
+      await executor.execute("gh", getRerunArgs(runId, target, mode)),
     );
   } catch (error) {
     throw normalizeGhError(error);
+  }
+}
+
+async function rerunPullRequestChecks(
+  target: PrWatchTarget,
+  mode: RerunMode,
+  executor: ShellExecutor,
+): Promise<void> {
+  try {
+    const result = await executor.execute("gh", [
+      "pr",
+      "checks",
+      target.prNumber,
+      "-R",
+      `${target.owner}/${target.repo}`,
+      "--json",
+      "bucket,link",
+    ]);
+
+    assertSuccessfulGhResult(result, result.stdout.trim() ? [1, 8] : [8]);
+    const runIds = getFailedPullRequestRunIds(target, parseJson<PrCheckResponse[]>(result.stdout));
+
+    if (runIds.length === 0) {
+      throw new Error("No failed GitHub Actions jobs were found for this pull request.");
+    }
+
+    for (const runId of runIds) {
+      assertSuccessfulGhResult(
+        await executor.execute("gh", getRerunArgs(runId, target, mode)),
+      );
+    }
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+function getRerunArgs(
+  runId: string,
+  target: Pick<WatchTarget, "owner" | "repo">,
+  mode: RerunMode,
+): string[] {
+  return [
+    "run",
+    "rerun",
+    runId,
+    ...(mode === "failed" ? ["--failed"] : []),
+    "-R",
+    `${target.owner}/${target.repo}`,
+  ];
+}
+
+function getFailedPullRequestRunIds(target: PrWatchTarget, checks: PrCheckResponse[]): string[] {
+  const runIds = checks
+    .filter((check) => check.bucket?.trim() === "fail")
+    .map((check) => getActionsRunId(check.link, target))
+    .filter((runId): runId is string => Boolean(runId));
+
+  return [...new Set(runIds)];
+}
+
+function getActionsRunId(
+  link: string | undefined,
+  target: Pick<PrWatchTarget, "owner" | "repo">,
+): string | undefined {
+  if (!link) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(link);
+    const [owner, repo, actions, runs, runId] = url.pathname.split("/").filter(Boolean);
+
+    if (
+      url.hostname !== "github.com" ||
+      owner?.toLowerCase() !== target.owner.toLowerCase() ||
+      repo?.toLowerCase() !== target.repo.toLowerCase() ||
+      actions !== "actions" ||
+      runs !== "runs" ||
+      !/^\d+$/.test(runId)
+    ) {
+      return undefined;
+    }
+
+    return runId;
+  } catch {
+    return undefined;
   }
 }
 

@@ -297,10 +297,6 @@ function getPullRequestStateLabel(sourceState: PrSourceState): string {
 }
 
 function canRerun(watch: WatchRecord): boolean {
-  if (watch.target.kind === "pr") {
-    return false;
-  }
-
   const state = getWatchState(watch);
 
   return state?.status === "completed" &&

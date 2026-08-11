@@ -525,6 +525,25 @@ describe("createPopupViewModel", () => {
     expect(model.rows[0].canRerun).toBe(true);
   });
 
+  it("offers to rerun failed pull request checks", () => {
+    const model = createPopupViewModel([
+      watch({
+        id: "getsentry/sentry/pull/51",
+        target: {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+        status: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+      }),
+    ]);
+
+    expect(model.rows[0].canRerun).toBe(true);
+  });
+
   it("exposes the triage state for every row", () => {
     const model = createPopupViewModel([
       watch({

@@ -26,7 +26,7 @@ import {
   type WatchRecord,
   type WatchTriageState,
 } from "../domain/watches";
-import type { WatchSnapshot } from "../platform/gh";
+import type { RerunMode, WatchSnapshot } from "../platform/gh";
 import type {
   ActiveWorkflowRun,
   OpenPullRequest,
@@ -47,7 +47,7 @@ export type WatchControllerDeps = {
   getAuthenticatedUserLogin?(): Promise<string>;
   notificationsPaused?(): boolean;
   notify(notification: WatchNotification): Promise<void>;
-  rerunFailed?(target: CheckWatchTarget): Promise<void>;
+  rerun?(target: WatchTarget, mode: RerunMode): Promise<void>;
   now?(): Date;
   save(watches: WatchRecord[]): Promise<void>;
   saveSuppressions(suppressions: WatchSuppression[]): Promise<void>;
@@ -68,7 +68,7 @@ export type WatchController = {
   listActiveWorkflowRuns(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   listOpenPullRequests(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   listWorkflowDefinitions(target: Pick<WatchedRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
-  rerunFailed(id: string): Promise<void>;
+  rerun(id: string, mode: RerunMode): Promise<void>;
   syncWorkflowSubscriptions(watchedRepos: WatchedRepo[]): Promise<void>;
   pollNow(options?: WatchPollOptions): Promise<void>;
   getWatches(): WatchRecord[];
@@ -78,6 +78,7 @@ export type WatchController = {
 export type WatchPollOptions = {
   triageState?: Exclude<WatchTriageState, "done">;
   includeInactive?: boolean;
+  watchIds?: string[];
 };
 
 export function createWatchController(
@@ -775,20 +776,26 @@ export function createWatchController(
       return deps.fetchWorkflowDefinitions(target);
     },
 
-    async rerunFailed(id) {
+    async rerun(id, mode) {
       const watch = watches.find((item) => item.id === id);
 
-      if (!watch || watch.target.kind === "pr" || !deps.rerunFailed) {
+      if (!watch || !deps.rerun) {
         return;
       }
 
-      await deps.rerunFailed(watch.target);
-      const reactivated = setWatchesTriageState(watches, [id], "inbox", getNow());
+      await deps.rerun(watch.target, mode);
+      const rerunAt = getNow();
+      const queuedState = { status: "queued", conclusion: null };
+      const reactivated = setWatchesTriageState(watches, [id], "inbox", rerunAt);
       setWatches(
         reactivated.map((current) =>
           current.id === id
             ? {
                 ...current,
+                status: formatWatchState(queuedState),
+                lastSeenStatus: formatWatchState(queuedState),
+                lastState: queuedState,
+                timing: { queuedAt: rerunAt.toISOString() },
                 active: true,
                 error: undefined,
               }
@@ -808,15 +815,17 @@ export function createWatchController(
     async pollNow(pollOptions = {}) {
       const notificationTime = getNow();
       const triageState = pollOptions.triageState ?? "inbox";
+      const watchIdSet = pollOptions.watchIds ? new Set(pollOptions.watchIds) : undefined;
       pruneExpiredSuppressions(notificationTime);
       pruneExpiredDoneWatches(notificationTime);
       const polledWatches = watches.filter(
         (watch) =>
           getWatchTriageState(watch) === triageState &&
-          (watch.active || pollOptions.includeInactive),
+          (watch.active || pollOptions.includeInactive) &&
+          (!watchIdSet || watchIdSet.has(watch.id)),
       );
 
-      if (!pollOptions.includeInactive) {
+      if (!pollOptions.includeInactive && !watchIdSet) {
         await hydrateLegacyWatchMetadata(triageState);
       }
 
@@ -866,7 +875,11 @@ export function createWatchController(
 
       await refreshPullRequestDetails(
         getTrackedPullRequestTargets(
-          watches.filter((watch) => getWatchTriageState(watch) === triageState),
+          watches.filter(
+            (watch) =>
+              getWatchTriageState(watch) === triageState &&
+              (!watchIdSet || watchIdSet.has(watch.id)),
+          ),
         ),
       );
 

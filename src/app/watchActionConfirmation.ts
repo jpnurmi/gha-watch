@@ -1,3 +1,5 @@
+import type { RerunMode } from "../platform/gh";
+
 export type WatchActionKind = "rerun";
 
 export type PendingWatchAction = {
@@ -5,8 +7,12 @@ export type PendingWatchAction = {
   kind: WatchActionKind;
 };
 
-export function isWatchActionConfirmation(action: string | undefined): boolean {
-  return action === "confirm-rerun";
+export function getWatchRerunMode(action: string | undefined): RerunMode | undefined {
+  if (action === "rerun-all") {
+    return "all";
+  }
+
+  return action === "rerun-failed" ? "failed" : undefined;
 }
 
 export function shouldDismissPendingWatchActionOnRowLeave(

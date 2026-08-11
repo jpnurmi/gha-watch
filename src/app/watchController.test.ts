@@ -4,7 +4,7 @@ import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } fro
 import type { WatchedRepo } from "../domain/watchedRepos";
 import type { WatchSuppression } from "../domain/watchSuppressions";
 import { type WatchRecord } from "../domain/watches";
-import type { ActiveWorkflowRun, OpenPullRequest, WatchSnapshot, WorkflowDefinition } from "../platform/gh";
+import type { ActiveWorkflowRun, OpenPullRequest, RerunMode, WatchSnapshot, WorkflowDefinition } from "../platform/gh";
 
 const runTarget: CheckWatchTarget = {
   kind: "run",
@@ -51,7 +51,7 @@ function createDeps(
   saves: WatchRecord[][];
   suppressionSaves: WatchSuppression[][];
   fetches: WatchTarget[];
-  reruns: CheckWatchTarget[];
+  reruns: Array<[WatchTarget, RerunMode]>;
   openPullRequestFetches: WatchedRepo[];
   activeWorkflowRunFetches: WatchedRepo[];
   defaultBranchFetches: WatchedRepo[];
@@ -63,7 +63,7 @@ function createDeps(
   const saves: WatchRecord[][] = [];
   const suppressionSaves: WatchSuppression[][] = [];
   const fetches: WatchTarget[] = [];
-  const reruns: CheckWatchTarget[] = [];
+  const reruns: Array<[WatchTarget, RerunMode]> = [];
   const openPullRequestFetches: WatchedRepo[] = [];
   const activeWorkflowRunFetches: WatchedRepo[] = [];
   const defaultBranchFetches: WatchedRepo[] = [];
@@ -97,8 +97,8 @@ function createDeps(
         notificationRecords.push(notification);
         notifications.push(`${notification.title}: ${notification.body}`);
       },
-      async rerunFailed(target) {
-        reruns.push(target);
+      async rerun(target, mode) {
+        reruns.push([target, mode]);
       },
       async fetchOpenPullRequests(target) {
         openPullRequestFetches.push(target);
@@ -1976,18 +1976,81 @@ describe("watchController", () => {
     expect(controller.getWatches()[1].repoIconUrl).toBe("https://avatars.githubusercontent.com/u/1396951?v=4");
   });
 
-  it("reruns failed jobs for an existing watch", async () => {
+  it("reruns the selected jobs for an existing watch", async () => {
+    const { deps, reruns } = createDeps([]);
+    const now = new Date("2026-05-18T12:00:00Z");
+    const controller = createWatchController({ ...deps, now: () => now }, [
+      {
+        ...existingWatch(),
+        status: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+        triageState: "saved",
+      },
+    ]);
+
+    await controller.rerun("getsentry/sentry/run/123", "all");
+
+    expect(reruns).toEqual([[runTarget, "all"]]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        status: "queued",
+        lastSeenStatus: "queued",
+        lastState: { status: "queued", conclusion: null },
+        timing: { queuedAt: "2026-05-18T12:00:00.000Z" },
+        triageState: "inbox",
+        active: true,
+        error: undefined,
+      },
+    ]);
+  });
+
+  it("reruns failed jobs for a pull request watch", async () => {
     const { deps, reruns } = createDeps([]);
     const controller = createWatchController(deps, [
       {
         ...existingWatch(),
+        id: "getsentry/sentry/pull/51",
+        target: prTarget,
         status: "completed:failure",
         lastState: { status: "completed", conclusion: "failure" },
       },
     ]);
 
-    await controller.rerunFailed("getsentry/sentry/run/123");
+    await controller.rerun("getsentry/sentry/pull/51", "failed");
 
-    expect(reruns).toEqual([runTarget]);
+    expect(reruns).toEqual([[prTarget, "failed"]]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "queued",
+      lastState: { status: "queued", conclusion: null },
+      active: true,
+    });
+  });
+
+  it("refreshes only selected watches after a rerun", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [
+      { ...existingWatch(), active: true },
+      {
+        ...existingWatch(),
+        id: "getsentry/sentry/job/456",
+        target: jobTarget,
+        active: true,
+      },
+    ]);
+
+    await controller.pollNow({ watchIds: ["getsentry/sentry/run/123"] });
+
+    expect(fetches).toEqual([runTarget]);
+    expect(controller.getWatches().map((watch) => watch.status)).toEqual([
+      "in_progress",
+      "completed:success",
+    ]);
   });
 });

@@ -11,7 +11,7 @@ import {
   fetchUserActiveWorkflowRuns,
   fetchWatchState,
   fetchWorkflowDefinitions,
-  rerunFailedWatch,
+  rerunWatch,
   type ShellExecutor,
 } from "./gh";
 
@@ -1318,11 +1318,11 @@ describe("fetchActiveWorkflowRuns", () => {
   });
 });
 
-describe("rerunFailedWatch", () => {
+describe("rerunWatch", () => {
   it("reruns only failed jobs for a run watch", async () => {
     const { executor, calls } = createExecutor({ code: 0, stdout: "", stderr: "" });
 
-    await rerunFailedWatch(
+    await rerunWatch(
       {
         kind: "run",
         owner: "getsentry",
@@ -1330,6 +1330,7 @@ describe("rerunFailedWatch", () => {
         runId: "123",
         url: "https://github.com/getsentry/sentry/actions/runs/123",
       },
+      "failed",
       executor,
     );
 
@@ -1341,10 +1342,33 @@ describe("rerunFailedWatch", () => {
     ]);
   });
 
+  it("reruns all jobs for a run watch", async () => {
+    const { executor, calls } = createExecutor({ code: 0, stdout: "", stderr: "" });
+
+    await rerunWatch(
+      {
+        kind: "run",
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "123",
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
+      },
+      "all",
+      executor,
+    );
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["run", "rerun", "123", "-R", "getsentry/sentry"],
+      },
+    ]);
+  });
+
   it("reruns failed jobs for a job watch when the run id is known", async () => {
     const { executor, calls } = createExecutor({ code: 0, stdout: "", stderr: "" });
 
-    await rerunFailedWatch(
+    await rerunWatch(
       {
         kind: "job",
         owner: "getsentry",
@@ -1353,6 +1377,7 @@ describe("rerunFailedWatch", () => {
         jobId: "456",
         url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
       },
+      "failed",
       executor,
     );
 
@@ -1364,11 +1389,144 @@ describe("rerunFailedWatch", () => {
     ]);
   });
 
+  it("reruns only failed GitHub Actions jobs for a pull request", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 1,
+        stdout: JSON.stringify([
+          {
+            bucket: "fail",
+            link: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+          },
+          {
+            bucket: "pass",
+            link: "https://github.com/getsentry/sentry/actions/runs/789/job/1011",
+          },
+          {
+            bucket: "fail",
+            link: "https://github.com/getsentry/sentry/actions/runs/123/job/457",
+          },
+          {
+            bucket: "fail",
+            link: "https://github.com/getsentry/sentry/actions/runs/789/job/1012",
+          },
+          {
+            bucket: "fail",
+            link: "https://checks.example.com/build/42",
+          },
+        ]),
+        stderr: "",
+      },
+      { code: 0, stdout: "", stderr: "" },
+      { code: 0, stdout: "", stderr: "" },
+    ]);
+
+    await rerunWatch(
+      {
+        kind: "pr",
+        owner: "getsentry",
+        repo: "sentry",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+      "failed",
+      executor,
+    );
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,link"],
+      },
+      {
+        program: "gh",
+        args: ["run", "rerun", "123", "--failed", "-R", "getsentry/sentry"],
+      },
+      {
+        program: "gh",
+        args: ["run", "rerun", "789", "--failed", "-R", "getsentry/sentry"],
+      },
+    ]);
+  });
+
+  it("reruns all jobs in failed GitHub Actions runs for a pull request", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 1,
+        stdout: JSON.stringify([
+          {
+            bucket: "fail",
+            link: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+          },
+          {
+            bucket: "pass",
+            link: "https://github.com/getsentry/sentry/actions/runs/789/job/1011",
+          },
+        ]),
+        stderr: "",
+      },
+      { code: 0, stdout: "", stderr: "" },
+    ]);
+
+    await rerunWatch(
+      {
+        kind: "pr",
+        owner: "getsentry",
+        repo: "sentry",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+      "all",
+      executor,
+    );
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,link"],
+      },
+      {
+        program: "gh",
+        args: ["run", "rerun", "123", "-R", "getsentry/sentry"],
+      },
+    ]);
+  });
+
+  it("rejects pull requests without failed GitHub Actions jobs", async () => {
+    const { executor, calls } = createExecutor({
+      code: 1,
+      stdout: JSON.stringify([
+        { bucket: "fail", link: "https://checks.example.com/build/42" },
+        {
+          bucket: "pass",
+          link: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+        },
+      ]),
+      stderr: "",
+    });
+
+    await expect(
+      rerunWatch(
+        {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+        "failed",
+        executor,
+      ),
+    ).rejects.toThrow("No failed GitHub Actions jobs were found for this pull request.");
+
+    expect(calls).toHaveLength(1);
+  });
+
   it("rejects job watches without a run id", async () => {
     const { executor, calls } = createExecutor({ code: 0, stdout: "", stderr: "" });
 
     await expect(
-      rerunFailedWatch(
+      rerunWatch(
         {
           kind: "job",
           owner: "getsentry",
@@ -1376,6 +1534,7 @@ describe("rerunFailedWatch", () => {
           jobId: "456",
           url: "https://github.com/getsentry/sentry/runs/456",
         },
+        "failed",
         executor,
       ),
     ).rejects.toThrow("This job link does not include a workflow run id.");

@@ -66,7 +66,7 @@ describe("watch tree group actions", () => {
   it("keeps job rows on the same vertical rhythm as PR and workflow rows", () => {
     expect(styles).toMatch(/\.watch-tree-header\s*\{[^}]*min-height:\s*52px;/s);
     expect(styles).toMatch(/\.watch\s*\{[^}]*min-height:\s*52px;/s);
-    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*8px;/s);
+    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*5px;/s);
   });
 
   it("keeps branch context compact without wrapping and exposes full labels", () => {
@@ -293,7 +293,7 @@ describe("watch tree group actions", () => {
     expect(styles).toMatch(
       /\.watch\s*\{[^}]*padding:\s*8px calc\(6px \+ var\(--scrollbar-gutter-width\)\) 8px\s*calc\(\s*var\(--tree-left-padding\) \+ var\(--tree-chevron-width\) \+ var\(--tree-column-gap\) \+\s*var\(--watch-indent,\s*0px\)\s*\);/s,
     );
-    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*8px;/s);
+    expect(styles).toMatch(/\.watch-actions\s*\{[^}]*top:\s*5px;/s);
   });
 
   it("only reveals row actions for the hovered or focused row", () => {
@@ -301,7 +301,7 @@ describe("watch tree group actions", () => {
       /\.watch \.watch-action-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
     );
     expect(styles).toMatch(
-      /\.watch:hover \.watch-action-button,[^{]*\.watch:focus-within \.watch-action-button\s*\{[^}]*visibility:\s*visible;[^}]*opacity:\s*0\.6;[^}]*pointer-events:\s*auto;/s,
+      /\.watch:hover \.watch-action-button,[^{]*\.watch:focus-within \.watch-action-button,[^{]*\.watch-action-button\[aria-expanded="true"\]\s*\{[^}]*visibility:\s*visible;[^}]*opacity:\s*0\.6;[^}]*pointer-events:\s*auto;/s,
     );
     expect(styles).not.toMatch(/\.watch\.has-unseen-change \.watch-action-button/);
   });
@@ -327,6 +327,9 @@ describe("watch tree group actions", () => {
   });
 
   it("uses the same neutral treatment for every triage action", () => {
+    expect(styles).toMatch(
+      /\.rerun-button,\s*\.watch-triage-button\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 60%\);/s,
+    );
     expect(styles).toMatch(/\.watch-triage-button\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 60%\);/s);
     expect(styles).not.toContain(".watch-triage-button.is-inbox");
     expect(styles).not.toContain(".watch-triage-button.is-saved");

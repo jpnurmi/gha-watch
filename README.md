@@ -17,7 +17,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Load a repository's open pull requests or active workflow runs on demand and start watching from the menu.
 - Show queued, in-progress, successful, failed, cancelled, and errored states.
 - Mark unseen status changes with a blue indicator.
-- Re-run failed workflow runs through `gh run rerun --failed`.
+- Re-run all jobs or only failed jobs for workflow runs and pull requests.
 - Clear finished watches or clear all watches from the menu.
 - Open watched runs or jobs in GitHub.
 

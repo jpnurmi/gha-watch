@@ -21,7 +21,7 @@ import {
 import { getStatusIconSvg } from "./app/statusIcon";
 import { createWatchController } from "./app/watchController";
 import {
-  isWatchActionConfirmation,
+  getWatchRerunMode,
   shouldDismissPendingWatchActionOnRowLeave,
   type PendingWatchAction,
 } from "./app/watchActionConfirmation";
@@ -85,9 +85,10 @@ import {
   type ActiveWorkflowRun,
   type OpenPullRequest,
   type RateLimit,
+  type RerunMode,
   type RepositoryCiStatus,
   type WorkflowDefinition,
-  rerunFailedWatch,
+  rerunWatch,
 } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
@@ -103,6 +104,7 @@ import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
 const pollIntervalMs = 30_000;
+const rerunRefreshDelayMs = 1_000;
 const freshnessStaleAfterMs = pollIntervalMs * 2;
 const treeIndentStepPx = 26;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
@@ -269,7 +271,7 @@ const controller = createWatchController(
     fetchWorkflowDefinitions: isDemoMode ? fetchDemoWorkflowDefinitions : fetchWorkflowDefinitions,
     notificationsPaused: () => isPopupOpen,
     notify: notifyStatusChange,
-    rerunFailed: isDemoMode ? async () => undefined : rerunFailedWatch,
+    rerun: isDemoMode ? async () => undefined : rerunWatch,
     save: saveWatches,
     saveSuppressions: saveWatchSuppressions,
   },
@@ -300,28 +302,6 @@ window.setInterval(() => {
   void poll();
 }, pollIntervalMs);
 void poll();
-document.addEventListener(
-  "click",
-  (event) => {
-    if (!pendingWatchAction) {
-      return;
-    }
-
-    const target = event.target;
-    const actionTarget = target instanceof Element ? target.closest<HTMLElement>("[data-action]") : null;
-    const action = actionTarget?.dataset.action;
-
-    if (isWatchActionConfirmation(action)) {
-      return;
-    }
-
-    pendingWatchAction = undefined;
-    render();
-    event.preventDefault();
-    event.stopPropagation();
-  },
-  { capture: true },
-);
 document.addEventListener("click", (event) => {
   const target = event.target;
 
@@ -334,11 +314,12 @@ document.addEventListener("click", (event) => {
     render();
   }
 
-  if (activeWorkflowRunMenu || pullRequestMenu || repositoryWatchMenu || repoCiStatusMenu) {
+  if (pendingWatchAction || activeWorkflowRunMenu || pullRequestMenu || repositoryWatchMenu || repoCiStatusMenu) {
     if (target instanceof Element && target.closest(".repo-action-menu")) {
       return;
     }
 
+    pendingWatchAction = undefined;
     activeWorkflowRunMenu = undefined;
     pullRequestMenu = undefined;
     repositoryWatchMenu = undefined;
@@ -351,6 +332,13 @@ window.addEventListener("keydown", (event) => {
     if (repoPressState || repoDragState || watchPressState || watchDragState) {
       cancelRepoPointerDrag();
       cancelWatchPointerDrag();
+      event.preventDefault();
+      return;
+    }
+
+    if (pendingWatchAction) {
+      pendingWatchAction = undefined;
+      render();
       event.preventDefault();
       return;
     }
@@ -1473,23 +1461,29 @@ function getMetadataDetail(row: WatchRowViewModel): string | undefined {
 }
 
 function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean): string {
-  if (pendingWatchAction?.id === row.id) {
-    return `
-      <div class="watch-actions">
-        <button class="confirm-button confirm-button-rerun" type="button" data-action="confirm-rerun" data-id="${escapeHtml(row.id)}">
-          Re-run
-        </button>
-      </div>
-    `;
-  }
+  const rerunMenuOpen = pendingWatchAction?.id === row.id;
 
   return `
     <div class="watch-actions">
       ${
         row.canRerun
-          ? `<button class="watch-action-button rerun-button" type="button" data-action="arm-rerun" data-id="${escapeHtml(row.id)}" title="Re-run" aria-label="Re-run ${escapeHtml(row.label)}">
-              ${getRerunActionIconSvg()}
-            </button>`
+          ? `<span class="repo-action-menu repo-action-menu-container watch-rerun-control">
+              <button class="watch-action-button rerun-button" type="button" data-action="arm-rerun" data-id="${escapeHtml(row.id)}" title="Re-run" aria-label="Re-run ${escapeHtml(row.label)}" aria-haspopup="menu" aria-expanded="${rerunMenuOpen ? "true" : "false"}">
+                ${getRerunActionIconSvg()}
+              </button>
+              ${
+                rerunMenuOpen
+                  ? `<div class="repo-action-popover watch-rerun-popover" role="menu" aria-label="Re-run options for ${escapeHtml(row.label)}">
+                      <button class="repo-action-item" type="button" role="menuitem" data-action="rerun-all" data-id="${escapeHtml(row.id)}">
+                        <span class="repo-action-title">Re-run all jobs</span>
+                      </button>
+                      <button class="repo-action-item" type="button" role="menuitem" data-action="rerun-failed" data-id="${escapeHtml(row.id)}">
+                        <span class="repo-action-title">Re-run failed jobs</span>
+                      </button>
+                    </div>`
+                  : ""
+              }
+            </span>`
           : ""
       }
       ${renderTriageButtons(row.triageState, [row.id], "watch-action-button", row.label, hasDoneCandidate)}
@@ -1836,9 +1830,13 @@ function bindEvents(): void {
     });
   }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="confirm-rerun"]')) {
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action^="rerun-"]')) {
     button.addEventListener("click", () => {
-      void confirmRerun(button.dataset.id || "");
+      const mode = getWatchRerunMode(button.dataset.action);
+
+      if (mode) {
+        void confirmRerun(button.dataset.id || "", mode);
+      }
     });
   }
 
@@ -2788,10 +2786,18 @@ function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
     return;
   }
 
-  pendingWatchAction = { id, kind };
+  pendingWatchAction = pendingWatchAction?.id === id && pendingWatchAction.kind === kind
+    ? undefined
+    : { id, kind };
   isClearMenuOpen = false;
   repoCiStatusMenu = undefined;
   render();
+
+  if (pendingWatchAction) {
+    window.requestAnimationFrame(() => {
+      app.querySelector<HTMLButtonElement>(".watch-rerun-popover .repo-action-item")?.focus();
+    });
+  }
 }
 
 function dismissWatchActionOnRowLeave(rowId: string | undefined): void {
@@ -2803,7 +2809,7 @@ function dismissWatchActionOnRowLeave(rowId: string | undefined): void {
   render();
 }
 
-async function confirmRerun(id: string): Promise<void> {
+async function confirmRerun(id: string, mode: RerunMode): Promise<void> {
   if (!id) {
     return;
   }
@@ -2811,9 +2817,17 @@ async function confirmRerun(id: string): Promise<void> {
   pendingWatchAction = undefined;
 
   try {
-    await controller.rerunFailed(id);
+    await controller.rerun(id, mode);
+
+    if (!isDemoMode) {
+      window.setTimeout(() => {
+        void controller.pollNow({ watchIds: [id] }).catch((error) => {
+          console.warn("Could not refresh the re-run GitHub Actions state.", error);
+        });
+      }, rerunRefreshDelayMs);
+    }
   } catch (error) {
-    console.error("Could not re-run failed GitHub Actions jobs.", error);
+    console.error(`Could not re-run ${mode === "all" ? "all" : "failed"} GitHub Actions jobs.`, error);
   }
 
   render();
