@@ -24,6 +24,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["N
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
+tauri-plugin-window-state = "2.4.1"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 notify-rust = "4.17.0"

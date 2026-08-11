@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
 const rustSource = readFileSync(new URL("../../src-tauri/src/main.rs", import.meta.url), "utf8");
+const cargoToml = readFileSync(new URL("../../src-tauri/Cargo.toml", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("platform frame styling", () => {
@@ -36,6 +37,15 @@ describe("platform frame styling", () => {
   it("keeps user-resized Linux window dimensions", () => {
     expect(mainSource).toContain('if (document.documentElement.dataset.platform === "linux")');
     expect(mainSource).toContain("return;\n  }\n\n  const nextHeight = calculatePopupHeight");
+  });
+
+  it("restores persisted Linux window geometry", () => {
+    expect(cargoToml).toMatch(
+      /\[target\.'cfg\(target_os = "linux"\)'\.dependencies\][\s\S]*tauri-plugin-window-state = "2\.4\.1"/,
+    );
+    expect(rustSource).toContain('#[cfg(target_os = "linux")]\n    let builder = builder.plugin(');
+    expect(rustSource).toContain("tauri_plugin_window_state::StateFlags::POSITION");
+    expect(rustSource).toContain("tauri_plugin_window_state::StateFlags::SIZE");
   });
 
   it("does not move the native Linux window from app content", () => {
