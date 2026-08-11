@@ -2,22 +2,22 @@ import { describe, expect, it } from "vitest";
 import { defaultAppSettings, normalizeAppSettings } from "./settings";
 
 describe("normalizeAppSettings", () => {
-  it("includes favorite repos in default settings", () => {
+  it("includes watched repos in default settings", () => {
     expect(defaultAppSettings).toEqual({
       autoClearFinishedWatches: false,
-      favoriteRepos: [],
+      watchedRepos: [],
       repoOrder: [],
     });
   });
 
-  it("normalizes favorite repos from saved settings", () => {
+  it("normalizes watched repos from saved settings", () => {
     expect(
       normalizeAppSettings({
         autoClearFinishedWatches: true,
-        favoriteRepos: [
-          { owner: "getsentry", repo: "sentry" },
-          { owner: "getsentry", repo: "sentry" },
-          { owner: "jpnurmi", repo: "gha-watch" },
+        watchedRepos: [
+          { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+          { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+          { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "all" },
         ],
         repoOrder: [
           "jpnurmi/gha-watch",
@@ -28,9 +28,9 @@ describe("normalizeAppSettings", () => {
       }),
     ).toEqual({
       autoClearFinishedWatches: true,
-      favoriteRepos: [
-        { owner: "getsentry", repo: "sentry" },
-        { owner: "jpnurmi", repo: "gha-watch" },
+      watchedRepos: [
+        { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+        { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "all" },
       ],
       repoOrder: ["jpnurmi/gha-watch", "getsentry/sentry"],
     });

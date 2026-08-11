@@ -1,15 +1,15 @@
-import { normalizeFavoriteRepos, type FavoriteRepo } from "./favorites";
+import { normalizeWatchedRepos, type WatchedRepo } from "./watchedRepos";
 import { normalizeRepoOrder } from "./repoOrder";
 
 export type AppSettings = {
   autoClearFinishedWatches: boolean;
-  favoriteRepos: FavoriteRepo[];
+  watchedRepos: WatchedRepo[];
   repoOrder: string[];
 };
 
 export const defaultAppSettings: AppSettings = {
   autoClearFinishedWatches: false,
-  favoriteRepos: [],
+  watchedRepos: [],
   repoOrder: [],
 };
 
@@ -20,7 +20,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
 
   return {
     autoClearFinishedWatches: normalizeAutoClearFinishedWatches(value),
-    favoriteRepos: normalizeFavoriteRepos(value.favoriteRepos),
+    watchedRepos: normalizeWatchedRepos(value.watchedRepos),
     repoOrder: normalizeRepoOrder(value.repoOrder),
   };
 }

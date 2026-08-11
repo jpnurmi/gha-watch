@@ -41,16 +41,17 @@ import {
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
 import {
-  addFavoriteRepo,
-  getFavoriteRepoKey,
-  hasFavoriteWorkflowSubscriptions,
-  isFavoriteRepo,
-  toggleFavoriteRepo,
-  toggleFavoriteWorkflowSubscription,
-  updateFavoriteRepoIcon,
-  type FavoriteRepo,
-  type FavoriteWorkflowSubscriptionScope,
-} from "./domain/favorites";
+  addWatchedRepo,
+  getWatchedPullRequestScope,
+  getWatchedRepoKey,
+  isWatchedRepo,
+  toggleWatchedPullRequestScope,
+  toggleWatchedWorkflowSubscription,
+  updateWatchedRepoIcon,
+  type WatchedPullRequestScope,
+  type WatchedRepo,
+  type WatchedWorkflowSubscriptionScope,
+} from "./domain/watchedRepos";
 import {
   isOwnerlessPullRequestSlug,
   isOwnerlessRepositorySlug,
@@ -145,8 +146,8 @@ const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
 let currentWatchView: WatchTriageState = "inbox";
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
-let favoritePrMenu: FavoritePullRequestMenuState | undefined;
-let workflowSubscriptionMenu: WorkflowSubscriptionMenuState | undefined;
+let pullRequestMenu: PullRequestMenuState | undefined;
+let repositoryWatchMenu: RepositoryWatchMenuState | undefined;
 let repoCiStatusMenu: RepoCiStatusMenuState | undefined;
 let repoPressState: RepoPressState | undefined;
 let repoDragState: RepoDragState | undefined;
@@ -207,7 +208,7 @@ type ActiveWorkflowRunMenuState =
       error: string;
     };
 
-type FavoritePullRequestMenuState =
+type PullRequestMenuState =
   | {
       repoKey: string;
       status: "loading";
@@ -223,10 +224,11 @@ type FavoritePullRequestMenuState =
       error: string;
     };
 
-type WorkflowSubscriptionMenuState =
+type RepositoryWatchMenuState =
   | {
       repoKey: string;
       status: "loading";
+      userLogin?: string;
     }
   | {
       repoKey: string;
@@ -239,6 +241,7 @@ type WorkflowSubscriptionMenuState =
       repoKey: string;
       status: "error";
       error: string;
+      userLogin?: string;
     };
 
 type RepoCiStatusMenuState = {
@@ -334,14 +337,14 @@ document.addEventListener("click", (event) => {
     render();
   }
 
-  if (activeWorkflowRunMenu || favoritePrMenu || workflowSubscriptionMenu || repoCiStatusMenu) {
+  if (activeWorkflowRunMenu || pullRequestMenu || repositoryWatchMenu || repoCiStatusMenu) {
     if (target instanceof Element && target.closest(".repo-action-menu")) {
       return;
     }
 
     activeWorkflowRunMenu = undefined;
-    favoritePrMenu = undefined;
-    workflowSubscriptionMenu = undefined;
+    pullRequestMenu = undefined;
+    repositoryWatchMenu = undefined;
     repoCiStatusMenu = undefined;
     render();
   }
@@ -437,7 +440,7 @@ function render(): void {
   const viewModel = createPopupViewModel(
     watches,
     new Date(),
-    showRepositoryTools ? settings.favoriteRepos : [],
+    showRepositoryTools ? settings.watchedRepos : [],
     settings.repoOrder,
     showRepositoryTools ? repoCiStatuses : {},
   );
@@ -602,7 +605,6 @@ function renderAddForm(): string {
 
 function renderWatchGroup(group: WatchGroupViewModel): string {
   const actions = getRepoHeaderActions({
-    favorite: group.favorite,
     userCollapsed: collapsedGroups.has(group.repoLabel),
   });
   const isCollapsed = actions.isCollapsed;
@@ -614,7 +616,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
     >
       <div class="watch-group-header">
         ${renderRepoGroupChevron(group, isCollapsed)}
-        ${renderFavoriteRepoButton(group)}
+        ${renderRepositoryWatchMenu(group)}
         <span class="watch-group-meta">
           <button
             class="watch-group-link"
@@ -650,7 +652,7 @@ function renderRepoCiStatus(group: WatchGroupViewModel): string {
     return "";
   }
 
-  const repoKey = getFavoriteRepoKey(group);
+  const repoKey = getWatchedRepoKey(group);
   const menuOpen = repoCiStatusMenu?.repoKey === repoKey;
   const content = `
     ${renderRepoCiStatusGlyph(group.ciStatus.tone)}
@@ -690,7 +692,7 @@ function renderRepoCiStatus(group: WatchGroupViewModel): string {
 
 function renderRepoCiStatusPopover(status: RepoCiStatusViewModel): string {
   return `
-    <div class="favorite-pr-popover repo-ci-popover" role="menu">
+    <div class="repo-action-popover repo-ci-popover" role="menu">
       ${status.workflows.map(renderRepoCiStatusItem).join("")}
     </div>
   `;
@@ -758,18 +760,17 @@ function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderA
 
   return `
     <div class="watch-group-actions">
-      ${renderWorkflowSubscriptionMenu(group)}
-      ${actions.showOpenPullRequests ? renderFavoritePullRequestMenu(group) : ""}
+      ${actions.showOpenPullRequests ? renderPullRequestMenu(group) : ""}
       ${actions.showActiveWorkflowRuns ? renderActiveWorkflowRunMenu(group) : ""}
       ${rowIds.length > 0 ? renderTriageButtons(currentWatchView, rowIds, "watch-group-triage-button", group.repoLabel) : ""}
     </div>
   `;
 }
 
-function renderFavoriteRepoButton(group: WatchGroupViewModel): string {
+function renderRepositoryWatchMenu(group: WatchGroupViewModel): string {
   if (currentWatchView !== "inbox") {
     return `
-      <span class="watch-group-star is-static" aria-hidden="true">
+      <span class="watch-group-watch is-static" aria-hidden="true">
         <span class="watch-group-icon">
           ${renderRepoIcon(group)}
         </span>
@@ -780,39 +781,49 @@ function renderFavoriteRepoButton(group: WatchGroupViewModel): string {
     `;
   }
 
+  const repoKey = getWatchedRepoKey(group);
+  const menuState = repositoryWatchMenu?.repoKey === repoKey ? repositoryWatchMenu : undefined;
+
   return `
-    <button
-      class="watch-group-star${group.favorite ? " is-favorite" : ""}"
-      type="button"
-      data-action="toggle-favorite-repo"
-      data-owner="${escapeHtml(group.owner)}"
-      data-repo="${escapeHtml(group.repo)}"
-      title="${group.favorite ? "Unfavorite" : "Favorite"}"
-      aria-label="${group.favorite ? "Unfavorite" : "Favorite"} ${escapeHtml(group.repoLabel)}"
-    >
-      <span class="watch-group-icon" aria-hidden="true">
-        ${renderRepoIcon(group)}
-      </span>
-      <span class="watch-group-star-glyph" aria-hidden="true">
-        ${renderStarIcon(group.favorite)}
-      </span>
-      <span class="watch-group-drag-glyph" aria-hidden="true">
-        ${renderDragGripIcon()}
-      </span>
-    </button>
+    <div class="repo-action-menu watch-group-watch-menu">
+      <button
+        class="watch-group-watch${group.watched ? " is-watched" : ""}"
+        type="button"
+        data-action="toggle-repository-watches"
+        data-owner="${escapeHtml(group.owner)}"
+        data-repo="${escapeHtml(group.repo)}"
+        title="Watches"
+        aria-label="Watches for ${escapeHtml(group.repoLabel)}"
+        aria-haspopup="menu"
+        aria-expanded="${menuState ? "true" : "false"}"
+      >
+        <span class="watch-group-icon" aria-hidden="true">
+          ${renderRepoIcon(group)}
+        </span>
+        <span class="watch-group-watch-glyph" aria-hidden="true">
+          ${renderEyeIcon(group.watched)}
+        </span>
+        <span class="watch-group-drag-glyph" aria-hidden="true">
+          ${renderDragGripIcon()}
+        </span>
+      </button>
+      ${menuState ? renderRepositoryWatchPopover(group, menuState) : ""}
+    </div>
   `;
 }
 
-function renderStarIcon(filled: boolean): string {
+function renderEyeIcon(watched: boolean): string {
   return `
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <path
-        d="m8 1.6 1.9 4 4.4.6-3.2 3.1.8 4.4L8 11.6l-3.9 2.1.8-4.4-3.2-3.1 4.4-.6L8 1.6Z"
-        fill="${filled ? "currentColor" : "none"}"
+        d="M1.5 8s2.3-3.75 6.5-3.75S14.5 8 14.5 8 12.2 11.75 8 11.75 1.5 8 1.5 8Z"
+        fill="none"
         stroke="currentColor"
+        stroke-linecap="round"
         stroke-linejoin="round"
         stroke-width="1.4"
       />
+      <circle cx="8" cy="8" r="1.9" fill="${watched ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.2"/>
     </svg>
   `;
 }
@@ -827,66 +838,71 @@ function renderChevronIcon(collapsed: boolean): string {
   `;
 }
 
-function renderWorkflowSubscriptionMenu(group: WatchGroupViewModel): string {
-  const repoKey = getFavoriteRepoKey(group);
-  const menuState = workflowSubscriptionMenu?.repoKey === repoKey ? workflowSubscriptionMenu : undefined;
-  const subscribed = favoriteRepoHasWorkflowSubscriptions(group);
-
-  return `
-    <div class="repo-action-menu favorite-pr-menu">
-      <button
-        class="watch-group-subscribe-button${subscribed ? " is-subscribed" : ""}"
-        type="button"
-        data-action="toggle-workflow-subscriptions"
-        data-owner="${escapeHtml(group.owner)}"
-        data-repo="${escapeHtml(group.repo)}"
-        title="Workflow subscriptions"
-        aria-label="Workflow subscriptions for ${escapeHtml(group.repoLabel)}"
-        aria-haspopup="menu"
-        aria-expanded="${menuState ? "true" : "false"}"
-      >
-        ${renderWorkflowSubscriptionIcon()}
-      </button>
-      ${menuState ? renderWorkflowSubscriptionPopover(group, menuState) : ""}
-    </div>
-  `;
-}
-
-function renderWorkflowSubscriptionIcon(): string {
-  return `
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M5.25 4.5h5.5M5.25 8h5.5M5.25 11.5h5.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"/>
-      <path d="M2.75 4.5h.01M2.75 8h.01M2.75 11.5h.01" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/>
-    </svg>
-  `;
-}
-
-function renderWorkflowSubscriptionPopover(
+function renderRepositoryWatchPopover(
   group: WatchGroupViewModel,
-  menuState: WorkflowSubscriptionMenuState,
+  menuState: RepositoryWatchMenuState,
 ): string {
+  let workflowContent: string;
+
   if (menuState.status === "loading") {
-    return `<div class="favorite-pr-popover workflow-subscription-popover" role="menu"><div class="favorite-pr-status">Loading...</div></div>`;
-  }
-
-  if (menuState.status === "error") {
-    return `
-      <div class="favorite-pr-popover workflow-subscription-popover" role="menu">
-        <div class="favorite-pr-status is-error">${escapeHtml(menuState.error)}</div>
-      </div>
-    `;
-  }
-
-  const workflows = getWorkflowSubscriptionMenuWorkflows(group, menuState.workflows);
-
-  if (workflows.length === 0) {
-    return `<div class="favorite-pr-popover workflow-subscription-popover" role="menu"><div class="favorite-pr-status">No workflows</div></div>`;
+    workflowContent = `<div class="repo-action-status">Loading workflows...</div>`;
+  } else if (menuState.status === "error") {
+    workflowContent = `<div class="repo-action-status is-error">${escapeHtml(menuState.error)}</div>`;
+  } else {
+    const workflows = getWorkflowSubscriptionMenuWorkflows(group, menuState.workflows);
+    workflowContent = workflows.length > 0
+      ? workflows.map((workflow) => renderWorkflowSubscriptionItem(group, workflow, menuState.defaultBranch, menuState.userLogin)).join("")
+      : `<div class="repo-action-status">No workflows</div>`;
   }
 
   return `
-    <div class="favorite-pr-popover workflow-subscription-popover" role="menu">
-      ${workflows.map((workflow) => renderWorkflowSubscriptionItem(group, workflow, menuState.defaultBranch, menuState.userLogin)).join("")}
+    <div class="repo-action-popover repository-watch-popover" role="menu">
+      ${renderPullRequestWatchItem(group, menuState.userLogin)}
+      ${workflowContent}
     </div>
+  `;
+}
+
+function renderPullRequestWatchItem(group: WatchGroupViewModel, userLogin: string | undefined): string {
+  const watchedRepo = findWatchedRepo(group);
+  const selectedScope = watchedRepo ? getWatchedPullRequestScope(watchedRepo) : undefined;
+  const displayLabel = userLogin?.trim() || "…";
+
+  return `
+    <div class="repository-watch-item pull-request-watch-item" role="none">
+      <span class="repo-action-title">Pull requests</span>
+      <span class="repository-watch-segmented" role="group" aria-label="Pull request watches">
+        ${renderPullRequestWatchScope(group, "all", "all", selectedScope)}
+        ${renderPullRequestWatchScope(group, "user", displayLabel, selectedScope)}
+      </span>
+    </div>
+  `;
+}
+
+function renderPullRequestWatchScope(
+  group: WatchGroupViewModel,
+  scope: WatchedPullRequestScope,
+  displayLabel: string,
+  selectedScope: WatchedPullRequestScope | undefined,
+): string {
+  const checked = scope === selectedScope;
+  const subject = scope === "all" ? "all pull requests" : `pull requests by ${displayLabel}`;
+
+  return `
+    <button
+      class="repository-watch-segment repository-watch-segment-${scope}${checked ? " is-selected" : ""}"
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked="${checked ? "true" : "false"}"
+      data-action="toggle-watched-pull-request-scope"
+      data-owner="${escapeHtml(group.owner)}"
+      data-repo="${escapeHtml(group.repo)}"
+      data-scope="${scope}"
+      title="${checked ? "Stop watching" : "Watch"} ${escapeHtml(subject)}"
+      aria-label="${checked ? "Stop watching" : "Watch"} ${escapeHtml(subject)} in ${escapeHtml(group.repoLabel)}"
+    >
+      ${escapeHtml(displayLabel)}
+    </button>
   `;
 }
 
@@ -897,9 +913,9 @@ function renderWorkflowSubscriptionItem(
   userLogin: string,
 ): string {
   return `
-    <div class="workflow-subscription-item" role="none">
-      <span class="favorite-pr-title" title="${escapeHtml(workflow.name)}">${escapeHtml(workflow.name)}</span>
-      <span class="workflow-subscription-segmented" role="group" aria-label="${escapeHtml(workflow.name)} subscriptions">
+    <div class="repository-watch-item" role="none">
+      <span class="repo-action-title" title="${escapeHtml(workflow.name)}">${escapeHtml(workflow.name)}</span>
+      <span class="repository-watch-segmented" role="group" aria-label="${escapeHtml(workflow.name)} watches">
         ${renderWorkflowSubscriptionToggle(group, workflow.name, "defaultBranch", defaultBranch)}
         ${renderWorkflowSubscriptionToggle(group, workflow.name, "user", undefined, userLogin)}
       </span>
@@ -910,7 +926,7 @@ function renderWorkflowSubscriptionItem(
 function renderWorkflowSubscriptionToggle(
   group: WatchGroupViewModel,
   workflowName: string,
-  scope: FavoriteWorkflowSubscriptionScope,
+  scope: WatchedWorkflowSubscriptionScope,
   defaultBranch?: string,
   userLogin?: string,
 ): string {
@@ -923,7 +939,7 @@ function renderWorkflowSubscriptionToggle(
 
   return `
     <button
-      class="workflow-subscription-segment workflow-subscription-segment-${scope}${checked ? " is-selected" : ""}"
+      class="repository-watch-segment repository-watch-segment-${scope}${checked ? " is-selected" : ""}"
       type="button"
       role="menuitemcheckbox"
       aria-checked="${checked ? "true" : "false"}"
@@ -932,8 +948,8 @@ function renderWorkflowSubscriptionToggle(
       data-repo="${escapeHtml(group.repo)}"
       data-workflow="${escapeHtml(workflowName)}"
       data-scope="${scope}"
-      title="${checked ? "Unsubscribe from" : "Subscribe to"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
-      aria-label="${checked ? "Unsubscribe from" : "Subscribe to"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
+      title="${checked ? "Stop watching" : "Watch"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
+      aria-label="${checked ? "Stop watching" : "Watch"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
     >
       ${escapeHtml(displayLabel)}
     </button>
@@ -944,11 +960,11 @@ function getWorkflowSubscriptionMenuWorkflows(
   group: WatchGroupViewModel,
   workflows: WorkflowDefinition[],
 ): WorkflowDefinition[] {
-  const favorite = findFavoriteRepo(group);
+  const watchedRepo = findWatchedRepo(group);
   const workflowNames = new Set(workflows.map((workflow) => workflow.name));
   const missingSelectedWorkflows = [
-    ...(favorite?.defaultBranchWorkflowNames ?? []),
-    ...(favorite?.userWorkflowNames ?? []),
+    ...(watchedRepo?.defaultBranchWorkflowNames ?? []),
+    ...(watchedRepo?.userWorkflowNames ?? []),
   ]
     .filter((workflowName) => !workflowNames.has(workflowName))
     .map((workflowName) => ({
@@ -960,34 +976,29 @@ function getWorkflowSubscriptionMenuWorkflows(
 }
 
 function workflowIsSubscribed(
-  repo: Pick<FavoriteRepo, "owner" | "repo">,
+  repo: Pick<WatchedRepo, "owner" | "repo">,
   workflowName: string,
-  scope: FavoriteWorkflowSubscriptionScope,
+  scope: WatchedWorkflowSubscriptionScope,
 ): boolean {
-  const favorite = findFavoriteRepo(repo);
+  const watchedRepo = findWatchedRepo(repo);
   const workflowNames = scope === "defaultBranch"
-    ? favorite?.defaultBranchWorkflowNames
-    : favorite?.userWorkflowNames;
+    ? watchedRepo?.defaultBranchWorkflowNames
+    : watchedRepo?.userWorkflowNames;
 
   return Boolean(workflowNames?.includes(workflowName));
 }
 
-function favoriteRepoHasWorkflowSubscriptions(repo: Pick<FavoriteRepo, "owner" | "repo">): boolean {
-  const favorite = findFavoriteRepo(repo);
-  return Boolean(favorite && hasFavoriteWorkflowSubscriptions(favorite));
-}
-
-function findFavoriteRepo(repo: Pick<FavoriteRepo, "owner" | "repo">): FavoriteRepo | undefined {
-  const repoKey = getFavoriteRepoKey(repo);
-  return settings.favoriteRepos.find((favorite) => getFavoriteRepoKey(favorite) === repoKey);
+function findWatchedRepo(repo: Pick<WatchedRepo, "owner" | "repo">): WatchedRepo | undefined {
+  const repoKey = getWatchedRepoKey(repo);
+  return settings.watchedRepos.find((watchedRepo) => getWatchedRepoKey(watchedRepo) === repoKey);
 }
 
 function renderActiveWorkflowRunMenu(group: WatchGroupViewModel): string {
-  const repoKey = getFavoriteRepoKey(group);
+  const repoKey = getWatchedRepoKey(group);
   const menuState = activeWorkflowRunMenu?.repoKey === repoKey ? activeWorkflowRunMenu : undefined;
 
   return `
-    <div class="repo-action-menu favorite-pr-menu">
+    <div class="repo-action-menu repo-action-menu-container">
       <button
         class="watch-group-workflow-button"
         type="button"
@@ -1011,23 +1022,23 @@ function renderActiveWorkflowRunPopover(
   menuState: ActiveWorkflowRunMenuState,
 ): string {
   if (menuState.status === "loading") {
-    return `<div class="favorite-pr-popover" role="menu"><div class="favorite-pr-status">Loading...</div></div>`;
+    return `<div class="repo-action-popover" role="menu"><div class="repo-action-status">Loading...</div></div>`;
   }
 
   if (menuState.status === "error") {
     return `
-      <div class="favorite-pr-popover" role="menu">
-        <div class="favorite-pr-status is-error">${escapeHtml(menuState.error)}</div>
+      <div class="repo-action-popover" role="menu">
+        <div class="repo-action-status is-error">${escapeHtml(menuState.error)}</div>
       </div>
     `;
   }
 
   if (menuState.runs.length === 0) {
-    return `<div class="favorite-pr-popover" role="menu"><div class="favorite-pr-status">No active workflow runs</div></div>`;
+    return `<div class="repo-action-popover" role="menu"><div class="repo-action-status">No active workflow runs</div></div>`;
   }
 
   return `
-    <div class="favorite-pr-popover" role="menu">
+    <div class="repo-action-popover" role="menu">
       ${menuState.runs.map((run) => renderActiveWorkflowRunItem(group, run)).join("")}
     </div>
   `;
@@ -1036,7 +1047,7 @@ function renderActiveWorkflowRunPopover(
 function renderActiveWorkflowRunItem(group: WatchGroupViewModel, run: ActiveWorkflowRun): string {
   return `
     <button
-      class="favorite-pr-item"
+      class="repo-action-item"
       type="button"
       role="menuitem"
       data-action="watch-active-workflow"
@@ -1046,8 +1057,8 @@ function renderActiveWorkflowRunItem(group: WatchGroupViewModel, run: ActiveWork
       data-url="${escapeHtml(run.url)}"
       title="${escapeHtml(getActiveWorkflowRunTitle(run))}"
     >
-      <span class="favorite-pr-number">${escapeHtml(formatWorkflowRunStatus(run.status))}</span>
-      <span class="favorite-pr-title">${escapeHtml(run.title)}</span>
+      <span class="repo-action-number">${escapeHtml(formatWorkflowRunStatus(run.status))}</span>
+      <span class="repo-action-title">${escapeHtml(run.title)}</span>
       ${renderBranchBadge(run.branchName)}
     </button>
   `;
@@ -1074,16 +1085,16 @@ function formatWorkflowRunStatus(status: string): string {
     .join(" ");
 }
 
-function renderFavoritePullRequestMenu(group: WatchGroupViewModel): string {
-  const repoKey = getFavoriteRepoKey(group);
-  const menuState = favoritePrMenu?.repoKey === repoKey ? favoritePrMenu : undefined;
+function renderPullRequestMenu(group: WatchGroupViewModel): string {
+  const repoKey = getWatchedRepoKey(group);
+  const menuState = pullRequestMenu?.repoKey === repoKey ? pullRequestMenu : undefined;
 
   return `
-    <div class="repo-action-menu favorite-pr-menu">
+    <div class="repo-action-menu repo-action-menu-container">
       <button
         class="watch-group-pr-button"
         type="button"
-        data-action="toggle-favorite-prs"
+        data-action="toggle-repo-prs"
         data-owner="${escapeHtml(group.owner)}"
         data-repo="${escapeHtml(group.repo)}"
         title="Open PRs"
@@ -1095,53 +1106,53 @@ function renderFavoritePullRequestMenu(group: WatchGroupViewModel): string {
           <path d="M5 3a2 2 0 1 1-2-2 2 2 0 0 1 2 2Zm0 10a2 2 0 1 1-2-2 2 2 0 0 1 2 2Zm6 0a2 2 0 1 1 2 2 2 2 0 0 1-2-2ZM3 5v6m10 0V8.5A2.5 2.5 0 0 0 10.5 6H8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.6"/>
         </svg>
       </button>
-      ${menuState ? renderFavoritePullRequestPopover(group, menuState) : ""}
+      ${menuState ? renderPullRequestPopover(group, menuState) : ""}
     </div>
   `;
 }
 
-function renderFavoritePullRequestPopover(
+function renderPullRequestPopover(
   group: WatchGroupViewModel,
-  menuState: FavoritePullRequestMenuState,
+  menuState: PullRequestMenuState,
 ): string {
   if (menuState.status === "loading") {
-    return `<div class="favorite-pr-popover" role="menu"><div class="favorite-pr-status">Loading...</div></div>`;
+    return `<div class="repo-action-popover" role="menu"><div class="repo-action-status">Loading...</div></div>`;
   }
 
   if (menuState.status === "error") {
     return `
-      <div class="favorite-pr-popover" role="menu">
-        <div class="favorite-pr-status is-error">${escapeHtml(menuState.error)}</div>
+      <div class="repo-action-popover" role="menu">
+        <div class="repo-action-status is-error">${escapeHtml(menuState.error)}</div>
       </div>
     `;
   }
 
   if (menuState.pullRequests.length === 0) {
-    return `<div class="favorite-pr-popover" role="menu"><div class="favorite-pr-status">No open pull requests</div></div>`;
+    return `<div class="repo-action-popover" role="menu"><div class="repo-action-status">No open pull requests</div></div>`;
   }
 
   return `
-    <div class="favorite-pr-popover" role="menu">
-      ${menuState.pullRequests.map((pullRequest) => renderFavoritePullRequestItem(group, pullRequest)).join("")}
+    <div class="repo-action-popover" role="menu">
+      ${menuState.pullRequests.map((pullRequest) => renderPullRequestItem(group, pullRequest)).join("")}
     </div>
   `;
 }
 
-function renderFavoritePullRequestItem(group: WatchGroupViewModel, pullRequest: OpenPullRequest): string {
+function renderPullRequestItem(group: WatchGroupViewModel, pullRequest: OpenPullRequest): string {
   return `
     <button
-      class="favorite-pr-item"
+      class="repo-action-item"
       type="button"
       role="menuitem"
-      data-action="watch-favorite-pr"
+      data-action="watch-repo-pr"
       data-owner="${escapeHtml(group.owner)}"
       data-repo="${escapeHtml(group.repo)}"
       data-pr="${escapeHtml(pullRequest.number)}"
       title="#${escapeHtml(pullRequest.number)} ${escapeHtml(pullRequest.title)}"
     >
-      <span class="favorite-pr-number">#${escapeHtml(pullRequest.number)}</span>
-      <span class="favorite-pr-title">${escapeHtml(pullRequest.title)}</span>
-      ${pullRequest.isDraft ? `<span class="favorite-pr-badge">Draft</span>` : ""}
+      <span class="repo-action-number">#${escapeHtml(pullRequest.number)}</span>
+      <span class="repo-action-title">${escapeHtml(pullRequest.title)}</span>
+      ${pullRequest.isDraft ? `<span class="repo-action-badge">Draft</span>` : ""}
     </button>
   `;
 }
@@ -1618,8 +1629,8 @@ function bindEvents(): void {
       isClearMenuOpen = false;
       pendingWatchAction = undefined;
       activeWorkflowRunMenu = undefined;
-      favoritePrMenu = undefined;
-      workflowSubscriptionMenu = undefined;
+      pullRequestMenu = undefined;
+      repositoryWatchMenu = undefined;
       repoCiStatusMenu = undefined;
       render();
     });
@@ -1768,12 +1779,12 @@ function bindEvents(): void {
     },
   );
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-favorite-repo"]')) {
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-watched-pull-request-scope"]')) {
     button.addEventListener("click", () => {
-      toggleFavoriteRepository({
+      togglePullRequestWatches({
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
-      });
+      }, getPullRequestWatchScope(button.dataset.scope));
     });
   }
 
@@ -1786,9 +1797,9 @@ function bindEvents(): void {
     });
   }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-workflow-subscriptions"]')) {
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repository-watches"]')) {
     button.addEventListener("click", () => {
-      void toggleWorkflowSubscriptions({
+      void toggleRepositoryWatchMenu({
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
       });
@@ -1806,9 +1817,9 @@ function bindEvents(): void {
     });
   }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-favorite-prs"]')) {
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repo-prs"]')) {
     button.addEventListener("click", () => {
-      void toggleFavoritePullRequests({
+      void togglePullRequests({
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
       });
@@ -1826,9 +1837,9 @@ function bindEvents(): void {
     });
   }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="watch-favorite-pr"]')) {
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="watch-repo-pr"]')) {
     button.addEventListener("click", () => {
-      void watchFavoritePullRequest({
+      void watchPullRequest({
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
         prNumber: button.dataset.pr || "",
@@ -2042,7 +2053,7 @@ function getRepoHeaderPressKey(header: HTMLElement, event: Event): string | unde
     return undefined;
   }
 
-  if (event.target.closest('.watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron, .repo-ci-status, [data-action="open-github-url"]')) {
+  if (event.target.closest('.watch-group-watch, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron, .repo-ci-status, [data-action="open-github-url"]')) {
     return undefined;
   }
 
@@ -2106,8 +2117,8 @@ function toggleTreeNode(nodeId: string): void {
   collapsedGroups.toggle(nodeId);
   isClearMenuOpen = false;
   activeWorkflowRunMenu = undefined;
-  favoritePrMenu = undefined;
-  workflowSubscriptionMenu = undefined;
+  pullRequestMenu = undefined;
+  repositoryWatchMenu = undefined;
   repoCiStatusMenu = undefined;
   render();
 }
@@ -2132,8 +2143,8 @@ function startWatchPointerDrag(repoKey: string, sourceKey: string, sourceIds: st
   watchDragState = { repoKey, sourceKey, sourceIds };
   isClearMenuOpen = false;
   activeWorkflowRunMenu = undefined;
-  favoritePrMenu = undefined;
-  workflowSubscriptionMenu = undefined;
+  pullRequestMenu = undefined;
+  repositoryWatchMenu = undefined;
   repoCiStatusMenu = undefined;
 
   app.querySelector(".watch-list")?.classList.add("is-reordering-runs");
@@ -2150,8 +2161,8 @@ function startRepoPointerDrag(sourceKey: string): void {
   repoDragState = { sourceKey };
   isClearMenuOpen = false;
   activeWorkflowRunMenu = undefined;
-  favoritePrMenu = undefined;
-  workflowSubscriptionMenu = undefined;
+  pullRequestMenu = undefined;
+  repositoryWatchMenu = undefined;
   repoCiStatusMenu = undefined;
 
   app.querySelector(".watch-list")?.classList.add("is-reordering");
@@ -2477,57 +2488,56 @@ function toggleRepoCiStatusMenu(repoKey: string): void {
 
   repoCiStatusMenu = repoCiStatusMenu?.repoKey === repoKey ? undefined : { repoKey };
   activeWorkflowRunMenu = undefined;
-  favoritePrMenu = undefined;
-  workflowSubscriptionMenu = undefined;
+  pullRequestMenu = undefined;
+  repositoryWatchMenu = undefined;
   isClearMenuOpen = false;
   render();
 }
 
-function toggleFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): void {
-  if (!repo.owner || !repo.repo) {
+function togglePullRequestWatches(
+  repo: Pick<WatchedRepo, "owner" | "repo">,
+  scope: WatchedPullRequestScope | undefined,
+): void {
+  if (!repo.owner || !repo.repo || !scope) {
     return;
   }
 
-  const wasFavorite = isFavoriteRepo(settings.favoriteRepos, repo);
-  let favoriteRepos = toggleFavoriteRepo(settings.favoriteRepos, repo);
+  const wasWatched = isWatchedRepo(settings.watchedRepos, repo);
+  let watchedRepos = toggleWatchedPullRequestScope(settings.watchedRepos, repo, scope);
 
-  if (!wasFavorite) {
-    favoriteRepos = updateFavoriteRepoIcon(favoriteRepos, repo, findRepoIconUrl(repo));
-  } else if (favoritePrMenu?.repoKey === getFavoriteRepoKey(repo)) {
-    favoritePrMenu = undefined;
-  } else if (activeWorkflowRunMenu?.repoKey === getFavoriteRepoKey(repo)) {
-    activeWorkflowRunMenu = undefined;
-  } else if (workflowSubscriptionMenu?.repoKey === getFavoriteRepoKey(repo)) {
-    workflowSubscriptionMenu = undefined;
-  } else if (repoCiStatusMenu?.repoKey === getFavoriteRepoKey(repo)) {
-    repoCiStatusMenu = undefined;
+  if (!wasWatched) {
+    watchedRepos = updateWatchedRepoIcon(watchedRepos, repo, findRepoIconUrl(repo));
   }
 
-  settings = { ...settings, favoriteRepos };
+  settings = { ...settings, watchedRepos };
   void saveSettings(settings);
   render();
   void refreshListedRepositoryCiStatuses();
 
-  if (!wasFavorite) {
-    void refreshFavoriteRepoIcon(repo);
+  if (!wasWatched) {
+    void refreshWatchedRepoIcon(repo);
   }
 }
 
-async function addFavoriteRepository(repo: Pick<FavoriteRepo, "owner" | "repo">): Promise<void> {
-  let favoriteRepos = addFavoriteRepo(settings.favoriteRepos, repo);
-  favoriteRepos = updateFavoriteRepoIcon(favoriteRepos, repo, findRepoIconUrl(repo));
+function getPullRequestWatchScope(value: string | undefined): WatchedPullRequestScope | undefined {
+  return value === "all" || value === "user" ? value : undefined;
+}
 
-  if (favoriteRepos !== settings.favoriteRepos) {
-    settings = { ...settings, favoriteRepos };
+async function addWatchedRepository(repo: Pick<WatchedRepo, "owner" | "repo">): Promise<void> {
+  let watchedRepos = addWatchedRepo(settings.watchedRepos, repo);
+  watchedRepos = updateWatchedRepoIcon(watchedRepos, repo, findRepoIconUrl(repo));
+
+  if (watchedRepos !== settings.watchedRepos) {
+    settings = { ...settings, watchedRepos };
     await saveSettings(settings);
   }
 
-  void refreshFavoriteRepoIcon(repo);
+  void refreshWatchedRepoIcon(repo);
 }
 
-async function refreshFavoriteRepoIcon(repo: Pick<FavoriteRepo, "owner" | "repo">): Promise<void> {
-  const repoKey = getFavoriteRepoKey(repo);
-  const current = settings.favoriteRepos.find((favorite) => getFavoriteRepoKey(favorite) === repoKey);
+async function refreshWatchedRepoIcon(repo: Pick<WatchedRepo, "owner" | "repo">): Promise<void> {
+  const repoKey = getWatchedRepoKey(repo);
+  const current = settings.watchedRepos.find((watchedRepo) => getWatchedRepoKey(watchedRepo) === repoKey);
 
   if (!current || current.repoIconUrl || isDemoMode) {
     return;
@@ -2535,40 +2545,40 @@ async function refreshFavoriteRepoIcon(repo: Pick<FavoriteRepo, "owner" | "repo"
 
   try {
     const repoIconUrl = await getRepositoryIconUrl(repo);
-    const favoriteRepos = updateFavoriteRepoIcon(settings.favoriteRepos, repo, repoIconUrl);
+    const watchedRepos = updateWatchedRepoIcon(settings.watchedRepos, repo, repoIconUrl);
 
-    if (favoriteRepos !== settings.favoriteRepos) {
-      settings = { ...settings, favoriteRepos };
+    if (watchedRepos !== settings.watchedRepos) {
+      settings = { ...settings, watchedRepos };
       await saveSettings(settings);
       render();
     }
   } catch {
-    // Missing avatars should not interfere with favorites.
+    // Missing avatars should not interfere with watched repositories.
   }
 }
 
-function findRepoIconUrl(repo: Pick<FavoriteRepo, "owner" | "repo">): string | undefined {
+function findRepoIconUrl(repo: Pick<WatchedRepo, "owner" | "repo">): string | undefined {
   return controller
     .getWatches()
     .find((watch) => watch.target.owner === repo.owner && watch.target.repo === repo.repo)?.repoIconUrl;
 }
 
-async function toggleFavoritePullRequests(repo: Pick<FavoriteRepo, "owner" | "repo">): Promise<void> {
+async function togglePullRequests(repo: Pick<WatchedRepo, "owner" | "repo">): Promise<void> {
   if (!repo.owner || !repo.repo) {
     return;
   }
 
-  const repoKey = getFavoriteRepoKey(repo);
+  const repoKey = getWatchedRepoKey(repo);
 
-  if (favoritePrMenu?.repoKey === repoKey) {
-    favoritePrMenu = undefined;
+  if (pullRequestMenu?.repoKey === repoKey) {
+    pullRequestMenu = undefined;
     render();
     return;
   }
 
-  favoritePrMenu = { repoKey, status: "loading" };
+  pullRequestMenu = { repoKey, status: "loading" };
   activeWorkflowRunMenu = undefined;
-  workflowSubscriptionMenu = undefined;
+  repositoryWatchMenu = undefined;
   repoCiStatusMenu = undefined;
   isClearMenuOpen = false;
   render();
@@ -2576,13 +2586,13 @@ async function toggleFavoritePullRequests(repo: Pick<FavoriteRepo, "owner" | "re
   try {
     const pullRequests = await controller.listOpenPullRequests(repo);
 
-    if (favoritePrMenu?.repoKey === repoKey) {
-      favoritePrMenu = { repoKey, status: "loaded", pullRequests };
+    if (pullRequestMenu?.repoKey === repoKey) {
+      pullRequestMenu = { repoKey, status: "loaded", pullRequests };
       render();
     }
   } catch (error) {
-    if (favoritePrMenu?.repoKey === repoKey) {
-      favoritePrMenu = {
+    if (pullRequestMenu?.repoKey === repoKey) {
+      pullRequestMenu = {
         repoKey,
         status: "error",
         error: error instanceof Error ? error.message : String(error),
@@ -2592,12 +2602,12 @@ async function toggleFavoritePullRequests(repo: Pick<FavoriteRepo, "owner" | "re
   }
 }
 
-async function toggleActiveWorkflowRuns(repo: Pick<FavoriteRepo, "owner" | "repo">): Promise<void> {
+async function toggleActiveWorkflowRuns(repo: Pick<WatchedRepo, "owner" | "repo">): Promise<void> {
   if (!repo.owner || !repo.repo) {
     return;
   }
 
-  const repoKey = getFavoriteRepoKey(repo);
+  const repoKey = getWatchedRepoKey(repo);
 
   if (activeWorkflowRunMenu?.repoKey === repoKey) {
     activeWorkflowRunMenu = undefined;
@@ -2606,8 +2616,8 @@ async function toggleActiveWorkflowRuns(repo: Pick<FavoriteRepo, "owner" | "repo
   }
 
   activeWorkflowRunMenu = { repoKey, status: "loading" };
-  favoritePrMenu = undefined;
-  workflowSubscriptionMenu = undefined;
+  pullRequestMenu = undefined;
+  repositoryWatchMenu = undefined;
   repoCiStatusMenu = undefined;
   isClearMenuOpen = false;
   render();
@@ -2631,43 +2641,57 @@ async function toggleActiveWorkflowRuns(repo: Pick<FavoriteRepo, "owner" | "repo
   }
 }
 
-async function toggleWorkflowSubscriptions(repo: Pick<FavoriteRepo, "owner" | "repo">): Promise<void> {
+async function toggleRepositoryWatchMenu(repo: Pick<WatchedRepo, "owner" | "repo">): Promise<void> {
   if (!repo.owner || !repo.repo) {
     return;
   }
 
-  const repoKey = getFavoriteRepoKey(repo);
+  const repoKey = getWatchedRepoKey(repo);
 
-  if (workflowSubscriptionMenu?.repoKey === repoKey) {
-    workflowSubscriptionMenu = undefined;
+  if (repositoryWatchMenu?.repoKey === repoKey) {
+    repositoryWatchMenu = undefined;
     render();
     return;
   }
 
-  workflowSubscriptionMenu = { repoKey, status: "loading" };
+  repositoryWatchMenu = { repoKey, status: "loading" };
   activeWorkflowRunMenu = undefined;
-  favoritePrMenu = undefined;
+  pullRequestMenu = undefined;
   repoCiStatusMenu = undefined;
   isClearMenuOpen = false;
   render();
 
   try {
+    const userLoginPromise = getAuthenticatedUserLogin();
+    void userLoginPromise.then(
+      (userLogin) => {
+        const currentMenu = repositoryWatchMenu;
+
+        if (currentMenu?.repoKey === repoKey && currentMenu.status === "loading") {
+          repositoryWatchMenu = { ...currentMenu, userLogin };
+          render();
+        }
+      },
+      () => undefined,
+    );
     const [workflows, defaultBranch, userLogin] = await Promise.all([
       controller.listWorkflowDefinitions(repo),
       getCachedRepositoryDefaultBranch(repo),
-      getAuthenticatedUserLogin(),
+      userLoginPromise,
     ]);
 
-    if (workflowSubscriptionMenu?.repoKey === repoKey) {
-      workflowSubscriptionMenu = { repoKey, status: "loaded", workflows, defaultBranch, userLogin };
+    if (repositoryWatchMenu?.repoKey === repoKey) {
+      repositoryWatchMenu = { repoKey, status: "loaded", workflows, defaultBranch, userLogin };
       render();
     }
   } catch (error) {
-    if (workflowSubscriptionMenu?.repoKey === repoKey) {
-      workflowSubscriptionMenu = {
+    if (repositoryWatchMenu?.repoKey === repoKey) {
+      const userLogin = repositoryWatchMenu.userLogin;
+      repositoryWatchMenu = {
         repoKey,
         status: "error",
         error: error instanceof Error ? error.message : String(error),
+        ...(userLogin ? { userLogin } : {}),
       };
       render();
     }
@@ -2675,8 +2699,8 @@ async function toggleWorkflowSubscriptions(repo: Pick<FavoriteRepo, "owner" | "r
 }
 
 function toggleWorkflowSubscription(
-  target: Pick<FavoriteRepo, "owner" | "repo"> & {
-    scope: FavoriteWorkflowSubscriptionScope | undefined;
+  target: Pick<WatchedRepo, "owner" | "repo"> & {
+    scope: WatchedWorkflowSubscriptionScope | undefined;
     workflowName: string;
   },
 ): void {
@@ -2684,41 +2708,41 @@ function toggleWorkflowSubscription(
     return;
   }
 
-  const wasFavorite = isFavoriteRepo(settings.favoriteRepos, target);
-  let favoriteRepos = toggleFavoriteWorkflowSubscription(
-    settings.favoriteRepos,
+  const wasWatched = isWatchedRepo(settings.watchedRepos, target);
+  let watchedRepos = toggleWatchedWorkflowSubscription(
+    settings.watchedRepos,
     target,
     target.scope,
     target.workflowName,
   );
 
-  if (!wasFavorite) {
-    favoriteRepos = updateFavoriteRepoIcon(favoriteRepos, target, findRepoIconUrl(target));
+  if (!wasWatched) {
+    watchedRepos = updateWatchedRepoIcon(watchedRepos, target, findRepoIconUrl(target));
   }
 
-  settings = { ...settings, favoriteRepos };
+  settings = { ...settings, watchedRepos };
   void saveSettings(settings);
   render();
 
-  if (!wasFavorite) {
-    void refreshFavoriteRepoIcon(target);
+  if (!wasWatched) {
+    void refreshWatchedRepoIcon(target);
   }
 
   void poll();
 }
 
-function getWorkflowSubscriptionScope(value: string | undefined): FavoriteWorkflowSubscriptionScope | undefined {
+function getWorkflowSubscriptionScope(value: string | undefined): WatchedWorkflowSubscriptionScope | undefined {
   return value === "defaultBranch" || value === "user" ? value : undefined;
 }
 
 async function watchActiveWorkflowRun(
-  target: Pick<FavoriteRepo, "owner" | "repo"> & { runId: string; url: string },
+  target: Pick<WatchedRepo, "owner" | "repo"> & { runId: string; url: string },
 ): Promise<void> {
   if (!target.owner || !target.repo || !target.runId || !target.url) {
     return;
   }
 
-  const repoKey = getFavoriteRepoKey(target);
+  const repoKey = getWatchedRepoKey(target);
 
   try {
     await controller.add({
@@ -2730,7 +2754,7 @@ async function watchActiveWorkflowRun(
     });
     currentWatchView = "inbox";
     activeWorkflowRunMenu = undefined;
-    workflowSubscriptionMenu = undefined;
+    repositoryWatchMenu = undefined;
     repoCiStatusMenu = undefined;
   } catch (error) {
     activeWorkflowRunMenu = {
@@ -2744,14 +2768,14 @@ async function watchActiveWorkflowRun(
   void updateTrayIndicator();
 }
 
-async function watchFavoritePullRequest(
-  target: Pick<FavoriteRepo, "owner" | "repo"> & { prNumber: string },
+async function watchPullRequest(
+  target: Pick<WatchedRepo, "owner" | "repo"> & { prNumber: string },
 ): Promise<void> {
   if (!target.owner || !target.repo || !target.prNumber) {
     return;
   }
 
-  const repoKey = getFavoriteRepoKey(target);
+  const repoKey = getWatchedRepoKey(target);
 
   try {
     await controller.add({
@@ -2762,11 +2786,11 @@ async function watchFavoritePullRequest(
       url: `https://github.com/${target.owner}/${target.repo}/pull/${target.prNumber}`,
     });
     currentWatchView = "inbox";
-    favoritePrMenu = undefined;
-    workflowSubscriptionMenu = undefined;
+    pullRequestMenu = undefined;
+    repositoryWatchMenu = undefined;
     repoCiStatusMenu = undefined;
   } catch (error) {
-    favoritePrMenu = {
+    pullRequestMenu = {
       repoKey,
       status: "error",
       error: error instanceof Error ? error.message : String(error),
@@ -2880,7 +2904,7 @@ async function addWatch(url: string): Promise<void> {
     const target = await parseWatchInput(url);
 
     if (target.kind === "repo") {
-      await addFavoriteRepository(target);
+      await addWatchedRepository(target);
     } else {
       await controller.add(target);
     }
@@ -2929,7 +2953,7 @@ async function poll(forceVisibleData = false): Promise<void> {
       await refreshListedRepositoryCiStatuses(forceVisibleData);
     } else {
       try {
-        await controller.syncWorkflowSubscriptions(settings.favoriteRepos);
+        await controller.syncWorkflowSubscriptions(settings.watchedRepos);
       } catch (error) {
         console.warn("Could not sync workflow subscriptions.", error);
       }
@@ -2959,7 +2983,7 @@ async function poll(forceVisibleData = false): Promise<void> {
 
 async function refreshListedRepositoryCiStatuses(force = false): Promise<void> {
   const repos = getListedRepositories();
-  const listedKeys = new Set(repos.map(getFavoriteRepoKey));
+  const listedKeys = new Set(repos.map(getWatchedRepoKey));
   const nextRepoCiStatuses = Object.fromEntries(
     Object.entries(repoCiStatuses).filter(([repoKey]) => listedKeys.has(repoKey)),
   );
@@ -2984,8 +3008,8 @@ async function refreshListedRepositoryCiStatuses(force = false): Promise<void> {
   await Promise.all(repos.map((repo) => refreshRepositoryCiStatus(repo, force)));
 }
 
-async function refreshRepositoryCiStatus(repo: Pick<FavoriteRepo, "owner" | "repo">, force: boolean): Promise<void> {
-  const repoKey = getFavoriteRepoKey(repo);
+async function refreshRepositoryCiStatus(repo: Pick<WatchedRepo, "owner" | "repo">, force: boolean): Promise<void> {
+  const repoKey = getWatchedRepoKey(repo);
 
   if (
     repoCiStatusRefreshes.has(repoKey) ||
@@ -3044,10 +3068,10 @@ async function refreshRepositoryCiStatus(repo: Pick<FavoriteRepo, "owner" | "rep
 }
 
 async function getCachedRepositoryDefaultBranch(
-  repo: Pick<FavoriteRepo, "owner" | "repo">,
+  repo: Pick<WatchedRepo, "owner" | "repo">,
   force = false,
 ): Promise<string> {
-  const repoKey = getFavoriteRepoKey(repo);
+  const repoKey = getWatchedRepoKey(repo);
   const cached = repoDefaultBranches.get(repoKey);
 
   if (cached && !force) {
@@ -3075,11 +3099,11 @@ async function getCachedRepositoryDefaultBranch(
   }
 }
 
-function getListedRepositories(): Array<Pick<FavoriteRepo, "owner" | "repo">> {
-  const repos = new Map<string, Pick<FavoriteRepo, "owner" | "repo">>();
+function getListedRepositories(): Array<Pick<WatchedRepo, "owner" | "repo">> {
+  const repos = new Map<string, Pick<WatchedRepo, "owner" | "repo">>();
 
-  for (const favorite of settings.favoriteRepos) {
-    repos.set(getFavoriteRepoKey(favorite), { owner: favorite.owner, repo: favorite.repo });
+  for (const watchedRepo of settings.watchedRepos) {
+    repos.set(getWatchedRepoKey(watchedRepo), { owner: watchedRepo.owner, repo: watchedRepo.repo });
   }
 
   for (const watch of controller.getWatches()) {
@@ -3087,7 +3111,7 @@ function getListedRepositories(): Array<Pick<FavoriteRepo, "owner" | "repo">> {
       continue;
     }
 
-    repos.set(getFavoriteRepoKey(watch.target), { owner: watch.target.owner, repo: watch.target.repo });
+    repos.set(getWatchedRepoKey(watch.target), { owner: watch.target.owner, repo: watch.target.repo });
   }
 
   return [...repos.values()];
@@ -3160,7 +3184,7 @@ async function fetchDemoOpenPullRequests(): Promise<OpenPullRequest[]> {
   return [
     {
       number: "12",
-      title: "Add favorite repo quick watches",
+      title: "Add watched repository quick watches",
       isDraft: false,
       authorLogin: "jpnurmi",
       headBranch: "feat/tray-badges",
@@ -3239,7 +3263,7 @@ async function fetchDemoWorkflowDefinitions(): Promise<WorkflowDefinition[]> {
 }
 
 async function fetchDemoRepositoryDefaultBranchCiStatus(
-  repo: Pick<FavoriteRepo, "owner" | "repo">,
+  repo: Pick<WatchedRepo, "owner" | "repo">,
 ): Promise<RepositoryCiStatus> {
   const pending = repo.repo === "sentry";
   const workflowUrl = `https://github.com/${repo.owner}/${repo.repo}/actions/runs/${pending ? "21" : "22"}`;

@@ -35,7 +35,7 @@ describe("getWatchTriageActions", () => {
     expect(mainSource).toContain('title="Remove from Done"');
     expect(mainSource).toContain("renderTriageButtons(currentWatchView, node.rowIds");
     expect(mainSource).toContain("renderTriageButtons(row.triageState, [row.id]");
-    expect(mainSource).toContain('class="watch-group-star is-static"');
+    expect(mainSource).toContain('class="watch-group-watch is-static"');
     expect(mainSource).toContain('if (currentWatchView !== "inbox")');
     expect(mainSource).not.toContain('title="Remove"');
     expect(styles).toMatch(/\.watch-view-switcher\s*\{[^}]*display:\s*inline-flex;/s);

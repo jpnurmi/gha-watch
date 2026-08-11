@@ -3,21 +3,19 @@ import { getRepoHeaderActions } from "./repoHeaderActions";
 
 describe("getRepoHeaderActions", () => {
   it("shows open pull requests for every visible repository group", () => {
-    expect(getRepoHeaderActions({ favorite: false, userCollapsed: false })).toMatchObject({
+    expect(getRepoHeaderActions({ userCollapsed: false })).toMatchObject({
       showOpenPullRequests: true,
       showActiveWorkflowRuns: true,
     });
   });
 
-  it("keeps favorite state separate from open pull request visibility", () => {
-    expect(getRepoHeaderActions({ favorite: true, userCollapsed: false })).toEqual({
-      favorite: true,
+  it("keeps pull request visibility independent from collapse state", () => {
+    expect(getRepoHeaderActions({ userCollapsed: false })).toEqual({
       isCollapsed: false,
       showActiveWorkflowRuns: true,
       showOpenPullRequests: true,
     });
-    expect(getRepoHeaderActions({ favorite: false, userCollapsed: true })).toEqual({
-      favorite: false,
+    expect(getRepoHeaderActions({ userCollapsed: true })).toEqual({
       isCollapsed: true,
       showActiveWorkflowRuns: true,
       showOpenPullRequests: true,
@@ -25,7 +23,7 @@ describe("getRepoHeaderActions", () => {
   });
 
   it("preserves the collapse preference while a repository is empty", () => {
-    expect(getRepoHeaderActions({ favorite: true, userCollapsed: false }).isCollapsed).toBe(false);
-    expect(getRepoHeaderActions({ favorite: true, userCollapsed: true }).isCollapsed).toBe(true);
+    expect(getRepoHeaderActions({ userCollapsed: false }).isCollapsed).toBe(false);
+    expect(getRepoHeaderActions({ userCollapsed: true }).isCollapsed).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } from "../domain/githubUrl";
-import type { FavoriteRepo } from "../domain/favorites";
+import type { WatchedRepo } from "../domain/watchedRepos";
 import type { WatchSuppression } from "../domain/watchSuppressions";
 import { type WatchRecord } from "../domain/watches";
 import type { ActiveWorkflowRun, OpenPullRequest, WatchSnapshot, WorkflowDefinition } from "../platform/gh";
@@ -52,11 +52,11 @@ function createDeps(
   suppressionSaves: WatchSuppression[][];
   fetches: WatchTarget[];
   reruns: CheckWatchTarget[];
-  openPullRequestFetches: FavoriteRepo[];
-  activeWorkflowRunFetches: FavoriteRepo[];
-  defaultBranchFetches: FavoriteRepo[];
-  userActiveWorkflowRunFetches: FavoriteRepo[];
-  workflowDefinitionFetches: FavoriteRepo[];
+  openPullRequestFetches: WatchedRepo[];
+  activeWorkflowRunFetches: WatchedRepo[];
+  defaultBranchFetches: WatchedRepo[];
+  userActiveWorkflowRunFetches: WatchedRepo[];
+  workflowDefinitionFetches: WatchedRepo[];
 } {
   const notifications: string[] = [];
   const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
@@ -64,11 +64,11 @@ function createDeps(
   const suppressionSaves: WatchSuppression[][] = [];
   const fetches: WatchTarget[] = [];
   const reruns: CheckWatchTarget[] = [];
-  const openPullRequestFetches: FavoriteRepo[] = [];
-  const activeWorkflowRunFetches: FavoriteRepo[] = [];
-  const defaultBranchFetches: FavoriteRepo[] = [];
-  const userActiveWorkflowRunFetches: FavoriteRepo[] = [];
-  const workflowDefinitionFetches: FavoriteRepo[] = [];
+  const openPullRequestFetches: WatchedRepo[] = [];
+  const activeWorkflowRunFetches: WatchedRepo[] = [];
+  const defaultBranchFetches: WatchedRepo[] = [];
+  const userActiveWorkflowRunFetches: WatchedRepo[] = [];
+  const workflowDefinitionFetches: WatchedRepo[] = [];
 
   return {
     notifications,
@@ -734,7 +734,7 @@ describe("watchController", () => {
   });
 
   it("subscribes to selected default branch workflow runs", async () => {
-    const { deps, activeWorkflowRunFetches, defaultBranchFetches } = createDeps([
+    const { deps, activeWorkflowRunFetches, defaultBranchFetches, openPullRequestFetches } = createDeps([
       {
         status: "in_progress",
         conclusion: null,
@@ -758,6 +758,7 @@ describe("watchController", () => {
 
     expect(activeWorkflowRunFetches).toEqual([{ owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"] }]);
     expect(defaultBranchFetches).toEqual([{ owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"] }]);
+    expect(openPullRequestFetches).toEqual([]);
     expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/123"]);
   });
 
@@ -1027,6 +1028,15 @@ describe("watchController", () => {
         updatedAt: "2026-08-10T12:54:47Z",
         url: pullRequestTarget.url,
       },
+      {
+        number: "1972",
+        title: "Respect consent for external crash reporters",
+        isDraft: false,
+        authorLogin: "octocat",
+        headBranch: "octocat/fix/crashpad-consent",
+        updatedAt: "2026-08-10T15:58:03Z",
+        url: "https://github.com/getsentry/sentry-native/pull/1972",
+      },
     ];
     deps.fetchUserActiveWorkflowRuns = async () => [
       {
@@ -1045,6 +1055,7 @@ describe("watchController", () => {
       {
         owner: "getsentry",
         repo: "sentry-native",
+        pullRequestScope: "user",
       },
     ]);
     await controller.syncWorkflowSubscriptions([
@@ -1071,6 +1082,62 @@ describe("watchController", () => {
       },
     ]);
     expect(fetches).toEqual([pullRequestTarget]);
+  });
+
+  it("automatically watches every open PR in all scope", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "Pull request #51",
+        prNumber: "51",
+        url: prTarget.url,
+      },
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "Pull request #52",
+        prNumber: "52",
+        url: "https://github.com/getsentry/sentry/pull/52",
+      },
+    ]);
+    deps.fetchOpenPullRequests = async () => [
+      {
+        number: "51",
+        title: "Improve the tray popup",
+        isDraft: false,
+        authorLogin: "jpnurmi",
+        updatedAt: "2026-05-17T12:00:00Z",
+        url: prTarget.url,
+      },
+      {
+        number: "52",
+        title: "Fix Windows notifications",
+        isDraft: false,
+        authorLogin: "octocat",
+        updatedAt: "2026-05-17T13:00:00Z",
+        url: "https://github.com/getsentry/sentry/pull/52",
+      },
+    ];
+    deps.getAuthenticatedUserLogin = undefined;
+    const controller = createWatchController(deps);
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        pullRequestScope: "all",
+      },
+    ]);
+
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/pull/51",
+      "getsentry/sentry/pull/52",
+    ]);
+    expect(fetches).toMatchObject([
+      { kind: "pr", prNumber: "51" },
+      { kind: "pr", prNumber: "52" },
+    ]);
   });
 
   it("rechecks inactive authored PRs when workflow reruns do not update the PR", async () => {
@@ -1125,6 +1192,7 @@ describe("watchController", () => {
       {
         owner: "getsentry",
         repo: "sentry-native",
+        pullRequestScope: "user",
       },
     ]);
 
@@ -1180,6 +1248,7 @@ describe("watchController", () => {
       {
         owner: "getsentry",
         repo: "sentry-native",
+        pullRequestScope: "user",
       },
     ]);
 

@@ -147,9 +147,31 @@ describe("watch tree group actions", () => {
       /\.watch-group-header\s*\{[^}]*grid-template-columns:\s*var\(--tree-chevron-width\) var\(--tree-leading-width\) minmax\(0,\s*1fr\) var\(\s*--repo-actions-width\s*\);/s,
     );
     expect(mainSource).toContain(
-      "event.target.closest('.watch-group-star, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron, .repo-ci-status, [data-action=\"open-github-url\"]')",
+      "event.target.closest('.watch-group-watch, .watch-group-actions, .repo-action-menu, .watch-group-toggle-chevron, .repo-ci-status, [data-action=\"open-github-url\"]')",
     );
     expect(styles).not.toMatch(/\.watch-group-header:hover \.watch-tree-chevron/s);
+  });
+
+  it("opens combined repository watches from the repo icon eye badge", () => {
+    expect(mainSource).toContain('class="repo-action-menu watch-group-watch-menu"');
+    expect(mainSource).toContain('data-action="toggle-repository-watches"');
+    expect(mainSource).toContain('title="Watches"');
+    expect(mainSource).toContain("renderEyeIcon(group.watched)");
+    expect(mainSource).toContain('fill="${watched ? "currentColor" : "none"}"');
+    expect(mainSource).toContain('data-action="toggle-watched-pull-request-scope"');
+    expect(mainSource).toContain('renderPullRequestWatchScope(group, "all", "all", selectedScope)');
+    expect(mainSource).toContain('renderPullRequestWatchScope(group, "user", displayLabel, selectedScope)');
+    expect(mainSource).toContain('<span class="repo-action-title">Pull requests</span>');
+    expect(mainSource).toContain('const displayLabel = userLogin?.trim() || "…";');
+    expect(mainSource).toContain('data-action="toggle-workflow-subscription"');
+    expect(mainSource).not.toContain("watch-group-subscribe-button");
+    expect(mainSource).not.toContain("renderStarIcon");
+    expect(styles).toMatch(
+      /\.watch-group-watch\.is-watched \.watch-group-watch-glyph\s*\{[^}]*color:\s*#58a6ff;/s,
+    );
+    expect(styles).toMatch(/\.repository-watch-segmented\s*\{[^}]*height:\s*20px;/s);
+    expect(mainSource).toContain('data-scope="${scope}"');
+    expect(mainSource).not.toContain("repository-pull-request-button");
   });
 
   it("opens repository slugs without making repository backgrounds interactive", () => {
@@ -169,12 +191,12 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain('"watch-group-triage-button"');
     expect(mainSource).not.toContain('data-action="arm-remove-repo"');
     expect(mainSource).not.toContain('data-action="confirm-remove-repo"');
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*120px;/s);
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*72px;/s);
     expect(styles).toMatch(
-      /\.watch-group-subscribe-button,[^{]*\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-triage-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
+      /\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-triage-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
     );
     expect(styles).toMatch(
-      /\.watch-group-header:hover \.watch-group-subscribe-button,[^{]*\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-triage-button/s,
+      /\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-triage-button/s,
     );
   });
 

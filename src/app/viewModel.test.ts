@@ -442,7 +442,7 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
-  it("keeps favorite repos visible even when they have no watches", () => {
+  it("keeps watched repos visible even when they have no watches", () => {
     const model = createPopupViewModel(
       [
         watch({
@@ -457,6 +457,7 @@ describe("createPopupViewModel", () => {
           owner: "jpnurmi",
           repo: "gha-watch",
           repoIconUrl: "https://avatars.githubusercontent.com/u/123?v=4",
+          pullRequestScope: "user",
         },
       ],
     );
@@ -464,27 +465,27 @@ describe("createPopupViewModel", () => {
     expect(
       model.groups.map((group) => ({
         repoLabel: group.repoLabel,
-        favorite: group.favorite,
+        watched: group.watched,
         repoIconUrl: group.repoIconUrl,
         rowCount: group.rows.length,
       })),
     ).toEqual([
       {
         repoLabel: "jpnurmi/gha-watch",
-        favorite: true,
+        watched: true,
         repoIconUrl: "https://avatars.githubusercontent.com/u/123?v=4",
         rowCount: 0,
       },
       {
         repoLabel: "getsentry/sentry",
-        favorite: false,
+        watched: false,
         repoIconUrl: undefined,
         rowCount: 1,
       },
     ]);
   });
 
-  it("marks watched repo groups as favorites when the repo is favorited", () => {
+  it("marks repository groups as watched when the repository is watched", () => {
     const model = createPopupViewModel(
       [
         watch({
@@ -495,7 +496,7 @@ describe("createPopupViewModel", () => {
         }),
       ],
       new Date(),
-      [{ owner: "getsentry", repo: "sentry" }],
+      [{ owner: "getsentry", repo: "sentry", pullRequestScope: "user" }],
     );
 
     expect(model.groups).toMatchObject([
@@ -503,7 +504,7 @@ describe("createPopupViewModel", () => {
         owner: "getsentry",
         repo: "sentry",
         repoLabel: "getsentry/sentry",
-        favorite: true,
+        watched: true,
         repoIconUrl: "https://avatars.githubusercontent.com/u/1396951?v=4",
         rows: [{ label: "CI" }],
       },

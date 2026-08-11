@@ -1,4 +1,4 @@
-import type { FavoriteRepo } from "../domain/favorites";
+import type { WatchedRepo } from "../domain/watchedRepos";
 import {
   getWatchId,
   getWatchState,
@@ -85,7 +85,7 @@ export type WatchGroupViewModel = {
   repoLabel: string;
   repoIconUrl?: string;
   ciStatus?: RepoCiStatusViewModel;
-  favorite: boolean;
+  watched: boolean;
   rows: WatchRowViewModel[];
   tree: WatchTreeNodeViewModel[];
   items: WatchGroupItemViewModel[];
@@ -130,7 +130,7 @@ type Counts = {
 export function createPopupViewModel(
   watches: WatchRecord[],
   now = new Date(),
-  favoriteRepos: FavoriteRepo[] = [],
+  watchedRepos: WatchedRepo[] = [],
   repoOrder: string[] = [],
   repoCiStatuses: Record<string, RepoCiStatusViewModel> = {},
 ): PopupViewModel {
@@ -140,7 +140,7 @@ export function createPopupViewModel(
   return {
     title: getTitle(counts, rows.length),
     subtitle: getSubtitle(counts, rows.length),
-    groups: orderGroups(groupRowsByRepo(watches, rows, favoriteRepos, repoCiStatuses), repoOrder),
+    groups: orderGroups(groupRowsByRepo(watches, rows, watchedRepos, repoCiStatuses), repoOrder),
     rows,
   };
 }
@@ -298,15 +298,15 @@ function canRerun(watch: WatchRecord): boolean {
 function groupRowsByRepo(
   watches: WatchRecord[],
   rows: WatchRowViewModel[],
-  favoriteRepos: FavoriteRepo[],
+  watchedRepos: WatchedRepo[],
   repoCiStatuses: Record<string, RepoCiStatusViewModel>,
 ): WatchGroupViewModel[] {
   const groups: WatchGroupViewModel[] = [];
   const groupByRepo = new Map<string, WatchGroupViewModel>();
 
-  for (const favorite of favoriteRepos) {
-    const repoLabel = getRepoLabel(favorite);
-    const group = createWatchGroup(favorite.owner, favorite.repo, favorite.repoIconUrl, true, repoCiStatuses[repoLabel]);
+  for (const watched of watchedRepos) {
+    const repoLabel = getRepoLabel(watched);
+    const group = createWatchGroup(watched.owner, watched.repo, watched.repoIconUrl, true, repoCiStatuses[repoLabel]);
     groupByRepo.set(repoLabel, group);
     groups.push(group);
   }
@@ -774,7 +774,7 @@ function createWatchGroup(
   owner: string,
   repo: string,
   repoIconUrl: string | undefined,
-  favorite: boolean,
+  watched: boolean,
   ciStatus?: RepoCiStatusViewModel,
 ): WatchGroupViewModel {
   return {
@@ -783,14 +783,14 @@ function createWatchGroup(
     repoLabel: `${owner}/${repo}`,
     ...(repoIconUrl ? { repoIconUrl } : {}),
     ...(ciStatus ? { ciStatus } : {}),
-    favorite,
+    watched,
     rows: [],
     tree: [],
     items: [],
   };
 }
 
-function getRepoLabel(repo: Pick<FavoriteRepo, "owner" | "repo">): string {
+function getRepoLabel(repo: Pick<WatchedRepo, "owner" | "repo">): string {
   return `${repo.owner}/${repo.repo}`;
 }
 

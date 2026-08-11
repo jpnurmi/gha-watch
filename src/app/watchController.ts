@@ -1,4 +1,4 @@
-import type { FavoriteRepo } from "../domain/favorites";
+import type { WatchedRepo } from "../domain/watchedRepos";
 import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, WatchTarget } from "../domain/githubUrl";
 import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
 import {
@@ -41,13 +41,13 @@ export type WatchControllerOptions = {
 
 export type WatchControllerDeps = {
   fetchState(target: WatchTarget): Promise<WatchSnapshot>;
-  fetchActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
-  fetchOpenPullRequests?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
+  fetchActiveWorkflowRuns?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
+  fetchOpenPullRequests?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   fetchPullRequestDetails?(targets: PrWatchTarget[]): Promise<Array<PullRequestDetails | undefined>>;
-  fetchRepositoryDefaultBranch?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<string>;
+  fetchRepositoryDefaultBranch?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<string>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
-  fetchUserActiveWorkflowRuns?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
-  fetchWorkflowDefinitions?(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
+  fetchUserActiveWorkflowRuns?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
+  fetchWorkflowDefinitions?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
   getAuthenticatedUserLogin?(): Promise<string>;
   notificationsPaused?(): boolean;
   notify(notification: WatchNotification): Promise<void>;
@@ -69,12 +69,12 @@ export type WatchController = {
   clearDone(ids: string[]): void;
   refreshRepositoryIcons(): Promise<void>;
   refreshWatchMetadata(): Promise<void>;
-  listActiveWorkflowRuns(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
-  listOpenPullRequests(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
-  listWorkflowDefinitions(target: Pick<FavoriteRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
+  listActiveWorkflowRuns(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
+  listOpenPullRequests(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
+  listWorkflowDefinitions(target: Pick<WatchedRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
   rerunFailed(id: string): Promise<void>;
   setOptions(options: WatchControllerOptions): void;
-  syncWorkflowSubscriptions(favoriteRepos: FavoriteRepo[]): Promise<void>;
+  syncWorkflowSubscriptions(watchedRepos: WatchedRepo[]): Promise<void>;
   pollNow(options?: WatchPollOptions): Promise<void>;
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
@@ -415,21 +415,35 @@ export function createWatchController(
     }
   }
 
-  async function syncFavoriteWorkflowSubscriptions(favorite: FavoriteRepo): Promise<void> {
-    const defaultBranchWorkflowNames = favorite.defaultBranchWorkflowNames ?? [];
-    const userWorkflowNames = favorite.userWorkflowNames ?? [];
+  async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<void> {
+    const defaultBranchWorkflowNames = watchedRepo.defaultBranchWorkflowNames ?? [];
+    const userWorkflowNames = watchedRepo.userWorkflowNames ?? [];
+    const needsPullRequestList = Boolean(watchedRepo.pullRequestScope) || userWorkflowNames.length > 0;
+    const needsUserLogin = watchedRepo.pullRequestScope === "user" || userWorkflowNames.length > 0;
+    let openPullRequests: OpenPullRequest[] = [];
+    let userLogin = "";
 
-    if (!deps.fetchOpenPullRequests || !deps.getAuthenticatedUserLogin) {
-      throw new Error("Favorite repository PR subscriptions need GitHub PR listing support.");
+    if (needsPullRequestList && !deps.fetchOpenPullRequests) {
+      throw new Error("Pull request watches need GitHub PR listing support.");
     }
 
-    const [openPullRequests, userLogin] = await Promise.all([
-      deps.fetchOpenPullRequests(favorite),
-      deps.getAuthenticatedUserLogin(),
+    if (needsUserLogin && !deps.getAuthenticatedUserLogin) {
+      throw new Error("User watches need GitHub authentication support.");
+    }
+
+    [openPullRequests, userLogin] = await Promise.all([
+      needsPullRequestList ? deps.fetchOpenPullRequests!(watchedRepo) : Promise.resolve([]),
+      needsUserLogin ? deps.getAuthenticatedUserLogin!() : Promise.resolve(""),
     ]);
-    for (const pullRequest of openPullRequests) {
-      if (pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()) {
-        await syncSubscribedPullRequest(favorite, pullRequest, true);
+
+    if (watchedRepo.pullRequestScope) {
+      for (const pullRequest of openPullRequests) {
+        if (
+          watchedRepo.pullRequestScope === "all" ||
+          pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()
+        ) {
+          await syncSubscribedPullRequest(watchedRepo, pullRequest, true);
+        }
       }
     }
 
@@ -444,8 +458,8 @@ export function createWatchController(
         throw new Error("Default branch workflow subscriptions need GitHub repository support.");
       }
 
-      const runs = await deps.fetchActiveWorkflowRuns(favorite);
-      const defaultBranch = await deps.fetchRepositoryDefaultBranch(favorite);
+      const runs = await deps.fetchActiveWorkflowRuns(watchedRepo);
+      const defaultBranch = await deps.fetchRepositoryDefaultBranch(watchedRepo);
 
       for (const run of runs) {
         if (
@@ -462,7 +476,7 @@ export function createWatchController(
         throw new Error("User workflow subscriptions need GitHub run listing support.");
       }
 
-      const runs = await deps.fetchUserActiveWorkflowRuns(favorite);
+      const runs = await deps.fetchUserActiveWorkflowRuns(watchedRepo);
 
       for (const run of runs) {
         if (
@@ -478,7 +492,7 @@ export function createWatchController(
 
         if (pullRequest) {
           if (pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()) {
-            await syncSubscribedPullRequest(favorite, pullRequest, true);
+            await syncSubscribedPullRequest(watchedRepo, pullRequest, true);
           }
         } else {
           targets.set(run.runId, run);
@@ -487,12 +501,12 @@ export function createWatchController(
     }
 
     for (const run of targets.values()) {
-      await addSubscribedWorkflowRun(favorite, run);
+      await addSubscribedWorkflowRun(watchedRepo, run);
     }
   }
 
   async function syncSubscribedPullRequest(
-    repo: Pick<FavoriteRepo, "owner" | "repo">,
+    repo: Pick<WatchedRepo, "owner" | "repo">,
     pullRequest: OpenPullRequest,
     refreshInactive = false,
   ): Promise<void> {
@@ -551,7 +565,7 @@ export function createWatchController(
   }
 
   async function addSubscribedWorkflowRun(
-    repo: Pick<FavoriteRepo, "owner" | "repo">,
+    repo: Pick<WatchedRepo, "owner" | "repo">,
     run: ActiveWorkflowRun,
   ): Promise<void> {
     const target = {
@@ -816,11 +830,11 @@ export function createWatchController(
       options = { ...options, ...nextOptions };
     },
 
-    async syncWorkflowSubscriptions(favoriteRepos) {
+    async syncWorkflowSubscriptions(watchedRepos) {
       pruneExpiredSuppressions();
 
-      for (const favorite of favoriteRepos) {
-        await syncFavoriteWorkflowSubscriptions(favorite);
+      for (const watchedRepo of watchedRepos) {
+        await syncWatchedWorkflowSubscriptions(watchedRepo);
       }
     },
 

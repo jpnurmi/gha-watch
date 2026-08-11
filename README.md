@@ -6,12 +6,13 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 
 ## Features
 
-- Add a repository URL or slug to favorite it immediately.
+- Add a repository URL or slug to watch your open pull requests immediately.
 - Watch a workflow run URL, a specific job URL, or a pull request URL.
 - Live pull request watches follow the latest PR head and show the current workflow runs.
 - Track pull requests as draft, ready, merged, or closed using GitHub's lifecycle icons and colors.
 - Group watches by repository, pull request, and workflow with collapsible tree sections.
-- Favorite repositories so they stay visible after their watches are cleared.
+- Watch repositories so they stay visible after their watches are cleared.
+- Configure all or user-specific pull request watches alongside workflow watches from the repository eye menu.
 - Long-press repository headers to reorder visible repositories.
 - Load a repository's open pull requests or active workflow runs on demand and start watching from the menu.
 - Show queued, in-progress, successful, failed, cancelled, and errored states.
@@ -48,7 +49,7 @@ OWNER/REPO#PR_NUMBER
 REPO#PR_NUMBER
 ```
 
-Repository links and `OWNER/REPO` slugs create favorite repositories without adding a watch.
+Repository links and `OWNER/REPO` slugs watch your open pull requests and keep the repository visible without adding an individual Actions watch.
 Ownerless repository names use the authenticated GitHub CLI user as the owner.
 Pull request links are live watches. On each poll, the app resolves the current PR head and watches the matching workflow runs for that head.
 Ownerless pull request slugs use the authenticated GitHub CLI user as the owner.

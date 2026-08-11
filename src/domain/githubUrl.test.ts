@@ -96,7 +96,7 @@ describe("parseGitHubActionsUrl", () => {
     });
   });
 
-  it("parses owner and repository slugs for favorite repositories", () => {
+  it("parses owner and repository slugs for watched repositories", () => {
     expect(parseGitHubActionsUrl("jpnurmi/gha-watch")).toEqual({
       kind: "repo",
       owner: "jpnurmi",
@@ -114,7 +114,7 @@ describe("parseGitHubActionsUrl", () => {
     });
   });
 
-  it("parses repository URLs for favorite repositories", () => {
+  it("parses repository URLs for watched repositories", () => {
     expect(parseGitHubActionsUrl("https://github.com/getsentry/sentry")).toEqual({
       kind: "repo",
       owner: "getsentry",
