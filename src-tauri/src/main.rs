@@ -50,6 +50,7 @@ struct DesktopNotification {
     #[cfg(target_os = "macos")]
     url: String,
     persistent: bool,
+    #[cfg(target_os = "macos")]
     timeout_ms: Option<u64>,
 }
 
