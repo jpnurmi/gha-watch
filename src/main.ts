@@ -274,9 +274,6 @@ const controller = createWatchController(
     saveSuppressions: saveWatchSuppressions,
   },
   loadInitialWatches(),
-  {
-    autoDoneFinishedWatches: settings.autoClearFinishedWatches,
-  },
   isDemoMode ? [] : loadWatchSuppressions(),
 );
 
@@ -1765,23 +1762,6 @@ function bindEvents(): void {
     },
   );
 
-  app.querySelector<HTMLButtonElement>('[data-action="toggle-auto-clear-finished"]')?.addEventListener(
-    "click",
-    () => {
-      settings = {
-        ...settings,
-        autoClearFinishedWatches: !settings.autoClearFinishedWatches,
-      };
-      controller.setOptions({
-        autoDoneFinishedWatches: settings.autoClearFinishedWatches,
-      });
-      isClearMenuOpen = false;
-      void saveSettings(settings);
-      render();
-      void poll();
-    },
-  );
-
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-watched-pull-request-scope"]')) {
     button.addEventListener("click", () => {
       togglePullRequestWatches({
@@ -1910,7 +1890,6 @@ function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): stri
   return `
     <div class="clear-menu-popover" role="menu">
       ${getOverflowMenuItems({
-        autoClearFinishedWatches: settings.autoClearFinishedWatches,
         autoStartEnabled,
         autoStartBusy,
         hasWatches,

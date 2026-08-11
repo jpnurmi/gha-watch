@@ -1,6 +1,6 @@
 export type OverflowMenuItem =
   | {
-      action: "toggle-auto-clear-finished" | "toggle-autostart";
+      action: "toggle-autostart";
       checked: boolean;
       checkbox: "checked" | "empty";
       disabled: boolean;
@@ -15,7 +15,6 @@ export type OverflowMenuItem =
     };
 
 export type OverflowMenuOptions = {
-  autoClearFinishedWatches: boolean;
   autoStartEnabled: boolean;
   autoStartBusy: boolean;
   hasWatches: boolean;
@@ -50,14 +49,6 @@ export function getOverflowMenuItems(options: OverflowMenuOptions): OverflowMenu
 
   return [
     ...triageActions,
-    {
-      action: "toggle-auto-clear-finished",
-      checked: options.autoClearFinishedWatches,
-      checkbox: options.autoClearFinishedWatches ? "checked" : "empty",
-      disabled: false,
-      kind: "checkbox",
-      label: "Auto-done",
-    },
     {
       action: "toggle-autostart",
       checked: options.autoStartEnabled,

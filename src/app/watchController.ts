@@ -35,10 +35,6 @@ import type {
 } from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
-export type WatchControllerOptions = {
-  autoDoneFinishedWatches?: boolean;
-};
-
 export type WatchControllerDeps = {
   fetchState(target: WatchTarget): Promise<WatchSnapshot>;
   fetchActiveWorkflowRuns?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
@@ -73,7 +69,6 @@ export type WatchController = {
   listOpenPullRequests(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   listWorkflowDefinitions(target: Pick<WatchedRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
   rerunFailed(id: string): Promise<void>;
-  setOptions(options: WatchControllerOptions): void;
   syncWorkflowSubscriptions(watchedRepos: WatchedRepo[]): Promise<void>;
   pollNow(options?: WatchPollOptions): Promise<void>;
   getWatches(): WatchRecord[];
@@ -88,7 +83,6 @@ export type WatchPollOptions = {
 export function createWatchController(
   deps: WatchControllerDeps,
   initialWatches: WatchRecord[] = [],
-  initialOptions: WatchControllerOptions = {},
   initialSuppressions: WatchSuppression[] = [],
 ): WatchController {
   const initialNow = deps.now?.() ?? new Date();
@@ -100,7 +94,6 @@ export function createWatchController(
   });
   let watches = clearExpiredDoneWatches(normalizedWatches, initialNow);
   let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
-  let options: WatchControllerOptions = initialOptions;
   const metadataHydratedWatchIds = new Set<string>();
   const repositoryIconRefreshes = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
@@ -393,26 +386,6 @@ export function createWatchController(
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
     await addWatchTarget(source, true);
     await refreshPullRequestDetails([source]);
-  }
-
-  function applyAutoDoneFinishedWatches(): void {
-    if (!options.autoDoneFinishedWatches) {
-      return;
-    }
-
-    const finishedIds = watches
-      .filter(
-        (watch) =>
-          getWatchTriageState(watch) === "inbox" &&
-          !watch.active &&
-          !hasUnseenStatusChange(watch),
-      )
-      .map((watch) => watch.id);
-    const nextWatches = setWatchesTriageState(watches, finishedIds, "done", getNow());
-
-    if (nextWatches !== watches) {
-      setWatches(nextWatches);
-    }
   }
 
   async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<void> {
@@ -713,12 +686,10 @@ export function createWatchController(
 
     markSeen(id) {
       setWatches(markWatchSeen(watches, id));
-      applyAutoDoneFinishedWatches();
     },
 
     markAllSeen() {
       setWatches(markAllWatchesSeen(watches));
-      applyAutoDoneFinishedWatches();
     },
 
     markAllDone(state) {
@@ -826,10 +797,6 @@ export function createWatchController(
       );
     },
 
-    setOptions(nextOptions) {
-      options = { ...options, ...nextOptions };
-    },
-
     async syncWorkflowSubscriptions(watchedRepos) {
       pruneExpiredSuppressions();
 
@@ -904,7 +871,6 @@ export function createWatchController(
       );
 
       if (deps.notificationsPaused?.()) {
-        applyAutoDoneFinishedWatches();
         return;
       }
 
@@ -912,7 +878,6 @@ export function createWatchController(
         await deps.notify(notification);
       }
 
-      applyAutoDoneFinishedWatches();
     },
 
     getWatches() {

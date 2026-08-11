@@ -788,7 +788,6 @@ describe("watchController", () => {
     const controller = createWatchController(
       deps,
       [],
-      {},
       [
         {
           id: "getsentry/sentry/run/123",
@@ -825,7 +824,6 @@ describe("watchController", () => {
         now: () => now,
       },
       [],
-      {},
       [
         {
           id: "getsentry/sentry/run/123",
@@ -861,7 +859,6 @@ describe("watchController", () => {
     const controller = createWatchController(
       deps,
       [],
-      {},
       [
         {
           id: "getsentry/sentry/run/123",
@@ -1380,36 +1377,6 @@ describe("watchController", () => {
     expect(fetches).toEqual([runTarget]);
   });
 
-  it("enriches newly associated PRs before auto-done", async () => {
-    const { deps } = createDeps([
-      {
-        status: "completed",
-        conclusion: "success",
-        title: "CI: tests",
-        prNumber: "51",
-        url: runTarget.url,
-      },
-    ]);
-    const controller = createWatchController(
-      {
-        ...deps,
-        async fetchPullRequestDetails() {
-          return [{ state: "merged", title: "Refine lifecycle icons" }];
-        },
-      },
-      [{ ...existingWatch(), active: true }],
-      { autoDoneFinishedWatches: true },
-    );
-
-    await controller.pollNow();
-
-    expect(controller.getWatches()[0]).toMatchObject({
-      source: prTarget,
-      sourceState: "merged",
-      triageState: "done",
-    });
-  });
-
   it("does not notify when a watched status changes to in progress", async () => {
     const { deps, notifications } = createDeps([
       {
@@ -1813,94 +1780,6 @@ describe("watchController", () => {
         lastState: { status: "completed", conclusion: "success" },
       },
     ]);
-  });
-
-  it("keeps unread completed watches in the inbox when auto-done is enabled", async () => {
-    const { deps, notificationRecords } = createDeps([
-      {
-        status: "in_progress",
-        conclusion: null,
-        title: "CI: tests",
-        url: runTarget.url,
-      },
-      {
-        status: "completed",
-        conclusion: "success",
-        title: "CI: tests",
-        url: runTarget.url,
-      },
-    ]);
-    const controller = createWatchController(deps, [], {
-      autoDoneFinishedWatches: true,
-    });
-
-    await controller.add(runTarget);
-    await controller.pollNow();
-
-    expect(notificationRecords).toMatchObject([
-      {
-        watchId: "getsentry/sentry/run/123",
-        title: "CI: tests",
-      },
-    ]);
-    expect(controller.getWatches()).toMatchObject([
-      {
-        id: "getsentry/sentry/run/123",
-        status: "completed:success",
-        lastSeenStatus: "in_progress",
-        active: false,
-      },
-    ]);
-  });
-
-  it("moves completed watches to done after they are marked seen", async () => {
-    const { deps } = createDeps([
-      {
-        status: "in_progress",
-        conclusion: null,
-        title: "CI: tests",
-        url: runTarget.url,
-      },
-      {
-        status: "completed",
-        conclusion: "success",
-        title: "CI: tests",
-        url: runTarget.url,
-      },
-    ]);
-    const controller = createWatchController(deps, [], {
-      autoDoneFinishedWatches: true,
-    });
-
-    await controller.add(runTarget);
-    await controller.pollNow();
-    controller.markSeen("getsentry/sentry/run/123");
-
-    expect(controller.getWatches()).toMatchObject([
-      {
-        id: "getsentry/sentry/run/123",
-        triageState: "done",
-      },
-    ]);
-  });
-
-  it("does not auto-done explicitly saved watches", () => {
-    const controller = createWatchController(
-      createDeps([]).deps,
-      [
-        {
-          ...existingWatch(),
-          triageState: "saved",
-        },
-      ],
-      {
-        autoDoneFinishedWatches: true,
-      },
-    );
-
-    controller.markAllSeen();
-
-    expect(controller.getWatches()[0].triageState).toBe("saved");
   });
 
   it("marks a status change seen when requested", async () => {
