@@ -13,6 +13,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Group watches by repository, pull request, and workflow with collapsible tree sections.
 - Watch repositories so they stay visible after their watches are cleared.
 - Configure all or user-specific pull request watches alongside workflow watches from the repository eye menu.
+- Sync watched repositories and their order across machines through an automatically discovered unlisted GitHub Gist.
 - Long-press repository headers to reorder visible repositories.
 - Load a repository's open pull requests or active workflow runs on demand and start watching from the menu.
 - Show queued, in-progress, successful, failed, cancelled, and errored states.

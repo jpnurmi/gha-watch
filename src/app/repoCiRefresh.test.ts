@@ -57,7 +57,7 @@ describe("shouldRefreshRepoCiStatus", () => {
 
   it("wires visible, manual, and cached default-branch refreshes", () => {
     expect(mainSource).toContain("void refreshListedRepositoryCiStatuses();");
-    expect(mainSource).toContain("void poll(true);");
+    expect(mainSource).toContain("void refreshSettingsAndStatuses(true);");
     expect(mainSource).toContain("popupOpen: isPopupOpen");
     expect(mainSource).toContain("getCachedRepositoryDefaultBranch(repo, force)");
   });

@@ -40,6 +40,7 @@ import {
 } from "./app/viewModel";
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
+import { createSettingsSync } from "./app/settingsSync";
 import {
   addWatchedRepo,
   getWatchedPullRequestScope,
@@ -100,6 +101,7 @@ import {
   saveWatches,
   saveWatchSuppressions,
 } from "./platform/store";
+import { createSettingsGistRemote } from "./platform/settingsGist";
 import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
@@ -159,6 +161,8 @@ let rateLimit: RateLimit | undefined;
 let lastSuccessfulRefreshAt: Date | undefined;
 let lastRefreshFailed = false;
 let settings = loadSettings();
+let settingsRevision = 0;
+const settingsSync = createSettingsSync(createSettingsGistRemote());
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
 const repoCiStatusUpdatedAt = new Map<string, number>();
@@ -301,7 +305,7 @@ void listenForDesktopNotificationClicks((click) => {
 window.setInterval(() => {
   void poll();
 }, pollIntervalMs);
-void poll();
+void refreshSettingsAndStatuses();
 document.addEventListener("click", (event) => {
   const target = event.target;
 
@@ -1673,7 +1677,7 @@ function bindEvents(): void {
   app.querySelector<HTMLButtonElement>('[data-action="refresh"]')?.addEventListener(
     "click",
     () => {
-      void poll(true);
+      void refreshSettingsAndStatuses(true);
     },
   );
 
@@ -2413,8 +2417,7 @@ function reorderRepos(sourceKey: string, targetKey: string, position: RepoDropPo
     return;
   }
 
-  settings = { ...settings, repoOrder };
-  void saveSettings(settings);
+  void updateAppSettings({ ...settings, repoOrder }, true);
   render();
 }
 
@@ -2494,8 +2497,7 @@ function togglePullRequestWatches(
     watchedRepos = updateWatchedRepoIcon(watchedRepos, repo, findRepoIconUrl(repo));
   }
 
-  settings = { ...settings, watchedRepos };
-  void saveSettings(settings);
+  void updateAppSettings({ ...settings, watchedRepos }, true);
   render();
   void refreshListedRepositoryCiStatuses();
 
@@ -2513,8 +2515,7 @@ async function addWatchedRepository(repo: Pick<WatchedRepo, "owner" | "repo">): 
   watchedRepos = updateWatchedRepoIcon(watchedRepos, repo, findRepoIconUrl(repo));
 
   if (watchedRepos !== settings.watchedRepos) {
-    settings = { ...settings, watchedRepos };
-    await saveSettings(settings);
+    await updateAppSettings({ ...settings, watchedRepos }, true);
   }
 
   void refreshWatchedRepoIcon(repo);
@@ -2533,8 +2534,7 @@ async function refreshWatchedRepoIcon(repo: Pick<WatchedRepo, "owner" | "repo">)
     const watchedRepos = updateWatchedRepoIcon(settings.watchedRepos, repo, repoIconUrl);
 
     if (watchedRepos !== settings.watchedRepos) {
-      settings = { ...settings, watchedRepos };
-      await saveSettings(settings);
+      await updateAppSettings({ ...settings, watchedRepos }, false);
       render();
     }
   } catch {
@@ -2705,8 +2705,7 @@ function toggleWorkflowSubscription(
     watchedRepos = updateWatchedRepoIcon(watchedRepos, target, findRepoIconUrl(target));
   }
 
-  settings = { ...settings, watchedRepos };
-  void saveSettings(settings);
+  void updateAppSettings({ ...settings, watchedRepos }, true);
   render();
 
   if (!wasWatched) {
@@ -2939,6 +2938,55 @@ async function updateRateLimit(): Promise<void> {
   } catch (error) {
     console.warn("Could not fetch GitHub rate limit.", error);
   }
+}
+
+async function updateAppSettings(nextSettings: typeof settings, syncRemote: boolean): Promise<void> {
+  settings = nextSettings;
+
+  if (syncRemote) {
+    settingsRevision += 1;
+  }
+
+  await saveSettings(nextSettings);
+
+  if (syncRemote && !isDemoMode) {
+    void settingsSync.push(nextSettings).catch((error) => {
+      console.warn("Could not upload synced settings.", error);
+    });
+  }
+}
+
+async function syncSettingsFromGist(): Promise<void> {
+  if (isDemoMode) {
+    return;
+  }
+
+  const revision = settingsRevision;
+  const localSettings = settings;
+
+  try {
+    const syncedSettings = await settingsSync.sync(localSettings);
+
+    if (settingsRevision !== revision) {
+      return;
+    }
+
+    if (JSON.stringify(syncedSettings) !== JSON.stringify(settings)) {
+      await updateAppSettings(syncedSettings, false);
+      render();
+
+      for (const watchedRepo of settings.watchedRepos) {
+        void refreshWatchedRepoIcon(watchedRepo);
+      }
+    }
+  } catch (error) {
+    console.warn("Could not sync settings.", error);
+  }
+}
+
+async function refreshSettingsAndStatuses(forceVisibleData = false): Promise<void> {
+  await syncSettingsFromGist();
+  await poll(forceVisibleData);
 }
 
 async function poll(forceVisibleData = false): Promise<void> {
