@@ -306,8 +306,10 @@ describe("watch tree group actions", () => {
     expect(styles).not.toMatch(/\.watch\.has-unseen-change \.watch-action-button/);
   });
 
-  it("keeps suggested Done actions visible for eligible rows and groups", () => {
-    expect(mainSource).toContain("group.rows.every((row) => row.doneCandidate)");
+  it("keeps suggested Done actions visible without duplicating them in expanded repository headers", () => {
+    expect(mainSource).toContain(
+      "actions.isCollapsed && group.rows.length > 0 && group.rows.every((row) => row.doneCandidate)",
+    );
     expect(mainSource).toContain("node.label, node.doneCandidate");
     expect(mainSource).toContain('row.triageState !== "done" && row.doneCandidate');
     expect(mainSource).toContain('action.state === "done" && doneCandidate ? " is-done-candidate" : ""');

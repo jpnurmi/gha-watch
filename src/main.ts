@@ -742,7 +742,8 @@ function renderRepoGroupChevron(
 
 function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderActions): string {
   const rowIds = group.rows.map((row) => row.id);
-  const doneCandidate = group.rows.length > 0 && group.rows.every((row) => row.doneCandidate);
+  const doneCandidate =
+    actions.isCollapsed && group.rows.length > 0 && group.rows.every((row) => row.doneCandidate);
 
   return `
     <div class="watch-group-actions">
