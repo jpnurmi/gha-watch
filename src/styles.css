@@ -1245,7 +1245,7 @@ button.watch-tree-leading {
 }
 
 .watch-workflow-status.status-icon-in-progress.has-failed-children {
-  color: #e36209;
+  color: #f85149;
 }
 
 .status-icon-cancelled,

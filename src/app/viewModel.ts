@@ -196,10 +196,12 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
   }
 
   if (status === "in_progress") {
+    const hasFailedChildren = Boolean(state?.hasFailedChildren);
+
     return createRow(
       watch,
-      "In progress",
-      state?.hasFailedChildren ? "This check is still running, but at least one job has failed." : "This check has started...",
+      hasFailedChildren ? "Failing" : "In progress",
+      hasFailedChildren ? "This check is still running, but at least one job has failed." : "This check has started...",
       "in-progress",
       now,
     );
@@ -389,7 +391,7 @@ function addRowToTree(group: WatchGroupViewModel, watch: WatchRecord, row: Watch
   parentNode.hasFailedChildren ||= row.hasFailedChildren;
   parentNode.unseenStatusChange ||= row.unseenStatusChange;
   parentNode.doneCandidate &&= row.doneCandidate;
-  parentNode.statusLabel = getTreeStatusLabel(parentNode.tone);
+  parentNode.statusLabel = getTreeStatusLabel(parentNode.tone, parentNode.hasFailedChildren);
   parentNode.detailLabel = getPullRequestNodeDetailLabel(parentNode, row);
 
   workflowNode.rowCount += 1;
@@ -401,7 +403,7 @@ function addRowToTree(group: WatchGroupViewModel, watch: WatchRecord, row: Watch
   workflowNode.hasFailedChildren ||= row.hasFailedChildren;
   workflowNode.unseenStatusChange ||= row.unseenStatusChange;
   workflowNode.doneCandidate &&= row.doneCandidate;
-  workflowNode.statusLabel = getTreeStatusLabel(workflowNode.tone);
+  workflowNode.statusLabel = getTreeStatusLabel(workflowNode.tone, workflowNode.hasFailedChildren);
   workflowNode.detailLabel = getWorkflowNodeDetailLabel(workflowNode);
   workflowNode.rows.push(createTreeRow(watch, row, parentNode, workflowLabel));
 }
@@ -427,7 +429,7 @@ function addDirectWorkflowRowToTree(group: WatchGroupViewModel, watch: WatchReco
   workflowNode.hasFailedChildren ||= row.hasFailedChildren;
   workflowNode.unseenStatusChange ||= row.unseenStatusChange;
   workflowNode.doneCandidate &&= row.doneCandidate;
-  workflowNode.statusLabel = getTreeStatusLabel(workflowNode.tone);
+  workflowNode.statusLabel = getTreeStatusLabel(workflowNode.tone, workflowNode.hasFailedChildren);
   workflowNode.detailLabel = getWorkflowNodeDetailLabel(workflowNode);
   workflowNode.rows.push(createDirectWorkflowTreeRow(watch, row, workflowNode));
 }
@@ -461,7 +463,7 @@ function updateDirectWorkflowParentNode(node: WatchTreeNodeViewModel, row: Watch
   node.hasFailedChildren ||= row.hasFailedChildren;
   node.unseenStatusChange ||= row.unseenStatusChange;
   node.doneCandidate &&= row.doneCandidate;
-  node.statusLabel = getTreeStatusLabel(node.tone);
+  node.statusLabel = getTreeStatusLabel(node.tone, node.hasFailedChildren);
   node.detailLabel = node.rowCount > 0 ? getWorkflowNodeDetailLabel(node) : undefined;
 }
 
@@ -739,7 +741,11 @@ function combineTones(left: RowTone, right: RowTone): RowTone {
   return getTonePriority(right) < getTonePriority(left) ? right : left;
 }
 
-function getTreeStatusLabel(tone: RowTone): string {
+function getTreeStatusLabel(tone: RowTone, hasFailedChildren = false): string {
+  if (tone === "in-progress" && hasFailedChildren) {
+    return "Failing";
+  }
+
   const labels: Record<RowTone, string> = {
     pending: "Pending",
     queued: "Queued",

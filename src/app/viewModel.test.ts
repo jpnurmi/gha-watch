@@ -608,7 +608,7 @@ describe("createPopupViewModel", () => {
 
     expect(model.rows.map((row) => [row.statusLabel, row.description, row.tone, row.hasFailedChildren])).toEqual([
       [
-        "In progress",
+        "Failing",
         "This check is still running, but at least one job has failed.",
         "in-progress",
         true,
