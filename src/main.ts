@@ -300,7 +300,7 @@ void controller.refreshRepositoryIcons();
 void refreshListedRepositoryCiStatuses();
 void listenForDesktopNotificationClicks((click) => {
   controller.markSeen(click.watchId);
-  void openUrl(click.url);
+  void openExternalUrl(click.url);
 });
 window.setInterval(() => {
   void poll();
@@ -1693,7 +1693,7 @@ function bindEvents(): void {
       queueSyncedStateUploadForWatchIds(ids);
 
       if (button.dataset.url) {
-        void openUrl(button.dataset.url);
+        void openExternalUrl(button.dataset.url);
       }
     });
   }
@@ -1725,7 +1725,7 @@ function bindEvents(): void {
       repoCiStatusMenu = undefined;
 
       if (button.dataset.url) {
-        void openUrl(button.dataset.url);
+        void openExternalUrl(button.dataset.url);
       }
     });
   }
@@ -2895,6 +2895,11 @@ async function hideMainWindow(): Promise<void> {
   } catch (error) {
     console.error("Could not hide GHA Watch window.", error);
   }
+}
+
+async function openExternalUrl(url: string): Promise<void> {
+  await hideMainWindow();
+  await openUrl(url);
 }
 
 async function acknowledgePopupDismissal(): Promise<void> {

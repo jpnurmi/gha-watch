@@ -206,7 +206,7 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain("status.workflows.map(renderRepoCiStatusItem)");
     expect(mainSource).toContain('data-action="open-repo-ci-workflow"');
     expect(mainSource).toContain('data-url="${escapeHtml(workflow.url)}"');
-    expect(mainSource).toContain("void openUrl(button.dataset.url)");
+    expect(mainSource).toContain("void openExternalUrl(button.dataset.url)");
     expect(mainSource).toContain("workflows: status.workflows.map((workflow) => ({");
     expect(styles).toMatch(/\.repo-ci-status\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*border-radius:\s*6px;/s);
     expect(styles).toContain(".repo-ci-popover");
