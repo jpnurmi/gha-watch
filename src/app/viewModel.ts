@@ -28,6 +28,16 @@ export type PrStateViewModel = {
 
 export type WatchSubject = "pull-request" | "workflow" | "job";
 
+export type PullRequestCheckViewModel = {
+  key: string;
+  name: string;
+  providerLabel: string;
+  statusLabel: string;
+  tone: RowTone;
+  ignored: boolean;
+  link?: string;
+};
+
 export type WatchRowViewModel = {
   id: string;
   label: string;
@@ -43,6 +53,9 @@ export type WatchRowViewModel = {
   unseenStatusChange: boolean;
   canRerun: boolean;
   canRerunFailed: boolean;
+  pullRequestChecks: PullRequestCheckViewModel[];
+  noWatchedChecks: boolean;
+  rerunUnavailableReason?: string;
   doneCandidate: boolean;
   triageState: WatchTriageState;
   url: string;
@@ -173,6 +186,9 @@ function createWatchRowViewModel(
       unseenStatusChange: hasUnseenStatusChange(watch),
       canRerun: canRerun(watch),
       canRerunFailed: canRerunFailed(watch),
+      pullRequestChecks: getPullRequestChecks(watch),
+      noWatchedChecks: Boolean(watch.noWatchedChecks),
+      rerunUnavailableReason: getRerunUnavailableReason(watch),
       doneCandidate: isDoneCandidate(watch, "error", repoCiStatus),
       triageState: getWatchTriageState(watch),
       url: watch.target.url,
@@ -182,6 +198,17 @@ function createWatchRowViewModel(
   const state = getWatchState(watch);
   const status = state?.status || watch.status;
   const conclusion = state?.conclusion || null;
+
+  if (watch.target.kind === "pr" && watch.noWatchedChecks) {
+    return createRow(
+      watch,
+      "No watched checks",
+      watch.pullRequestChecks?.length ? "All checks are ignored." : "No checks were found.",
+      "pending",
+      now,
+      repoCiStatus,
+    );
+  }
 
   if (status === "completed") {
     if (conclusion === "success") {
@@ -242,6 +269,9 @@ function createRow(
     unseenStatusChange: hasUnseenStatusChange(watch),
     canRerun: canRerun(watch),
     canRerunFailed: canRerunFailed(watch),
+    pullRequestChecks: getPullRequestChecks(watch),
+    noWatchedChecks: Boolean(watch.noWatchedChecks),
+    rerunUnavailableReason: getRerunUnavailableReason(watch),
     doneCandidate: isDoneCandidate(watch, tone, repoCiStatus),
     triageState: getWatchTriageState(watch),
     url: watch.target.url,
@@ -336,6 +366,14 @@ function getPullRequestStateLabel(sourceState: PrSourceState): string {
 }
 
 function canRerun(watch: WatchRecord): boolean {
+  if (watch.target.kind === "pr" && watch.pullRequestChecks) {
+    const ignoredKeys = new Set(watch.ignoredCheckKeys ?? []);
+    return watch.pullRequestChecks.some((check) =>
+      !ignoredKeys.has(check.key) &&
+      Boolean(check.actionsRunId) &&
+      (check.bucket === "fail" || check.bucket === "cancel"));
+  }
+
   const state = getWatchState(watch);
 
   return state?.status === "completed" &&
@@ -344,12 +382,76 @@ function canRerun(watch: WatchRecord): boolean {
 }
 
 function canRerunFailed(watch: WatchRecord): boolean {
+  if (watch.target.kind === "pr" && watch.pullRequestChecks) {
+    const ignoredKeys = new Set(watch.ignoredCheckKeys ?? []);
+    return watch.pullRequestChecks.some((check) =>
+      !ignoredKeys.has(check.key) && Boolean(check.actionsRunId) && check.bucket === "fail");
+  }
+
   const state = getWatchState(watch);
 
   return state?.status === "completed" &&
     state.conclusion !== "success" &&
     state.conclusion !== "cancelled" &&
     state.conclusion !== "skipped";
+}
+
+function getPullRequestChecks(watch: WatchRecord): PullRequestCheckViewModel[] {
+  const ignoredKeys = new Set(watch.ignoredCheckKeys ?? []);
+
+  return (watch.pullRequestChecks ?? []).map((check) => ({
+    key: check.key,
+    name: check.name,
+    providerLabel: check.provider === "github-actions"
+      ? check.workflow || "GitHub Actions"
+      : check.provider,
+    statusLabel: getCheckStatusLabel(check.bucket),
+    tone: getCheckTone(check.bucket),
+    ignored: ignoredKeys.has(check.key),
+    ...(check.link ? { link: check.link } : {}),
+  }));
+}
+
+function getRerunUnavailableReason(watch: WatchRecord): string | undefined {
+  if (watch.target.kind !== "pr" || !watch.pullRequestChecks) {
+    return undefined;
+  }
+
+  const ignoredKeys = new Set(watch.ignoredCheckKeys ?? []);
+  const failures = watch.pullRequestChecks.filter((check) => check.bucket === "fail");
+  const includedFailures = failures.filter((check) => !ignoredKeys.has(check.key));
+
+  if (failures.length > 0 && includedFailures.length === 0) {
+    return "All failed checks are ignored.";
+  }
+
+  if (includedFailures.length > 0 && includedFailures.every((check) => !check.actionsRunId)) {
+    return "Included failures are not GitHub Actions checks and cannot be re-run here.";
+  }
+
+  return undefined;
+}
+
+function getCheckStatusLabel(bucket: string): string {
+  const labels: Record<string, string> = {
+    pass: "Passed",
+    fail: "Failed",
+    pending: "Pending",
+    skipping: "Skipped",
+    cancel: "Cancelled",
+  };
+  return labels[bucket] ?? titleCase(bucket);
+}
+
+function getCheckTone(bucket: string): RowTone {
+  const tones: Record<string, RowTone> = {
+    pass: "success",
+    fail: "failure",
+    pending: "in-progress",
+    skipping: "skipped",
+    cancel: "cancelled",
+  };
+  return tones[bucket] ?? "pending";
 }
 
 function groupRowsByRepo(

@@ -4,6 +4,7 @@ import type {
   WatchTarget,
 } from "../domain/githubUrl";
 import type { WatchState } from "../domain/status";
+import { createCheckKey, normalizeIgnoredCheckKeys } from "../domain/watches";
 import type { PrSourceState, WatchMetadata, WatchTiming } from "../domain/watches";
 
 export type ShellResult = {
@@ -24,6 +25,35 @@ export type WatchSnapshot = WatchState & {
   prNumber?: string;
   timing?: WatchTiming;
   url: string;
+  pullRequestChecks?: PullRequestCheckSnapshot[];
+  includedCheckCount?: number;
+  ignoredCheckCount?: number;
+  noWatchedChecks?: boolean;
+};
+
+export type PullRequestCheckSnapshot = {
+  key: string;
+  name: string;
+  provider: string;
+  workflow?: string;
+  event?: string;
+  bucket: string;
+  status: string;
+  conclusion: string | null;
+  link?: string;
+  startedAt?: string;
+  completedAt?: string;
+  actionsRunId?: string;
+};
+
+export type PullRequestCheckAggregation = WatchState & {
+  checks: PullRequestCheckSnapshot[];
+  includedChecks: PullRequestCheckSnapshot[];
+  includedFailures: PullRequestCheckSnapshot[];
+  includedCheckCount: number;
+  ignoredCheckCount: number;
+  noWatchedChecks: boolean;
+  timing?: WatchTiming;
 };
 
 type RunViewResponse = {
@@ -66,8 +96,12 @@ type JobViewResponse = {
 type PrCheckResponse = {
   bucket?: string;
   completedAt?: string | null;
+  event?: string;
   link?: string;
+  name?: string;
   startedAt?: string | null;
+  state?: string;
+  workflow?: string;
 };
 
 type PullRequestDetailsResponse = {
@@ -218,7 +252,7 @@ export async function fetchWatchState(
         "-R",
         `${target.owner}/${target.repo}`,
         "--json",
-        "bucket,completedAt,startedAt",
+        "bucket,state,name,workflow,event,link,completedAt,startedAt",
       ]);
 
       assertSuccessfulGhResult(result, result.stdout.trim() ? [1, 8] : [8]);
@@ -842,9 +876,10 @@ export async function rerunWatch(
   target: WatchTarget,
   mode: RerunMode,
   executor: ShellExecutor = createTauriShellExecutor(),
+  ignoredCheckKeys: readonly string[] = [],
 ): Promise<void> {
   if (target.kind === "pr") {
-    await rerunPullRequestChecks(target, mode, executor);
+    await rerunPullRequestChecks(target, mode, executor, ignoredCheckKeys);
     return;
   }
 
@@ -867,6 +902,7 @@ async function rerunPullRequestChecks(
   target: PrWatchTarget,
   mode: RerunMode,
   executor: ShellExecutor,
+  ignoredCheckKeys: readonly string[],
 ): Promise<void> {
   try {
     const result = await executor.execute("gh", [
@@ -876,18 +912,16 @@ async function rerunPullRequestChecks(
       "-R",
       `${target.owner}/${target.repo}`,
       "--json",
-      "bucket,link",
+      "bucket,state,name,workflow,event,link,completedAt,startedAt",
     ]);
 
     assertSuccessfulGhResult(result, result.stdout.trim() ? [1, 8] : [8]);
-    const runIds = getPullRequestRunIds(target, parseJson<PrCheckResponse[]>(result.stdout), mode);
+    const checks = parseJson<PrCheckResponse[]>(result.stdout)
+      .map((check) => normalizePullRequestCheck(target, check));
+    const runIds = getPullRequestRunIds(checks, mode, ignoredCheckKeys);
 
     if (runIds.length === 0) {
-      throw new Error(
-        mode === "failed"
-          ? "No failed GitHub Actions jobs were found for this pull request."
-          : "No failed or cancelled GitHub Actions jobs were found for this pull request.",
-      );
+      throw new Error(getPullRequestRerunError(checks, mode, ignoredCheckKeys));
     }
 
     for (const runId of runIds) {
@@ -916,19 +950,45 @@ function getRerunArgs(
 }
 
 function getPullRequestRunIds(
-  target: PrWatchTarget,
-  checks: PrCheckResponse[],
+  checks: PullRequestCheckSnapshot[],
   mode: RerunMode,
+  ignoredCheckKeys: readonly string[],
 ): string[] {
+  const ignoredKeys = new Set(normalizeIgnoredCheckKeys(ignoredCheckKeys));
   const runIds = checks
     .filter((check) => {
-      const bucket = check.bucket?.trim();
-      return bucket === "fail" || (mode === "all" && bucket === "cancel");
+      return !ignoredKeys.has(check.key) &&
+        (check.bucket === "fail" || (mode === "all" && check.bucket === "cancel"));
     })
-    .map((check) => getActionsRunId(check.link, target))
+    .map((check) => check.actionsRunId)
     .filter((runId): runId is string => Boolean(runId));
 
   return [...new Set(runIds)];
+}
+
+function getPullRequestRerunError(
+  checks: PullRequestCheckSnapshot[],
+  mode: RerunMode,
+  ignoredCheckKeys: readonly string[],
+): string {
+  const ignoredKeys = new Set(normalizeIgnoredCheckKeys(ignoredCheckKeys));
+  const candidates = checks.filter((check) =>
+    check.bucket === "fail" || (mode === "all" && check.bucket === "cancel"));
+  const included = candidates.filter((check) => !ignoredKeys.has(check.key));
+
+  if (candidates.length > 0 && included.length === 0) {
+    return mode === "failed"
+      ? "All failed checks are ignored for this pull request."
+      : "All failed or cancelled checks are ignored for this pull request.";
+  }
+
+  if (included.length > 0 && included.every((check) => !check.actionsRunId)) {
+    return "Included failures were found, but none are GitHub Actions checks GHA Watch can re-run.";
+  }
+
+  return mode === "failed"
+    ? "No failed GitHub Actions jobs were found for this pull request."
+    : "No failed or cancelled GitHub Actions jobs were found for this pull request.";
 }
 
 function getActionsRunId(
@@ -1072,26 +1132,130 @@ function toJobSnapshot(fallbackUrl: string, response: JobViewResponse): WatchSna
   };
 }
 
-function toPrSnapshot(target: PrWatchTarget, checks: PrCheckResponse[]): WatchSnapshot {
-  const timing = compactTiming({
-    startedAt: getEarliestTimestamp(checks.map((check) => check.startedAt ?? undefined)),
-    completedAt: prChecksAreCompleted(checks)
-      ? getLatestTimestamp(checks.map((check) => check.completedAt ?? undefined))
-      : undefined,
-  });
-  const state = getPrChecksState(checks);
+function toPrSnapshot(target: PrWatchTarget, response: PrCheckResponse[]): WatchSnapshot {
+  const aggregate = aggregatePullRequestChecks(
+    response.map((check) => normalizePullRequestCheck(target, check)),
+  );
 
   return {
-    ...state,
+    status: aggregate.status,
+    conclusion: aggregate.conclusion,
+    ...(aggregate.hasFailedChildren ? { hasFailedChildren: true } : {}),
     title: `Pull request #${target.prNumber}`,
     prNumber: target.prNumber,
-    ...(timing ? { timing } : {}),
+    ...(aggregate.timing ? { timing: aggregate.timing } : {}),
     url: target.url,
+    pullRequestChecks: aggregate.checks,
+    includedCheckCount: aggregate.includedCheckCount,
+    ignoredCheckCount: aggregate.ignoredCheckCount,
+    noWatchedChecks: aggregate.noWatchedChecks,
   };
 }
 
-function getPrChecksState(checks: PrCheckResponse[]): WatchState {
-  const buckets = checks.map((check) => check.bucket?.trim()).filter((bucket): bucket is string => Boolean(bucket));
+export function aggregatePullRequestChecks(
+  checks: PullRequestCheckSnapshot[],
+  ignoredCheckKeys: readonly string[] = [],
+): PullRequestCheckAggregation {
+  const ignoredKeys = new Set(normalizeIgnoredCheckKeys(ignoredCheckKeys));
+  const includedChecks = checks.filter((check) => !ignoredKeys.has(check.key));
+  const ignoredCheckCount = checks.length - includedChecks.length;
+  const state = getPrChecksState(includedChecks);
+  const timing = compactTiming({
+    startedAt: getEarliestTimestamp(includedChecks.map((check) => check.startedAt)),
+    completedAt: prChecksAreCompleted(includedChecks)
+      ? getLatestTimestamp(includedChecks.map((check) => check.completedAt))
+      : undefined,
+  });
+
+  return {
+    ...state,
+    checks,
+    includedChecks,
+    includedFailures: includedChecks.filter((check) => check.bucket === "fail"),
+    includedCheckCount: includedChecks.length,
+    ignoredCheckCount,
+    noWatchedChecks: includedChecks.length === 0,
+    ...(timing ? { timing } : {}),
+  };
+}
+
+function normalizePullRequestCheck(
+  target: PrWatchTarget,
+  response: PrCheckResponse,
+): PullRequestCheckSnapshot {
+  const name = response.name?.trim() || "Unnamed check";
+  const workflow = response.workflow?.trim() || undefined;
+  const link = response.link?.trim() || undefined;
+  const provider = getCheckProvider(workflow, link);
+  const bucket = response.bucket?.trim() || "pending";
+  const status = response.state?.trim() || (bucket === "pending" ? "pending" : "completed");
+  const event = response.event?.trim() || undefined;
+  const startedAt = normalizeTimestamp(response.startedAt);
+  const completedAt = normalizeTimestamp(response.completedAt);
+  const actionsRunId = getActionsRunId(link, target);
+
+  return {
+    key: createCheckKey(provider, workflow, name),
+    name,
+    provider,
+    ...(workflow ? { workflow } : {}),
+    ...(event ? { event } : {}),
+    bucket,
+    status,
+    conclusion: getCheckConclusion(bucket),
+    ...(link ? { link } : {}),
+    ...(startedAt ? { startedAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
+    ...(actionsRunId ? { actionsRunId } : {}),
+  };
+}
+
+function getCheckProvider(workflow: string | undefined, link: string | undefined): string {
+  if (workflow || isGitHubActionsLink(link)) {
+    return "github-actions";
+  }
+
+  if (link) {
+    try {
+      return new URL(link).hostname.toLowerCase() || "external";
+    } catch {
+      // Fall through to the provider-neutral value.
+    }
+  }
+
+  return "external";
+}
+
+function isGitHubActionsLink(link: string | undefined): boolean {
+  if (!link) {
+    return false;
+  }
+
+  try {
+    const url = new URL(link);
+    return url.hostname === "github.com" && /\/actions\/runs\/\d+(?:\/|$)/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function getCheckConclusion(bucket: string): string | null {
+  const conclusions: Record<string, string> = {
+    pass: "success",
+    fail: "failure",
+    cancel: "cancelled",
+    skipping: "skipped",
+  };
+  return conclusions[bucket] ?? null;
+}
+
+function normalizeTimestamp(value: string | null | undefined): string | undefined {
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : undefined;
+}
+
+function getPrChecksState(checks: PullRequestCheckSnapshot[]): WatchState {
+  const buckets = checks.map((check) => check.bucket).filter(Boolean);
 
   if (buckets.length === 0) {
     return { status: "pending", conclusion: null };
@@ -1124,8 +1288,8 @@ function getPrChecksState(checks: PrCheckResponse[]): WatchState {
   return { status: "pending", conclusion: null };
 }
 
-function prChecksAreCompleted(checks: PrCheckResponse[]): boolean {
-  return checks.length > 0 && !checks.some((check) => check.bucket?.trim() === "pending");
+function prChecksAreCompleted(checks: PullRequestCheckSnapshot[]): boolean {
+  return checks.length > 0 && !checks.some((check) => check.bucket === "pending");
 }
 
 function getEarliestTimestamp(values: Array<string | undefined>): string | undefined {

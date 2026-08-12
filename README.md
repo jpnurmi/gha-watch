@@ -19,6 +19,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Show queued, in-progress, successful, failed, cancelled, and errored states.
 - Mark unseen status changes with a blue indicator.
 - Re-run all jobs or only failed jobs for workflow runs and pull requests.
+- Ignore flaky or informational pull request checks without hiding them; ignored checks do not affect status, notifications, or failed-job reruns.
 - Clear finished watches or clear all watches from the menu.
 - Automatically retain Done history for one month, capped at the 100 newest items.
 - Open watched runs or jobs in GitHub.

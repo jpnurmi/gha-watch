@@ -4,7 +4,14 @@ import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } fro
 import type { WatchedRepo } from "../domain/watchedRepos";
 import type { WatchSuppression } from "../domain/watchSuppressions";
 import { type WatchRecord } from "../domain/watches";
-import type { ActiveWorkflowRun, OpenPullRequest, RerunMode, WatchSnapshot, WorkflowDefinition } from "../platform/gh";
+import type {
+  ActiveWorkflowRun,
+  OpenPullRequest,
+  PullRequestCheckSnapshot,
+  RerunMode,
+  WatchSnapshot,
+  WorkflowDefinition,
+} from "../platform/gh";
 
 const runTarget: CheckWatchTarget = {
   kind: "run",
@@ -52,6 +59,7 @@ function createDeps(
   suppressionSaves: WatchSuppression[][];
   fetches: WatchTarget[];
   reruns: Array<[WatchTarget, RerunMode]>;
+  rerunIgnoredKeys: Array<readonly string[]>;
   openPullRequestFetches: WatchedRepo[];
   activeWorkflowRunFetches: WatchedRepo[];
   defaultBranchFetches: WatchedRepo[];
@@ -64,6 +72,7 @@ function createDeps(
   const suppressionSaves: WatchSuppression[][] = [];
   const fetches: WatchTarget[] = [];
   const reruns: Array<[WatchTarget, RerunMode]> = [];
+  const rerunIgnoredKeys: Array<readonly string[]> = [];
   const openPullRequestFetches: WatchedRepo[] = [];
   const activeWorkflowRunFetches: WatchedRepo[] = [];
   const defaultBranchFetches: WatchedRepo[] = [];
@@ -77,6 +86,7 @@ function createDeps(
     suppressionSaves,
     fetches,
     reruns,
+    rerunIgnoredKeys,
     openPullRequestFetches,
     activeWorkflowRunFetches,
     defaultBranchFetches,
@@ -97,8 +107,9 @@ function createDeps(
         notificationRecords.push(notification);
         notifications.push(`${notification.title}: ${notification.body}`);
       },
-      async rerun(target, mode) {
+      async rerun(target, mode, ignoredCheckKeys) {
         reruns.push([target, mode]);
+        rerunIgnoredKeys.push(ignoredCheckKeys ?? []);
       },
       async fetchOpenPullRequests(target) {
         openPullRequestFetches.push(target);
@@ -209,6 +220,20 @@ function existingWatch(): WatchRecord {
   };
 }
 
+function prCheck(overrides: Partial<PullRequestCheckSnapshot> = {}): PullRequestCheckSnapshot {
+  return {
+    key: "check:v1:github-actions:ci:test",
+    name: "test",
+    provider: "github-actions",
+    workflow: "CI",
+    bucket: "pass",
+    status: "SUCCESS",
+    conclusion: "success",
+    actionsRunId: "123",
+    ...overrides,
+  };
+}
+
 describe("watchController", () => {
   it("replaces saved and Done watches from sync while preserving local inbox watches", () => {
     const { deps, saves } = createDeps([]);
@@ -242,6 +267,30 @@ describe("watchController", () => {
       remoteDone,
     ]);
     expect(saves.at(-1)).toEqual(controller.getWatches());
+  });
+
+  it("preserves active Inbox PR check preferences when sync contains the same watch", () => {
+    const localPr: WatchRecord = {
+      ...existingWatch(),
+      id: "getsentry/sentry/pull/51",
+      target: prTarget,
+      ignoredCheckKeys: ["check:v1:github-actions:ci:local-flaky"],
+      triageState: "inbox",
+    };
+    const remotePr: WatchRecord = {
+      ...localPr,
+      ignoredCheckKeys: ["check:v1:github-actions:ci:remote-flaky"],
+      triageState: "saved",
+    };
+    const { deps } = createDeps([]);
+    const controller = createWatchController(deps, [localPr]);
+
+    controller.replaceSyncedWatches([remotePr]);
+
+    expect(controller.getWatches()).toMatchObject([{
+      triageState: "saved",
+      ignoredCheckKeys: ["check:v1:github-actions:ci:local-flaky"],
+    }]);
   });
 
   it("publishes a watch with its baseline state without notifying", async () => {
@@ -2038,8 +2087,116 @@ describe("watchController", () => {
     ]);
   });
 
+  it("recomputes ignored checks immediately without a synthetic notification", async () => {
+    const flaky = prCheck({
+      key: "check:v1:github-actions:ci:flaky",
+      name: "flaky",
+      bucket: "fail",
+      status: "FAILURE",
+      conclusion: "failure",
+    });
+    const checks = [flaky, prCheck()];
+    const { deps, notifications, fetches } = createDeps([{
+      status: "completed",
+      conclusion: "failure",
+      title: "Pull request #51",
+      url: prTarget.url,
+      pullRequestChecks: checks,
+      includedCheckCount: 2,
+      ignoredCheckCount: 0,
+      noWatchedChecks: false,
+    }]);
+    const controller = createWatchController(deps, [{
+      ...existingWatch(),
+      id: "getsentry/sentry/pull/51",
+      target: prTarget,
+      status: "completed:failure",
+      lastSeenStatus: "completed:failure",
+      lastState: { status: "completed", conclusion: "failure" },
+      pullRequestChecks: checks,
+      includedCheckCount: 2,
+      ignoredCheckCount: 0,
+    }]);
+
+    await controller.setPullRequestCheckIgnored("getsentry/sentry/pull/51", flaky.key, true);
+
+    expect(fetches).toEqual([prTarget]);
+    expect(notifications).toEqual([]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      ignoredCheckKeys: [flaky.key],
+      status: "completed:success",
+      lastSeenStatus: "completed:success",
+      includedCheckCount: 1,
+      ignoredCheckCount: 1,
+      noWatchedChecks: false,
+    });
+  });
+
+  it("keeps an all-ignored pull request active for future polling", async () => {
+    const onlyCheck = prCheck({ bucket: "fail", conclusion: "failure" });
+    const { deps, notifications } = createDeps([{
+      status: "completed",
+      conclusion: "failure",
+      title: "Pull request #51",
+      url: prTarget.url,
+      pullRequestChecks: [onlyCheck],
+      includedCheckCount: 1,
+      ignoredCheckCount: 0,
+      noWatchedChecks: false,
+    }]);
+    const controller = createWatchController(deps, [{
+      ...existingWatch(),
+      id: "getsentry/sentry/pull/51",
+      target: prTarget,
+      status: "completed:failure",
+      lastState: { status: "completed", conclusion: "failure" },
+      pullRequestChecks: [onlyCheck],
+    }]);
+
+    await controller.setPullRequestCheckIgnored("getsentry/sentry/pull/51", onlyCheck.key, true);
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "pending",
+      lastSeenStatus: "pending",
+      active: true,
+      includedCheckCount: 0,
+      ignoredCheckCount: 1,
+      noWatchedChecks: true,
+    });
+    expect(notifications).toEqual([]);
+  });
+
+  it("keeps a zero-check pull request active after polling", async () => {
+    const { deps } = createDeps([{
+      status: "pending",
+      conclusion: null,
+      title: "Pull request #51",
+      url: prTarget.url,
+      pullRequestChecks: [],
+      includedCheckCount: 0,
+      ignoredCheckCount: 0,
+      noWatchedChecks: true,
+    }]);
+    const controller = createWatchController(deps, [{
+      ...existingWatch(),
+      id: "getsentry/sentry/pull/51",
+      target: prTarget,
+      status: "pending",
+      lastState: { status: "pending", conclusion: null },
+      active: true,
+    }]);
+
+    await controller.pollNow();
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "pending",
+      active: true,
+      noWatchedChecks: true,
+    });
+  });
+
   it("reruns failed jobs for a pull request watch", async () => {
-    const { deps, reruns } = createDeps([]);
+    const { deps, reruns, rerunIgnoredKeys } = createDeps([]);
     const controller = createWatchController(deps, [
       {
         ...existingWatch(),
@@ -2047,12 +2204,14 @@ describe("watchController", () => {
         target: prTarget,
         status: "completed:failure",
         lastState: { status: "completed", conclusion: "failure" },
+        ignoredCheckKeys: ["check:v1:github-actions:ci:flaky"],
       },
     ]);
 
     await controller.rerun("getsentry/sentry/pull/51", "failed");
 
     expect(reruns).toEqual([[prTarget, "failed"]]);
+    expect(rerunIgnoredKeys).toEqual([["check:v1:github-actions:ci:flaky"]]);
     expect(controller.getWatches()[0]).toMatchObject({
       status: "queued",
       lastState: { status: "queued", conclusion: null },

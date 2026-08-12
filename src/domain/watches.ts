@@ -1,5 +1,6 @@
 import type { PrWatchTarget, RunWatchTarget, WatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
+import type { PullRequestCheckSnapshot } from "../platform/gh";
 
 export type PrSourceState = "draft" | "ready" | "merged" | "closed";
 export type WatchTriageState = "inbox" | "saved" | "done";
@@ -28,8 +29,11 @@ export type WatchRecord = {
   source?: PrWatchTarget;
   sourceRun?: RunWatchTarget;
   sourceState?: PrSourceState;
-  ignoredTargetIds?: string[];
-  ignoredWorkflowNames?: string[];
+  ignoredCheckKeys?: string[];
+  pullRequestChecks?: PullRequestCheckSnapshot[];
+  includedCheckCount?: number;
+  ignoredCheckCount?: number;
+  noWatchedChecks?: boolean;
   label: string;
   metadata?: WatchMetadata;
   repoIconUrl?: string;
@@ -75,8 +79,6 @@ export function addWatch(
   source?: PrWatchTarget,
   sourceState?: PrSourceState,
   metadata?: WatchMetadata,
-  ignoredWorkflowNames?: string[],
-  ignoredTargetIds?: string[],
   sourceRun?: RunWatchTarget,
 ): WatchRecord[] {
   const id = getWatchId(target);
@@ -93,8 +95,6 @@ export function addWatch(
       ...(source ? { source } : {}),
       ...(sourceRun ? { sourceRun } : {}),
       ...(sourceState ? { sourceState } : {}),
-      ...(ignoredTargetIds?.length ? { ignoredTargetIds } : {}),
-      ...(ignoredWorkflowNames?.length ? { ignoredWorkflowNames } : {}),
       label: getWatchLabel(target),
       ...(metadata ? { metadata } : {}),
       status: "pending",
@@ -104,6 +104,75 @@ export function addWatch(
       error: undefined,
     },
   ];
+}
+
+const checkKeyPrefix = "check:v1:";
+
+export function createCheckKey(provider: string, workflow: string | undefined, name: string): string {
+  const normalizedProvider = normalizeCheckKeyPart(provider);
+  const normalizedWorkflow = normalizeCheckKeyPart(workflow ?? "");
+  const normalizedName = normalizeCheckKeyPart(name);
+
+  if (!normalizedProvider || !normalizedName) {
+    throw new Error("Check keys need a provider and name.");
+  }
+
+  return `${checkKeyPrefix}${encodeURIComponent(normalizedProvider)}:${encodeURIComponent(normalizedWorkflow)}:${encodeURIComponent(normalizedName)}`;
+}
+
+export function normalizeIgnoredCheckKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(
+    value
+      .map(normalizeIgnoredCheckKey)
+      .filter((key): key is string => Boolean(key)),
+  )].sort();
+}
+
+export function normalizeWatchCheckPreferences(watch: WatchRecord): WatchRecord {
+  const record = watch as WatchRecord & {
+    ignoredTargetIds?: unknown;
+    ignoredWorkflowNames?: unknown;
+  };
+  const {
+    ignoredTargetIds: _ignoredTargetIds,
+    ignoredWorkflowNames: _ignoredWorkflowNames,
+    ignoredCheckKeys: rawKeys,
+    ...rest
+  } = record;
+  const ignoredCheckKeys = normalizeIgnoredCheckKeys(rawKeys);
+
+  return {
+    ...rest,
+    ...(ignoredCheckKeys.length > 0 ? { ignoredCheckKeys } : {}),
+  };
+}
+
+function normalizeIgnoredCheckKey(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 1_024 || !value.startsWith(checkKeyPrefix)) {
+    return undefined;
+  }
+
+  const parts = value.slice(checkKeyPrefix.length).split(":");
+
+  if (parts.length !== 3) {
+    return undefined;
+  }
+
+  try {
+    const [provider, workflow, name] = parts.map(decodeURIComponent);
+    const normalized = createCheckKey(provider, workflow || undefined, name);
+    return normalized === value ? normalized : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeCheckKeyPart(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en-US");
 }
 
 export function getWatchTriageState(

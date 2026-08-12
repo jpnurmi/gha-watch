@@ -3,10 +3,13 @@ import {
   addWatch,
   clearDoneWatches,
   clearExpiredDoneWatches,
+  createCheckKey,
   getWatchTriageState,
   moveWatchGroupWithinRepo,
   moveWatchWithinRepo,
   normalizeWatchDoneAt,
+  normalizeIgnoredCheckKeys,
+  normalizeWatchCheckPreferences,
   normalizeWatchSeenStatus,
   setWatchesTriageState,
   type WatchRecord,
@@ -321,5 +324,32 @@ describe("watch operations", () => {
         "after",
       ),
     ).toBe(watches);
+  });
+
+  it("normalizes versioned check keys and rejects malformed persisted values", () => {
+    const key = createCheckKey("GitHub-Actions", " CI  Build ", " Test  Linux ");
+
+    expect(key).toBe("check:v1:github-actions:ci%20build:test%20linux");
+    expect(normalizeIgnoredCheckKeys([
+      key,
+      key,
+      "check:v1:github-actions:CI%20Build:test%20linux",
+      "check:v2:github-actions:ci:test",
+      "check:v1:missing-name:",
+      42,
+    ])).toEqual([key]);
+  });
+
+  it("drops uninterpretable legacy ignore fields during migration", () => {
+    const normalized = normalizeWatchCheckPreferences({
+      ...watch({}),
+      ignoredWorkflowNames: ["CI"],
+      ignoredTargetIds: ["123"],
+      ignoredCheckKeys: ["check:v1:github-actions:ci:test", "malformed"],
+    } as WatchRecord & { ignoredWorkflowNames: string[]; ignoredTargetIds: string[] });
+
+    expect(normalized.ignoredCheckKeys).toEqual(["check:v1:github-actions:ci:test"]);
+    expect(normalized).not.toHaveProperty("ignoredWorkflowNames");
+    expect(normalized).not.toHaveProperty("ignoredTargetIds");
   });
 });

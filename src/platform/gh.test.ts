@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregatePullRequestChecks,
   fetchActiveWorkflowRuns,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
@@ -13,6 +14,7 @@ import {
   fetchWorkflowDefinitions,
   rerunWatch,
   type ShellExecutor,
+  type PullRequestCheckSnapshot,
 } from "./gh";
 
 function createExecutor(result: Awaited<ReturnType<ShellExecutor["execute"]>>): {
@@ -54,6 +56,14 @@ function createSequenceExecutor(results: Array<Awaited<ReturnType<ShellExecutor[
     },
   };
 }
+
+const prTarget = {
+  kind: "pr" as const,
+  owner: "getsentry",
+  repo: "sentry",
+  prNumber: "51",
+  url: "https://github.com/getsentry/sentry/pull/51",
+};
 
 describe("fetchWatchState", () => {
   it("fetches run state and pull request references via gh api", async () => {
@@ -271,16 +281,28 @@ describe("fetchWatchState", () => {
       stdout: JSON.stringify([
         {
           bucket: "pass",
+          name: "lint",
+          workflow: "CI",
+          state: "SUCCESS",
+          link: "https://github.com/getsentry/sentry/actions/runs/123/job/1",
           startedAt: "2026-05-16T12:00:00Z",
           completedAt: "2026-05-16T12:02:00Z",
         },
         {
           bucket: "pending",
+          name: "test",
+          workflow: "CI",
+          state: "IN_PROGRESS",
+          link: "https://github.com/getsentry/sentry/actions/runs/123/job/2",
           startedAt: "2026-05-16T12:03:00Z",
           completedAt: null,
         },
         {
           bucket: "skipping",
+          name: "optional",
+          workflow: "CI",
+          state: "SKIPPED",
+          link: "https://github.com/getsentry/sentry/actions/runs/123/job/3",
           startedAt: "0001-01-01T00:00:00Z",
           completedAt: "0001-01-01T00:00:00Z",
         },
@@ -308,6 +330,33 @@ describe("fetchWatchState", () => {
         startedAt: "2026-05-16T12:00:00.000Z",
       },
       url: "https://github.com/getsentry/sentry/pull/51",
+      pullRequestChecks: [
+        expect.objectContaining({
+          key: "check:v1:github-actions:ci:lint",
+          name: "lint",
+          provider: "github-actions",
+          workflow: "CI",
+          bucket: "pass",
+          status: "SUCCESS",
+          conclusion: "success",
+          actionsRunId: "123",
+        }),
+        expect.objectContaining({
+          key: "check:v1:github-actions:ci:test",
+          name: "test",
+          bucket: "pending",
+          conclusion: null,
+        }),
+        expect.objectContaining({
+          key: "check:v1:github-actions:ci:optional",
+          name: "optional",
+          bucket: "skipping",
+          conclusion: "skipped",
+        }),
+      ],
+      includedCheckCount: 3,
+      ignoredCheckCount: 0,
+      noWatchedChecks: false,
     });
 
     expect(calls).toEqual([
@@ -320,7 +369,7 @@ describe("fetchWatchState", () => {
           "-R",
           "getsentry/sentry",
           "--json",
-          "bucket,completedAt,startedAt",
+          "bucket,state,name,workflow,event,link,completedAt,startedAt",
         ],
       },
     ]);
@@ -1320,6 +1369,130 @@ describe("fetchActiveWorkflowRuns", () => {
   });
 });
 
+describe("pull request check identities", () => {
+  it("does not collide when providers use the same display name", async () => {
+    const { executor } = createExecutor({
+      code: 1,
+      stdout: JSON.stringify([
+        { bucket: "fail", name: "test", link: "https://checks.example.com/build/1" },
+        { bucket: "fail", name: "test", link: "https://quality.example.net/check/2" },
+      ]),
+      stderr: "",
+    });
+
+    const snapshot = await fetchWatchState(prTarget, executor);
+    expect(snapshot.pullRequestChecks?.map((check) => check.key)).toEqual([
+      "check:v1:checks.example.com::test",
+      "check:v1:quality.example.net::test",
+    ]);
+  });
+
+  it("keeps the identity stable when a rerun creates new run and job ids", async () => {
+    const { executor } = createSequenceExecutor([
+      {
+        code: 1,
+        stdout: JSON.stringify([{
+          bucket: "fail",
+          name: "test",
+          workflow: "CI",
+          link: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+        }]),
+        stderr: "",
+      },
+      {
+        code: 1,
+        stdout: JSON.stringify([{
+          bucket: "fail",
+          name: "test",
+          workflow: "CI",
+          link: "https://github.com/getsentry/sentry/actions/runs/789/job/1011",
+        }]),
+        stderr: "",
+      },
+    ]);
+
+    const before = await fetchWatchState(prTarget, executor);
+    const after = await fetchWatchState(prTarget, executor);
+
+    expect(before.pullRequestChecks?.[0].key).toBe("check:v1:github-actions:ci:test");
+    expect(after.pullRequestChecks?.[0].key).toBe(before.pullRequestChecks?.[0].key);
+    expect(after.pullRequestChecks?.[0].actionsRunId).not.toBe(before.pullRequestChecks?.[0].actionsRunId);
+  });
+});
+
+describe("aggregatePullRequestChecks", () => {
+  function check(overrides: Partial<PullRequestCheckSnapshot>): PullRequestCheckSnapshot {
+    return {
+      key: "check:v1:github-actions:ci:test",
+      name: "test",
+      provider: "github-actions",
+      workflow: "CI",
+      bucket: "pass",
+      status: "SUCCESS",
+      conclusion: "success",
+      ...overrides,
+    };
+  }
+
+  it("excludes ignored failures without hiding them from child data", () => {
+    const ignored = check({
+      key: "check:v1:github-actions:ci:flaky",
+      name: "flaky",
+      bucket: "fail",
+      status: "FAILURE",
+      conclusion: "failure",
+    });
+    const result = aggregatePullRequestChecks(
+      [ignored, check({})],
+      [ignored.key],
+    );
+
+    expect(result).toMatchObject({
+      status: "completed",
+      conclusion: "success",
+      includedCheckCount: 1,
+      ignoredCheckCount: 1,
+      noWatchedChecks: false,
+      includedFailures: [],
+    });
+    expect(result.checks).toContain(ignored);
+  });
+
+  it("lets an included failure win the aggregate", () => {
+    const result = aggregatePullRequestChecks([
+      check({}),
+      check({
+        key: "check:v1:github-actions:ci:required",
+        name: "required",
+        bucket: "fail",
+        conclusion: "failure",
+      }),
+    ]);
+
+    expect(result).toMatchObject({ status: "completed", conclusion: "failure" });
+    expect(result.includedFailures.map((item) => item.name)).toEqual(["required"]);
+  });
+
+  it("keeps all-ignored and zero-check aggregates pollable", () => {
+    const onlyCheck = check({});
+
+    expect(aggregatePullRequestChecks([onlyCheck], [onlyCheck.key])).toMatchObject({
+      status: "pending",
+      conclusion: null,
+      includedCheckCount: 0,
+      ignoredCheckCount: 1,
+      noWatchedChecks: true,
+    });
+    expect(aggregatePullRequestChecks([])).toMatchObject({
+      status: "pending",
+      conclusion: null,
+      includedCheckCount: 0,
+      ignoredCheckCount: 0,
+      noWatchedChecks: true,
+    });
+  });
+});
+
 describe("rerunWatch", () => {
   it("reruns only failed jobs for a run watch", async () => {
     const { executor, calls } = createExecutor({ code: 0, stdout: "", stderr: "" });
@@ -1438,7 +1611,7 @@ describe("rerunWatch", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,link"],
+        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,state,name,workflow,event,link,completedAt,startedAt"],
       },
       {
         program: "gh",
@@ -1485,7 +1658,7 @@ describe("rerunWatch", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,link"],
+        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,state,name,workflow,event,link,completedAt,startedAt"],
       },
       {
         program: "gh",
@@ -1532,7 +1705,7 @@ describe("rerunWatch", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,link"],
+        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,state,name,workflow,event,link,completedAt,startedAt"],
       },
       {
         program: "gh",
@@ -1566,8 +1739,56 @@ describe("rerunWatch", () => {
         "failed",
         executor,
       ),
-    ).rejects.toThrow("No failed GitHub Actions jobs were found for this pull request.");
+    ).rejects.toThrow("Included failures were found, but none are GitHub Actions checks GHA Watch can re-run.");
 
+    expect(calls).toHaveLength(1);
+  });
+
+  it("reruns only included failing pull request checks", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 1,
+        stdout: JSON.stringify([
+          {
+            bucket: "fail",
+            name: "flaky",
+            workflow: "CI",
+            link: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+          },
+          {
+            bucket: "fail",
+            name: "required",
+            workflow: "CI",
+            link: "https://github.com/getsentry/sentry/actions/runs/789/job/1011",
+          },
+        ]),
+        stderr: "",
+      },
+      { code: 0, stdout: "", stderr: "" },
+    ]);
+
+    await rerunWatch(prTarget, "failed", executor, ["check:v1:github-actions:ci:flaky"]);
+
+    expect(calls.at(-1)?.args).toEqual([
+      "run", "rerun", "789", "--failed", "-R", "getsentry/sentry",
+    ]);
+  });
+
+  it("reports when all failed pull request checks are ignored", async () => {
+    const { executor, calls } = createExecutor({
+      code: 1,
+      stdout: JSON.stringify([{
+        bucket: "fail",
+        name: "flaky",
+        workflow: "CI",
+        link: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+      }]),
+      stderr: "",
+    });
+
+    await expect(
+      rerunWatch(prTarget, "failed", executor, ["check:v1:github-actions:ci:flaky"]),
+    ).rejects.toThrow("All failed checks are ignored for this pull request.");
     expect(calls).toHaveLength(1);
   });
 

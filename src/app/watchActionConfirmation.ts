@@ -1,6 +1,6 @@
 import type { RerunMode } from "../platform/gh";
 
-export type WatchActionKind = "rerun";
+export type WatchActionKind = "rerun" | "checks";
 
 export type PendingWatchAction = {
   id: string;

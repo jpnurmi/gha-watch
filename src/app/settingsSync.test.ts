@@ -196,4 +196,23 @@ describe("settings sync helpers", () => {
       watch("3", "saved"),
     ]);
   });
+
+  it("retains normalized per-PR ignored check keys in synced history", () => {
+    const savedPr: WatchRecord = {
+      ...watch("51", "saved"),
+      id: "jpnurmi/gha-watch/pull/51",
+      target: {
+        kind: "pr",
+        owner: "jpnurmi",
+        repo: "gha-watch",
+        prNumber: "51",
+        url: "https://github.com/jpnurmi/gha-watch/pull/51",
+      },
+      ignoredCheckKeys: ["malformed", "check:v1:github-actions:ci:flaky"],
+    };
+
+    expect(toSyncedState({ ...localState, watches: [savedPr] }).watches[0]).toMatchObject({
+      ignoredCheckKeys: ["check:v1:github-actions:ci:flaky"],
+    });
+  });
 });
