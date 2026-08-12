@@ -31,6 +31,17 @@ import {
 import { getClickedUnseenWatchIds } from "./app/watchSeenAction";
 import { getRepositoryUrl, getWatchActionsUrl } from "./app/watchLinks";
 import { getWatchTriageActions } from "./app/watchTriage";
+import {
+  createEmptyWatchFilters,
+  createWatchFiltersByView,
+  getWatchFilterKeyboardAction,
+  getWatchRepositories,
+  hasActiveWatchFilters,
+  parseWatchFilterStatus,
+  toggleWatchFilterStatus,
+  watchFilterStatuses,
+  type WatchFilterStatus,
+} from "./app/watchFilters";
 import { createTrayState } from "./app/trayState";
 import {
   createPopupViewModel,
@@ -152,6 +163,8 @@ let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
 let currentWatchView: WatchTriageState = "inbox";
+const watchFiltersByView = createWatchFiltersByView();
+let resetWatchListScrollOnNextRender = false;
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let pullRequestMenu: PullRequestMenuState | undefined;
 let repositoryWatchMenu: RepositoryWatchMenuState | undefined;
@@ -335,6 +348,20 @@ document.addEventListener("click", (event) => {
   }
 });
 window.addEventListener("keydown", (event) => {
+  const filters = watchFiltersByView[currentWatchView];
+  const filterKeyboardAction = getWatchFilterKeyboardAction({
+    filters,
+    filtersFocused: isWatchFilterControl(document.activeElement),
+    key: event.key,
+    textControlActive: isTextControl(event.target),
+  });
+
+  if (filterKeyboardAction === "focus-search") {
+    event.preventDefault();
+    app.querySelector<HTMLInputElement>('input[name="watch-filter-query"]')?.focus();
+    return;
+  }
+
   if (event.key === "Escape") {
     if (repoPressState || repoDragState || watchPressState || watchDragState) {
       cancelRepoPointerDrag();
@@ -343,8 +370,28 @@ window.addEventListener("keydown", (event) => {
       return;
     }
 
+    if (filterKeyboardAction === "clear-query") {
+      watchFiltersByView[currentWatchView] = { ...filters, query: "" };
+      resetWatchListScrollOnNextRender = true;
+      render();
+      event.preventDefault();
+      return;
+    }
+
     if (pendingWatchAction) {
       pendingWatchAction = undefined;
+      render();
+      event.preventDefault();
+      return;
+    }
+
+    if (filterKeyboardAction === "close-filters") {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
+      watchFiltersByView[currentWatchView] = createEmptyWatchFilters();
+      resetWatchListScrollOnNextRender = true;
       render();
       event.preventDefault();
       return;
@@ -429,12 +476,14 @@ function render(): void {
   const allWatches = controller.getWatches();
   const watches = allWatches.filter((watch) => getWatchTriageState(watch) === currentWatchView);
   const showRepositoryTools = currentWatchView === "inbox";
+  const filters = watchFiltersByView[currentWatchView];
   const viewModel = createPopupViewModel(
     watches,
     new Date(),
     showRepositoryTools ? settings.watchedRepos : [],
     settings.repoOrder,
     showRepositoryTools ? repoCiStatuses : {},
+    filters,
   );
   const hasWatches = watches.length > 0;
   const hasFinishedWatches = currentWatchView !== "done" && watches.some((watch) => !watch.active);
@@ -496,14 +545,104 @@ function render(): void {
         ${renderRateLimitBar()}
       </header>
 
+      ${renderWatchFilters(viewModel, getWatchRepositories(watches))}
+
       ${getPopupBodySections(isAdding)
         .map((section) => renderPopupBodySection(section, viewModel))
         .join("")}
     </section>
-  `);
+  `, { resetWatchListScroll: resetWatchListScrollOnNextRender });
+  resetWatchListScrollOnNextRender = false;
 
   bindEvents();
   void resizePopupToContent();
+}
+
+const watchFilterStatusLabels: Record<WatchFilterStatus, string> = {
+  running: "Running",
+  failing: "Failing",
+  successful: "Successful",
+  cancelled: "Cancelled",
+  errored: "Errored",
+  unseen: "Unseen",
+};
+
+function renderWatchFilters(
+  viewModel: ReturnType<typeof createPopupViewModel>,
+  repositories: string[],
+): string {
+  const filters = watchFiltersByView[currentWatchView];
+  const active = hasActiveWatchFilters(filters);
+
+  return `
+    <section class="watch-filters${active ? " is-active" : ""}" aria-label="Filter watches">
+      <div class="watch-filter-search">
+        <svg class="watch-filter-search-icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="m10.25 10.25 3 3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
+        </svg>
+        <input
+          name="watch-filter-query"
+          type="search"
+          value="${escapeHtml(filters.query)}"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Filter watches"
+          aria-label="Filter watches"
+          aria-controls="watch-list"
+        />
+        ${
+          filters.query
+            ? `<button class="watch-filter-query-clear" type="button" data-action="clear-watch-filter-query" aria-label="Clear search query" title="Clear search query">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.6"/></svg>
+              </button>`
+            : ""
+        }
+        ${
+          active
+            ? `<span class="watch-filter-result-count" role="status" aria-live="polite">${String(viewModel.rows.length)} of ${String(viewModel.totalRowCount)}</span>`
+            : ""
+        }
+      </div>
+      <div class="watch-filter-facets">
+        <div class="watch-filter-statuses" role="group" aria-label="Filter by status">
+          ${watchFilterStatuses
+            .map((status) => {
+              const selected = filters.statuses.includes(status);
+              return `<button
+                class="watch-filter-chip${selected ? " is-selected" : ""}"
+                type="button"
+                data-action="toggle-watch-filter-status"
+                data-filter-status="${status}"
+                aria-pressed="${selected ? "true" : "false"}"
+              >${watchFilterStatusLabels[status]}</button>`;
+            })
+            .join("")}
+        </div>
+        ${repositories.length > 1 ? renderWatchRepositoryFilter(repositories) : ""}
+        ${
+          active
+            ? `<button class="watch-filter-clear" type="button" data-action="clear-watch-filters">Clear all</button>`
+            : ""
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderWatchRepositoryFilter(repositories: string[]): string {
+  const selectedRepository = watchFiltersByView[currentWatchView].repository;
+
+  return `
+    <select class="watch-filter-repository" data-action="select-watch-filter-repository" aria-label="Filter by repository">
+      <option value="">All repositories</option>
+      ${repositories
+        .map(
+          (repository) => `<option value="${escapeHtml(repository)}"${selectedRepository === repository ? " selected" : ""}>${escapeHtml(repository)}</option>`,
+        )
+        .join("")}
+    </select>
+  `;
 }
 
 function renderPopupBodySection(
@@ -525,13 +664,19 @@ function renderWatchList(viewModel: ReturnType<typeof createPopupViewModel>): st
   }[currentWatchView];
 
   return `
-    <ul class="watch-list">
+    <ul class="watch-list" id="watch-list">
       ${
         viewModel.groups.length === 0
           ? `<li class="empty">
               <div class="empty-content">
-                <span class="empty-label">${emptyState.label}</span>
-                ${emptyState.showAdd ? `<button class="empty-action" type="button" data-action="toggle-add">Add</button>` : ""}
+                <span class="empty-label">${viewModel.filtering ? "No matching watches" : emptyState.label}</span>
+                ${
+                  viewModel.filtering
+                    ? `<button class="empty-action" type="button" data-action="clear-watch-filters">Clear filters</button>`
+                    : emptyState.showAdd
+                      ? `<button class="empty-action" type="button" data-action="toggle-add">Add</button>`
+                      : ""
+                }
               </div>
             </li>`
           : viewModel.groups.map(renderWatchGroup).join("")
@@ -1610,6 +1755,76 @@ function renderWatchSubjectIcon(
 }
 
 function bindEvents(): void {
+  app.querySelector<HTMLInputElement>('input[name="watch-filter-query"]')?.addEventListener(
+    "input",
+    (event) => {
+      const input = event.currentTarget as HTMLInputElement;
+      watchFiltersByView[currentWatchView] = {
+        ...watchFiltersByView[currentWatchView],
+        query: input.value,
+      };
+      resetWatchListScrollOnNextRender = true;
+      render();
+    },
+  );
+
+  app.querySelector<HTMLButtonElement>('[data-action="clear-watch-filter-query"]')?.addEventListener(
+    "click",
+    () => {
+      watchFiltersByView[currentWatchView] = {
+        ...watchFiltersByView[currentWatchView],
+        query: "",
+      };
+      resetWatchListScrollOnNextRender = true;
+      render();
+      app.querySelector<HTMLInputElement>('input[name="watch-filter-query"]')?.focus();
+    },
+  );
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-watch-filter-status"]')) {
+    button.addEventListener("click", () => {
+      const status = parseWatchFilterStatus(button.dataset.filterStatus);
+
+      if (!status) {
+        return;
+      }
+
+      watchFiltersByView[currentWatchView] = toggleWatchFilterStatus(
+        watchFiltersByView[currentWatchView],
+        status,
+      );
+      resetWatchListScrollOnNextRender = true;
+      render();
+    });
+  }
+
+  app.querySelector<HTMLSelectElement>('[data-action="select-watch-filter-repository"]')?.addEventListener(
+    "change",
+    (event) => {
+      const select = event.currentTarget as HTMLSelectElement;
+      watchFiltersByView[currentWatchView] = {
+        ...watchFiltersByView[currentWatchView],
+        ...(select.value ? { repository: select.value } : {}),
+      };
+
+      if (!select.value) {
+        delete watchFiltersByView[currentWatchView].repository;
+      }
+
+      resetWatchListScrollOnNextRender = true;
+      render();
+    },
+  );
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="clear-watch-filters"]')) {
+    button.addEventListener("click", () => {
+      watchFiltersByView[currentWatchView] = createEmptyWatchFilters();
+      resetWatchListScrollOnNextRender = true;
+      render();
+      app.querySelector<HTMLInputElement>('input[name="watch-filter-query"]')?.focus();
+    });
+  }
+
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-add"]')) {
     button.addEventListener("click", () => {
       const wasAdding = isAdding && currentWatchView === "inbox";
@@ -2134,6 +2349,15 @@ function getTreeNodeRowIds(button: HTMLButtonElement): string[] {
 
 function parseWatchTriageState(value: string | undefined): WatchTriageState | undefined {
   return value === "inbox" || value === "saved" || value === "done" ? value : undefined;
+}
+
+function isTextControl(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement &&
+    (target.matches("input, textarea, select") || target.isContentEditable);
+}
+
+function isWatchFilterControl(target: Element | null): boolean {
+  return Boolean(target?.closest(".watch-filters"));
 }
 
 function startWatchPointerDrag(repoKey: string, sourceKey: string, sourceIds: string[]): void {
@@ -3269,6 +3493,7 @@ async function resizePopupToContent(): Promise<void> {
 
 function measurePopupContentHeight(): number {
   const header = app.querySelector<HTMLElement>(".header");
+  const watchFilters = app.querySelector<HTMLElement>(".watch-filters");
   const addForm = app.querySelector<HTMLElement>(".add-form");
   const watchList = app.querySelector<HTMLElement>(".watch-list");
   const watchListContentHeight = watchList?.querySelector(".empty")
@@ -3277,7 +3502,10 @@ function measurePopupContentHeight(): number {
         return height + (child instanceof HTMLElement ? child.offsetHeight : 0);
       }, 0);
 
-  return (header?.offsetHeight ?? 0) + (addForm?.offsetHeight ?? 0) + watchListContentHeight;
+  return (header?.offsetHeight ?? 0) +
+    (watchFilters?.offsetHeight ?? 0) +
+    (addForm?.offsetHeight ?? 0) +
+    watchListContentHeight;
 }
 
 function escapeHtml(value: string): string {

@@ -15,14 +15,26 @@ type AddInputState = {
   value: string;
 };
 
-export function replacePopupHtmlPreservingScroll(root: PopupRenderRoot, html: string): void {
+export type PopupRenderOptions = {
+  resetWatchListScroll?: boolean;
+};
+
+export function replacePopupHtmlPreservingScroll(
+  root: PopupRenderRoot,
+  html: string,
+  options: PopupRenderOptions = {},
+): void {
   const scrollPosition = capturePopupScrollPosition(root);
   const addInputState = captureAddInputState(root);
+  const filterInputState = captureInputState(root, 'input[name="watch-filter-query"]');
 
   root.innerHTML = html;
 
-  restorePopupScrollPosition(root, scrollPosition);
+  if (!options.resetWatchListScroll) {
+    restorePopupScrollPosition(root, scrollPosition);
+  }
   restoreAddInputState(root, addInputState);
+  restoreInputState(root, 'input[name="watch-filter-query"]', filterInputState, false);
 }
 
 function capturePopupScrollPosition(root: PopupRenderRoot): PopupScrollPosition {
@@ -44,7 +56,14 @@ function restorePopupScrollPosition(root: PopupRenderRoot, scrollPosition: Popup
 }
 
 function captureAddInputState(root: PopupRenderRoot): AddInputState | undefined {
-  const input = root.querySelector<HTMLInputElement>('input[name="url"]');
+  return captureInputState(root, 'input[name="url"]');
+}
+
+function captureInputState(
+  root: PopupRenderRoot,
+  selector: string,
+): AddInputState | undefined {
+  const input = root.querySelector<HTMLInputElement>(selector);
 
   if (!input) {
     return undefined;
@@ -60,17 +79,28 @@ function captureAddInputState(root: PopupRenderRoot): AddInputState | undefined 
 }
 
 function restoreAddInputState(root: PopupRenderRoot, inputState: AddInputState | undefined): void {
+  restoreInputState(root, 'input[name="url"]', inputState);
+}
+
+function restoreInputState(
+  root: PopupRenderRoot,
+  selector: string,
+  inputState: AddInputState | undefined,
+  restoreValue = true,
+): void {
   if (!inputState) {
     return;
   }
 
-  const input = root.querySelector<HTMLInputElement>('input[name="url"]');
+  const input = root.querySelector<HTMLInputElement>(selector);
 
   if (!input) {
     return;
   }
 
-  input.value = inputState.value;
+  if (restoreValue) {
+    input.value = inputState.value;
+  }
 
   if (!inputState.focused) {
     return;

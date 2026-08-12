@@ -37,6 +37,35 @@ describe("replacePopupHtmlPreservingScroll", () => {
       value: "owner/repo#1234",
     });
   });
+
+  it("keeps the filter query selection and focus while filtering", () => {
+    const root = createPopupRoot(184, undefined, {
+      focused: true,
+      selectionEnd: 5,
+      selectionStart: 2,
+      value: "build",
+    });
+
+    replacePopupHtmlPreservingScroll(root, '<input name="watch-filter-query" value="build" />');
+
+    expect(root.filterInputState).toEqual({
+      focused: true,
+      selectionDirection: "none",
+      selectionEnd: 5,
+      selectionStart: 2,
+      value: "build",
+    });
+  });
+
+  it("resets the watch list scroll offset when filters change", () => {
+    const root = createPopupRoot(184);
+
+    replacePopupHtmlPreservingScroll(root, "<section>filtered</section>", {
+      resetWatchListScroll: true,
+    });
+
+    expect(root.watchListScrollTop).toBe(0);
+  });
 });
 
 type FakeAddInputOptions = {
@@ -53,17 +82,22 @@ type FakeAddInputState = FakeAddInputOptions & {
 function createPopupRoot(
   initialScrollTop: number | undefined,
   initialInput?: FakeAddInputOptions,
+  initialFilterInput?: FakeAddInputOptions,
 ): PopupRenderRoot & {
   addInputState: FakeAddInputState | undefined;
+  filterInputState: FakeAddInputState | undefined;
   watchListScrollTop: number | undefined;
 } {
   let watchList = initialScrollTop === undefined ? undefined : { scrollTop: initialScrollTop };
   const ownerDocument: { activeElement: unknown } = { activeElement: undefined };
   let addInput = initialInput ? createAddInput(ownerDocument, initialInput) : undefined;
+  let filterInput = initialFilterInput ? createAddInput(ownerDocument, initialFilterInput) : undefined;
   let markup = "";
 
   if (initialInput?.focused) {
     ownerDocument.activeElement = addInput;
+  } else if (initialFilterInput?.focused) {
+    ownerDocument.activeElement = filterInput;
   }
 
   return {
@@ -81,10 +115,29 @@ function createPopupRoot(
     get watchListScrollTop() {
       return watchList?.scrollTop;
     },
+    get filterInputState() {
+      return filterInput
+        ? {
+            focused: ownerDocument.activeElement === filterInput,
+            selectionDirection: filterInput.selectionDirection,
+            selectionEnd: filterInput.selectionEnd,
+            selectionStart: filterInput.selectionStart,
+            value: filterInput.value,
+          }
+        : undefined;
+    },
     set innerHTML(value: string) {
       markup = value;
       watchList = initialScrollTop === undefined ? undefined : { scrollTop: 0 };
       addInput = value.includes('name="url"') ? createAddInput(ownerDocument) : undefined;
+      filterInput = value.includes('name="watch-filter-query"')
+        ? createAddInput(ownerDocument, {
+            focused: false,
+            selectionEnd: 0,
+            selectionStart: 0,
+            value: value.match(/name="watch-filter-query"[^>]*value="([^"]*)"/)?.[1] ?? "",
+          })
+        : undefined;
     },
     get innerHTML() {
       return markup;
@@ -99,11 +152,16 @@ function createPopupRoot(
         return addInput;
       }
 
+      if (selector === 'input[name="watch-filter-query"]') {
+        return filterInput;
+      }
+
       return null;
     },
   } as unknown as PopupRenderRoot & {
-    addInputState: FakeAddInputState | undefined;
-    watchListScrollTop: number | undefined;
+      addInputState: FakeAddInputState | undefined;
+      filterInputState: FakeAddInputState | undefined;
+      watchListScrollTop: number | undefined;
   };
 }
 
