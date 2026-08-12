@@ -6,7 +6,10 @@ import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot 
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
 import { createRepositoryIconProvider } from "./app/repositoryIcon";
-import { shouldRefreshRepoCiStatus } from "./app/repoCiRefresh";
+import {
+  getRepoCiStatusAfterRefreshError,
+  shouldRefreshRepoCiStatus,
+} from "./app/repoCiRefresh";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
@@ -3117,6 +3120,7 @@ async function refreshListedRepositoryCiStatuses(force = false): Promise<void> {
 
 async function refreshRepositoryCiStatus(repo: Pick<WatchedRepo, "owner" | "repo">, force: boolean): Promise<void> {
   const repoKey = getWatchedRepoKey(repo);
+  const previousStatus = repoCiStatuses[repoKey];
 
   if (
     repoCiStatusRefreshes.has(repoKey) ||
@@ -3132,7 +3136,7 @@ async function refreshRepositoryCiStatus(repo: Pick<WatchedRepo, "owner" | "repo
 
   repoCiStatusRefreshes.add(repoKey);
 
-  if (!repoCiStatuses[repoKey]) {
+  if (!previousStatus) {
     repoCiStatuses = {
       ...repoCiStatuses,
       [repoKey]: {
@@ -3158,14 +3162,10 @@ async function refreshRepositoryCiStatus(repo: Pick<WatchedRepo, "owner" | "repo
       [repoKey]: toRepoCiStatusViewModel(status),
     };
   } catch (error) {
+    console.warn(`Could not refresh default branch CI status for ${repoKey}.`, error);
     repoCiStatuses = {
       ...repoCiStatuses,
-      [repoKey]: {
-        tone: "pending",
-        label: "Unknown",
-        description: error instanceof Error ? error.message : String(error),
-        workflows: [],
-      },
+      [repoKey]: getRepoCiStatusAfterRefreshError(previousStatus, error),
     };
   } finally {
     repoCiStatusUpdatedAt.set(repoKey, Date.now());

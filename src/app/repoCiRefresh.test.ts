@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { repoCiRefreshIntervalMs, shouldRefreshRepoCiStatus } from "./repoCiRefresh";
+import type { RepoCiStatusViewModel } from "./viewModel";
+import {
+  getRepoCiStatusAfterRefreshError,
+  repoCiRefreshIntervalMs,
+  shouldRefreshRepoCiStatus,
+} from "./repoCiRefresh";
 
 const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
 
@@ -60,5 +65,37 @@ describe("shouldRefreshRepoCiStatus", () => {
     expect(mainSource).toContain("void refreshSettingsAndStatuses(true);");
     expect(mainSource).toContain("popupOpen: isPopupOpen");
     expect(mainSource).toContain("getCachedRepositoryDefaultBranch(repo, force)");
+  });
+});
+
+describe("getRepoCiStatusAfterRefreshError", () => {
+  it("keeps the last known status after a transient refresh failure", () => {
+    const previousStatus: RepoCiStatusViewModel = {
+      tone: "success",
+      label: "Passing",
+      description: "main: 1 workflow passed",
+      defaultBranch: "main",
+      commitSha: "abc123",
+      workflows: [
+        {
+          tone: "success",
+          label: "Passing",
+          description: "CI passed",
+          name: "CI",
+          url: "https://github.com/jpnurmi/gha-watch/actions/runs/1",
+        },
+      ],
+    };
+
+    expect(getRepoCiStatusAfterRefreshError(previousStatus, new Error("offline"))).toBe(previousStatus);
+  });
+
+  it("reports an unknown status when the initial refresh fails", () => {
+    expect(getRepoCiStatusAfterRefreshError(undefined, new Error("offline"))).toEqual({
+      tone: "pending",
+      label: "Unknown",
+      description: "offline",
+      workflows: [],
+    });
   });
 });
