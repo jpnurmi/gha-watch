@@ -7,10 +7,12 @@ import {
   fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
+  fetchRepositoryBranches,
   fetchRepositoryIconUrl,
   fetchUserActiveWorkflowRuns,
   fetchWatchState,
   fetchWorkflowDefinitions,
+  fetchWorkflowRuns,
   rerunWatch,
   type ShellExecutor,
 } from "./gh";
@@ -1090,6 +1092,30 @@ describe("fetchWorkflowDefinitions", () => {
   });
 });
 
+describe("fetchRepositoryBranches", () => {
+  it("loads authoritative branch choices while ignoring malformed entries", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify([
+        { name: "release/1.x" },
+        { name: "main" },
+        { name: "main" },
+        { name: "" },
+      ]),
+      stderr: "",
+    });
+
+    await expect(fetchRepositoryBranches({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toEqual([
+      "main",
+      "release/1.x",
+    ]);
+    expect(calls).toEqual([{
+      program: "gh",
+      args: ["api", "repos/getsentry/sentry/branches?per_page=100"],
+    }]);
+  });
+});
+
 describe("fetchActiveWorkflowRuns", () => {
   it("fetches active workflow runs through gh and sorts them by update time", async () => {
     const { executor, calls } = createSequenceExecutor([
@@ -1317,6 +1343,340 @@ describe("fetchActiveWorkflowRuns", () => {
         url: "https://github.com/getsentry/sentry/actions/runs/101",
       },
     ]);
+  });
+});
+
+describe("fetchWorkflowRuns", () => {
+  it("fetches generalized run metadata once through the repository REST endpoint", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        workflow_runs: [
+          {
+            id: 102,
+            workflow_id: 12,
+            name: "Deploy",
+            display_title: "Package app",
+            event: "workflow_dispatch",
+            actor: { login: "jpnurmi" },
+            head_branch: "release/1.x",
+            status: "in_progress",
+            conclusion: null,
+            created_at: "2026-08-12T10:00:00Z",
+            run_started_at: "2026-08-12T10:01:00Z",
+            updated_at: "2026-08-12T10:02:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/102",
+          },
+          {
+            id: 101,
+            workflow_id: 11,
+            name: "CI",
+            display_title: "Tests",
+            event: "push",
+            actor: { login: "octocat" },
+            head_branch: "main",
+            status: "completed",
+            conclusion: "success",
+            created_at: "2026-08-12T09:00:00Z",
+            updated_at: "2026-08-12T09:05:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/101",
+          },
+        ],
+      }),
+      stderr: "",
+    });
+
+    await expect(fetchWorkflowRuns({ owner: "getsentry", repo: "sentry" }, {}, executor)).resolves.toEqual({
+      runs: [
+      {
+        runId: "102",
+        workflowId: "12",
+        title: "Deploy: Package app",
+        event: "workflow_dispatch",
+        actorLogin: "jpnurmi",
+        workflowName: "Deploy",
+        status: "in_progress",
+        branchName: "release/1.x",
+        createdAt: "2026-08-12T10:00:00Z",
+        startedAt: "2026-08-12T10:01:00Z",
+        updatedAt: "2026-08-12T10:02:00Z",
+        url: "https://github.com/getsentry/sentry/actions/runs/102",
+      },
+      {
+        runId: "101",
+        workflowId: "11",
+        title: "CI: Tests",
+        event: "push",
+        actorLogin: "octocat",
+        workflowName: "CI",
+        status: "completed",
+        conclusion: "success",
+        branchName: "main",
+        createdAt: "2026-08-12T09:00:00Z",
+        updatedAt: "2026-08-12T09:05:00Z",
+        url: "https://github.com/getsentry/sentry/actions/runs/101",
+      },
+      ],
+    });
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry/actions/runs?status=queued&per_page=100&page=1"],
+      },
+      {
+        program: "gh",
+        args: ["api", "repos/getsentry/sentry/actions/runs?status=in_progress&per_page=100&page=1"],
+      },
+    ]);
+  });
+
+  it("finds active runs beyond the first full status page with bounded pagination", async () => {
+    const calls: string[][] = [];
+    const fullQueuedPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      name: "Other",
+      display_title: `Queued ${index + 1}`,
+      event: "push",
+      actor: { login: "octocat" },
+      head_branch: "main",
+      status: "queued",
+      updated_at: `2026-08-12T09:${String(index % 60).padStart(2, "0")}:00Z`,
+      html_url: `https://github.com/getsentry/sentry/actions/runs/${index + 1}`,
+    }));
+    const executor: ShellExecutor = {
+      async execute(_program, args) {
+        calls.push(args);
+        const endpoint = args[1];
+
+        if (endpoint.includes("status=queued") && endpoint.endsWith("page=1")) {
+          return { code: 0, stdout: JSON.stringify({ workflow_runs: fullQueuedPage }), stderr: "" };
+        }
+
+        if (endpoint.includes("status=queued") && endpoint.endsWith("page=2")) {
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              workflow_runs: [{
+                id: 501,
+                workflow_id: 12,
+                name: "Deploy",
+                display_title: "Release package",
+                event: "push",
+                actor: { login: "jpnurmi" },
+                head_branch: "release/1.x",
+                status: "queued",
+                updated_at: "2026-08-12T08:00:00Z",
+                html_url: "https://github.com/getsentry/sentry/actions/runs/501",
+              }],
+            }),
+            stderr: "",
+          };
+        }
+
+        return { code: 0, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+      },
+    };
+
+    const { runs } = await fetchWorkflowRuns({ owner: "getsentry", repo: "sentry" }, {}, executor);
+
+    expect(runs).toContainEqual(expect.objectContaining({
+      runId: "501",
+      workflowName: "Deploy",
+      branchName: "release/1.x",
+      status: "queued",
+    }));
+    expect(calls).toEqual([
+      ["api", "repos/getsentry/sentry/actions/runs?status=queued&per_page=100&page=1"],
+      ["api", "repos/getsentry/sentry/actions/runs?status=in_progress&per_page=100&page=1"],
+      ["api", "repos/getsentry/sentry/actions/runs?status=queued&per_page=100&page=2"],
+    ]);
+  });
+
+  it("discovers completed runs created after a cursor", async () => {
+    const calls: string[][] = [];
+    const executor: ShellExecutor = {
+      async execute(_program, args) {
+        calls.push(args);
+
+        if (args[1].includes("created=")) {
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              workflow_runs: [{
+                id: 601,
+                workflow_id: 13,
+                name: "CI",
+                display_title: "Fast tests",
+                event: "push",
+                actor: { login: "jpnurmi" },
+                head_branch: "main",
+                status: "completed",
+                conclusion: "success",
+                created_at: "2026-08-12T10:00:05Z",
+                updated_at: "2026-08-12T10:00:15Z",
+                html_url: "https://github.com/getsentry/sentry/actions/runs/601",
+              }],
+            }),
+            stderr: "",
+          };
+        }
+
+        return { code: 0, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+      },
+    };
+
+    await expect(fetchWorkflowRuns(
+      { owner: "getsentry", repo: "sentry" },
+      {
+        createdAfter: "2026-08-12T10:00:00.000Z",
+        createdBefore: "2026-08-12T10:00:30.000Z",
+      },
+      executor,
+    )).resolves.toEqual({
+      runs: [expect.objectContaining({
+        runId: "601",
+        status: "completed",
+        conclusion: "success",
+        createdAt: "2026-08-12T10:00:05Z",
+      })],
+    });
+    expect(calls).toContainEqual([
+      "api",
+      "repos/getsentry/sentry/actions/runs?per_page=100&page=1&created=2026-08-12T10%3A00%3A00.000Z..2026-08-12T10%3A00%3A30.000Z",
+    ]);
+  });
+
+  it("caps active run pagination per status", async () => {
+    const calls: string[][] = [];
+    const fullPage = {
+      workflow_runs: Array.from({ length: 100 }, (_, index) => ({
+        id: index + 1,
+        name: "CI",
+        display_title: "Build",
+        status: "queued",
+        html_url: `https://github.com/getsentry/sentry/actions/runs/${index + 1}`,
+      })),
+    };
+    const executor: ShellExecutor = {
+      async execute(_program, args) {
+        calls.push(args);
+        return { code: 0, stdout: JSON.stringify(fullPage), stderr: "" };
+      },
+    };
+
+    await fetchWorkflowRuns({ owner: "getsentry", repo: "sentry" }, {}, executor);
+
+    expect(calls).toHaveLength(6);
+    expect(calls.every((args) => !args[1].endsWith("page=4"))).toBe(true);
+  });
+
+  it("returns the next catch-up page when a cursor scan reaches its page cap", async () => {
+    const fullPage = {
+      workflow_runs: Array.from({ length: 100 }, (_, index) => ({
+        id: index + 1,
+        name: "CI",
+        display_title: "Build",
+        status: "completed",
+        conclusion: "success",
+        created_at: "2026-08-12T10:00:01Z",
+        html_url: `https://github.com/getsentry/sentry/actions/runs/${index + 1}`,
+      })),
+    };
+    const executor: ShellExecutor = {
+      async execute(_program, args) {
+        return {
+          code: 0,
+          stdout: JSON.stringify(args[1].includes("created=") ? fullPage : { workflow_runs: [] }),
+          stderr: "",
+        };
+      },
+    };
+
+    const batch = await fetchWorkflowRuns(
+      { owner: "getsentry", repo: "sentry" },
+      {
+        createdAfter: "2026-08-12T10:00:00.000Z",
+        createdBefore: "2026-08-12T10:00:30.000Z",
+      },
+      executor,
+    );
+
+    expect(batch.nextCatchUpPage).toBe(4);
+  });
+
+  it("resumes a stable all-status interval after a run changes from active to completed", async () => {
+    let phase = 1;
+    const catchUpCalls: string[] = [];
+    const executor: ShellExecutor = {
+      async execute(_program, args) {
+        const endpoint = args[1];
+
+        if (endpoint.includes("status=")) {
+          return { code: 0, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+        }
+
+        catchUpCalls.push(endpoint);
+        const page = Number(new URL(`https://api.github.test/?${endpoint.split("?")[1]}`).searchParams.get("page"));
+
+        if (phase === 1 && page <= 3) {
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              workflow_runs: Array.from({ length: 100 }, (_, index) => ({
+                id: page * 1000 + index,
+                name: "CI",
+                display_title: "Build",
+                status: page === 1 && index === 0 ? "in_progress" : "completed",
+                conclusion: page === 1 && index === 0 ? null : "success",
+                created_at: "2026-08-12T10:00:05Z",
+                html_url: `https://github.com/getsentry/sentry/actions/runs/${page * 1000 + index}`,
+              })),
+            }),
+            stderr: "",
+          };
+        }
+
+        if (phase === 2 && page === 4) {
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              workflow_runs: [{
+                id: 9999,
+                name: "Deploy",
+                display_title: "Older match",
+                event: "push",
+                head_branch: "release/1.x",
+                status: "completed",
+                conclusion: "success",
+                created_at: "2026-08-12T10:00:01Z",
+                html_url: "https://github.com/getsentry/sentry/actions/runs/9999",
+              }],
+            }),
+            stderr: "",
+          };
+        }
+
+        return { code: 0, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+      },
+    };
+    const range = {
+      createdAfter: "2026-08-12T10:00:00.000Z",
+      createdBefore: "2026-08-12T10:00:30.000Z",
+    };
+
+    const first = await fetchWorkflowRuns({ owner: "getsentry", repo: "sentry" }, range, executor);
+    phase = 2;
+    const second = await fetchWorkflowRuns(
+      { owner: "getsentry", repo: "sentry" },
+      { ...range, catchUpPage: first.nextCatchUpPage },
+      executor,
+    );
+
+    expect(first.nextCatchUpPage).toBe(4);
+    expect(second.runs).toContainEqual(expect.objectContaining({ runId: "9999" }));
+    expect(catchUpCalls).toHaveLength(4);
+    expect(catchUpCalls.every((endpoint) => !endpoint.includes("status="))).toBe(true);
+    expect(catchUpCalls.at(-1)).toContain("page=4");
   });
 });
 

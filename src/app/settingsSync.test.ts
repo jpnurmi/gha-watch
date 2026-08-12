@@ -122,6 +122,17 @@ describe("settings sync", () => {
     ]);
   });
 
+  it("rewrites normalized version 1 settings in the current format", async () => {
+    const remote = {
+      load: vi.fn(async () => ({ ...remoteState, settingsMigrated: true as const })),
+      save: vi.fn(async () => undefined),
+    } satisfies SettingsRemote;
+
+    await createSettingsSync(remote).sync(localState);
+
+    expect(remote.save).toHaveBeenCalledWith(toSyncedState(remoteState));
+  });
+
   it("keeps a failed explicit upload pending for the next sync", async () => {
     let storedState: SyncedState | undefined;
     let shouldFail = true;

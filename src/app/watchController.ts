@@ -1,4 +1,9 @@
-import type { WatchedRepo } from "../domain/watchedRepos";
+import {
+  getWatchedRepoKey,
+  getWorkflowSubscriptions,
+  workflowRunMatchesSubscription,
+  type WatchedRepo,
+} from "../domain/watchedRepos";
 import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, WatchTarget } from "../domain/githubUrl";
 import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
 import {
@@ -26,11 +31,14 @@ import {
   type WatchRecord,
   type WatchTriageState,
 } from "../domain/watches";
-import type { RerunMode, WatchSnapshot } from "../platform/gh";
+import { isWorkflowRunActive, type RerunMode, type WatchSnapshot } from "../platform/gh";
 import type {
   ActiveWorkflowRun,
   OpenPullRequest,
   PullRequestDetails,
+  WorkflowRun,
+  WorkflowRunDiscoveryBatch,
+  WorkflowRunDiscoveryOptions,
   WorkflowDefinition,
 } from "../platform/gh";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
@@ -38,9 +46,14 @@ import { createWatchNotification, type WatchNotification } from "./watchNotifica
 export type WatchControllerDeps = {
   fetchState(target: WatchTarget): Promise<WatchSnapshot>;
   fetchActiveWorkflowRuns?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
+  fetchWorkflowRuns?(
+    target: Pick<WatchedRepo, "owner" | "repo">,
+    options?: WorkflowRunDiscoveryOptions,
+  ): Promise<WorkflowRunDiscoveryBatch>;
   fetchOpenPullRequests?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   fetchPullRequestDetails?(targets: PrWatchTarget[]): Promise<Array<PullRequestDetails | undefined>>;
   fetchRepositoryDefaultBranch?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<string>;
+  fetchRepositoryBranches?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<string[]>;
   fetchRepositoryIconUrl?(target: Pick<ParsedWatchTarget, "owner" | "repo">): Promise<string | undefined>;
   fetchUserActiveWorkflowRuns?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   fetchWorkflowDefinitions?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
@@ -68,6 +81,7 @@ export type WatchController = {
   refreshWatchMetadata(): Promise<void>;
   listActiveWorkflowRuns(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   listOpenPullRequests(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
+  listRepositoryBranches(target: Pick<WatchedRepo, "owner" | "repo">): Promise<string[]>;
   listWorkflowDefinitions(target: Pick<WatchedRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
   rerun(id: string, mode: RerunMode): Promise<void>;
   syncWorkflowSubscriptions(watchedRepos: WatchedRepo[]): Promise<void>;
@@ -81,6 +95,18 @@ export type WatchPollOptions = {
   includeInactive?: boolean;
   watchIds?: string[];
 };
+
+type WorkflowDiscoveryState = {
+  cursor: string;
+  overlapEnabled: boolean;
+  catchUp?: {
+    after: string;
+    before: string;
+    nextPage: number;
+  };
+};
+
+const workflowDiscoveryOverlapMs = 60_000;
 
 export function createWatchController(
   deps: WatchControllerDeps,
@@ -98,6 +124,7 @@ export function createWatchController(
   let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
   const metadataHydratedWatchIds = new Set<string>();
   const repositoryIconRefreshes = new Map<string, Promise<void>>();
+  const workflowDiscoveryStates = new Map<string, WorkflowDiscoveryState>();
   const listeners = new Set<() => void>();
 
   if (watches !== normalizedWatches) {
@@ -405,6 +432,11 @@ export function createWatchController(
   }
 
   async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<void> {
+    if (watchedRepo.workflowSubscriptions) {
+      await syncNormalizedWorkflowSubscriptions(watchedRepo);
+      return;
+    }
+
     const defaultBranchWorkflowNames = watchedRepo.defaultBranchWorkflowNames ?? [];
     const userWorkflowNames = watchedRepo.userWorkflowNames ?? [];
     const needsPullRequestList = Boolean(watchedRepo.pullRequestScope) || userWorkflowNames.length > 0;
@@ -494,6 +526,132 @@ export function createWatchController(
     }
   }
 
+  async function syncNormalizedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<void> {
+    const subscriptions = getWorkflowSubscriptions(watchedRepo);
+    const repoKey = getWatchedRepoKey(watchedRepo);
+    const discoveryState = workflowDiscoveryStates.get(repoKey);
+    const scanStartedAt = getNow().toISOString();
+    const catchUpScan = discoveryState
+      ? discoveryState.catchUp ?? {
+          after: discoveryState.overlapEnabled
+            ? getWorkflowDiscoveryOverlapStart(discoveryState.cursor)
+            : discoveryState.cursor,
+          before: scanStartedAt,
+          nextPage: 1,
+        }
+      : undefined;
+    const hasCurrentUserDispatchSubscription = subscriptions.some(
+      (subscription) =>
+        subscription.actor === "currentUser" &&
+        (subscription.events.includes("*") || subscription.events.includes("workflow_dispatch")),
+    );
+    const needsPullRequestList = Boolean(watchedRepo.pullRequestScope) || hasCurrentUserDispatchSubscription;
+    const needsDefaultBranch = subscriptions.some((subscription) => subscription.branch.kind === "default");
+    const needsUserLogin = watchedRepo.pullRequestScope === "user" ||
+      subscriptions.some((subscription) => subscription.actor === "currentUser");
+
+    if (needsPullRequestList && !deps.fetchOpenPullRequests) {
+      throw new Error("Pull request watches need GitHub PR listing support.");
+    }
+
+    if (subscriptions.length > 0 && !deps.fetchWorkflowRuns) {
+      throw new Error("Workflow subscriptions need GitHub run listing support.");
+    }
+
+    if (needsDefaultBranch && !deps.fetchRepositoryDefaultBranch) {
+      throw new Error("Default branch workflow subscriptions need GitHub repository support.");
+    }
+
+    if (needsUserLogin && !deps.getAuthenticatedUserLogin) {
+      throw new Error("User watches need GitHub authentication support.");
+    }
+
+    const [openPullRequests, runBatch, defaultBranch, userLogin] = await Promise.all([
+      needsPullRequestList ? deps.fetchOpenPullRequests!(watchedRepo) : Promise.resolve([]),
+      subscriptions.length > 0
+        ? deps.fetchWorkflowRuns!(watchedRepo, catchUpScan
+            ? {
+                createdAfter: catchUpScan.after,
+                createdBefore: catchUpScan.before,
+                catchUpPage: catchUpScan.nextPage,
+              }
+            : {})
+        : Promise.resolve({ runs: [] } as WorkflowRunDiscoveryBatch),
+      needsDefaultBranch ? deps.fetchRepositoryDefaultBranch!(watchedRepo) : Promise.resolve(""),
+      needsUserLogin ? deps.getAuthenticatedUserLogin!() : Promise.resolve(""),
+    ]);
+
+    if (watchedRepo.pullRequestScope) {
+      for (const pullRequest of openPullRequests) {
+        if (
+          watchedRepo.pullRequestScope === "all" ||
+          pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()
+        ) {
+          await syncSubscribedPullRequest(watchedRepo, pullRequest, true);
+        }
+      }
+    }
+
+    const targets = new Map<string, { run: WorkflowRun; caughtUp: boolean }>();
+
+    for (const run of runBatch.runs) {
+      const caughtUp = Boolean(discoveryState);
+
+      if (!isWorkflowRunActive(run) && (!caughtUp || run.status !== "completed")) {
+        continue;
+      }
+
+      const matchingSubscriptions = subscriptions.filter((subscription) => workflowRunMatchesSubscription(
+        run,
+        subscription,
+        { defaultBranch, currentUserLogin: userLogin },
+      ));
+
+      if (matchingSubscriptions.length === 0) {
+        continue;
+      }
+
+      const aggregatesAuthoredPullRequest =
+        run.event === "workflow_dispatch" &&
+        matchingSubscriptions.some((subscription) => subscription.actor === "currentUser");
+
+      if (aggregatesAuthoredPullRequest) {
+        const pullRequest = openPullRequests.find(
+          (candidate) => candidate.headBranch?.trim() === run.branchName,
+        );
+
+        if (pullRequest) {
+          if (pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()) {
+            await syncSubscribedPullRequest(watchedRepo, pullRequest, true);
+          }
+
+          continue;
+        }
+      }
+
+      targets.set(run.runId, { run, caughtUp });
+    }
+
+    for (const { run, caughtUp } of targets.values()) {
+      await addSubscribedWorkflowRun(watchedRepo, run, caughtUp);
+    }
+
+    if (!discoveryState) {
+      workflowDiscoveryStates.set(repoKey, { cursor: scanStartedAt, overlapEnabled: false });
+    } else if (catchUpScan && runBatch.nextCatchUpPage) {
+      workflowDiscoveryStates.set(repoKey, {
+        cursor: discoveryState.cursor,
+        overlapEnabled: discoveryState.overlapEnabled,
+        catchUp: {
+          ...catchUpScan,
+          nextPage: runBatch.nextCatchUpPage,
+        },
+      });
+    } else if (catchUpScan) {
+      workflowDiscoveryStates.set(repoKey, { cursor: catchUpScan.before, overlapEnabled: true });
+    }
+  }
+
   async function syncSubscribedPullRequest(
     repo: Pick<WatchedRepo, "owner" | "repo">,
     pullRequest: OpenPullRequest,
@@ -556,6 +714,7 @@ export function createWatchController(
   async function addSubscribedWorkflowRun(
     repo: Pick<WatchedRepo, "owner" | "repo">,
     run: ActiveWorkflowRun,
+    caughtUp = false,
   ): Promise<void> {
     const target = {
       kind: "run",
@@ -604,8 +763,15 @@ export function createWatchController(
       return;
     }
 
-    setWatches([...watches, subscribedWatch]);
+    const publishedWatch = caughtUp && subscribedWatch.lastState?.status === "completed"
+      ? { ...subscribedWatch, lastSeenStatus: "pending" }
+      : subscribedWatch;
+    setWatches([...watches, publishedWatch]);
     void refreshRepositoryIcon(target);
+
+    if (caughtUp && publishedWatch.lastState?.status === "completed" && !deps.notificationsPaused?.()) {
+      await deps.notify(createWatchNotification(publishedWatch, getNow()));
+    }
   }
 
   function reuseTrackedPullRequestForSubscribedRun(
@@ -790,11 +956,15 @@ export function createWatchController(
     },
 
     async listActiveWorkflowRuns(target) {
-      if (!deps.fetchActiveWorkflowRuns) {
+      if (deps.fetchActiveWorkflowRuns) {
+        return deps.fetchActiveWorkflowRuns(target);
+      }
+
+      if (!deps.fetchWorkflowRuns) {
         throw new Error("Active workflow run lists need GitHub run listing support.");
       }
 
-      return deps.fetchActiveWorkflowRuns(target);
+      return (await deps.fetchWorkflowRuns(target)).runs.filter(isWorkflowRunActive);
     },
 
     async listOpenPullRequests(target) {
@@ -803,6 +973,14 @@ export function createWatchController(
       }
 
       return deps.fetchOpenPullRequests(target);
+    },
+
+    async listRepositoryBranches(target) {
+      if (!deps.fetchRepositoryBranches) {
+        throw new Error("Workflow branch choices need GitHub branch listing support.");
+      }
+
+      return deps.fetchRepositoryBranches(target);
     },
 
     async listWorkflowDefinitions(target) {
@@ -843,6 +1021,17 @@ export function createWatchController(
 
     async syncWorkflowSubscriptions(watchedRepos) {
       pruneExpiredSuppressions();
+      const normalizedSubscriptionRepoKeys = new Set(
+        watchedRepos
+          .filter((repo) => Boolean(repo.workflowSubscriptions?.length))
+          .map(getWatchedRepoKey),
+      );
+
+      for (const repoKey of workflowDiscoveryStates.keys()) {
+        if (!normalizedSubscriptionRepoKeys.has(repoKey)) {
+          workflowDiscoveryStates.delete(repoKey);
+        }
+      }
 
       for (const watchedRepo of watchedRepos) {
         await syncWatchedWorkflowSubscriptions(watchedRepo);
@@ -942,6 +1131,11 @@ export function createWatchController(
       };
     },
   };
+}
+
+function getWorkflowDiscoveryOverlapStart(cursor: string): string {
+  const timestamp = Date.parse(cursor);
+  return new Date(timestamp - workflowDiscoveryOverlapMs).toISOString();
 }
 
 function mergePolledTiming(

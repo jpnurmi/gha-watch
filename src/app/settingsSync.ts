@@ -54,6 +54,12 @@ export function createSettingsSync(remote: SettingsRemote): SettingsSync {
             return restoreLocalCaches(migratedState, localState);
           }
 
+          if (remoteState.settingsMigrated) {
+            const migratedState = toSyncedState(remoteState);
+            await remote.save(migratedState);
+            return restoreLocalCaches(migratedState, localState);
+          }
+
           return restoreLocalCaches(remoteState, localState);
         }
 

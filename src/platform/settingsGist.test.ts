@@ -199,7 +199,7 @@ describe("settings Gist", () => {
     );
     expect(() => parseSettingsDocument(JSON.stringify({
       format: "dev.jpnurmi.gha-watch/settings",
-      version: 2,
+      version: 3,
       settings: state.settings,
     }))).toThrow("unsupported version");
   });
@@ -213,7 +213,51 @@ describe("settings Gist", () => {
       settings: state.settings,
       watches: [],
       historyInitialized: false,
+      settingsMigrated: true,
     });
+  });
+
+  it("migrates version 1 workflow scopes and serializes deterministic version 2 subscriptions", () => {
+    const migrated = parseSettingsDocument(JSON.stringify({
+      format: "dev.jpnurmi.gha-watch/settings",
+      version: 1,
+      settings: {
+        watchedRepos: [{
+          owner: "jpnurmi",
+          repo: "gha-watch",
+          defaultBranchWorkflowNames: ["CI"],
+          userWorkflowNames: ["Release"],
+        }],
+        repoOrder: [],
+      },
+      watches: [],
+    }));
+    const serialized = serializeSettingsDocument(migrated);
+
+    expect(JSON.parse(serialized)).toMatchObject({
+      version: 2,
+      settings: {
+        watchedRepos: [{
+          owner: "jpnurmi",
+          repo: "gha-watch",
+          workflowSubscriptions: [
+            {
+              workflowName: "CI",
+              branch: { kind: "default" },
+              events: ["*"],
+              actor: "any",
+            },
+            {
+              workflowName: "Release",
+              branch: { kind: "any" },
+              events: ["workflow_dispatch"],
+              actor: "currentUser",
+            },
+          ],
+        }],
+      },
+    });
+    expect(serializeSettingsDocument(parseSettingsDocument(serialized))).toBe(serialized);
   });
 
   it("ignores malformed and inbox watch records", () => {

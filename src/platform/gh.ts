@@ -119,17 +119,34 @@ export type PullRequestDetails = {
 
 export type PullRequestDetailsBatch = Array<PullRequestDetails | undefined>;
 
-export type ActiveWorkflowRun = {
+export type WorkflowRun = {
   runId: string;
   title: string;
   event?: string;
+  actorLogin?: string;
+  workflowId?: string;
   workflowName?: string;
   status: string;
+  conclusion?: string;
   branchName?: string;
   createdAt?: string;
+  startedAt?: string;
   updatedAt?: string;
   url: string;
 };
+
+export type WorkflowRunDiscoveryOptions = {
+  createdAfter?: string;
+  createdBefore?: string;
+  catchUpPage?: number;
+};
+
+export type WorkflowRunDiscoveryBatch = {
+  runs: WorkflowRun[];
+  nextCatchUpPage?: number;
+};
+
+export type ActiveWorkflowRun = WorkflowRun;
 
 export type RepositoryCiStatusTone = "success" | "pending" | "failure";
 
@@ -190,10 +207,40 @@ type WorkflowRunListResponse = {
   workflowName?: string;
 };
 
+type RepositoryWorkflowRunsResponse = {
+  workflow_runs?: RepositoryWorkflowRunResponse[];
+};
+
+type RepositoryWorkflowRunResponse = {
+  actor?: {
+    login?: string;
+  } | null;
+  conclusion?: string | null;
+  created_at?: string;
+  display_title?: string;
+  event?: string;
+  head_branch?: string | null;
+  html_url?: string;
+  id?: number | string;
+  name?: string;
+  run_started_at?: string;
+  status?: string;
+  updated_at?: string;
+  workflow_id?: number | string;
+};
+
+const activeWorkflowRunStatuses = ["queued", "in_progress"] as const;
+const workflowRunsPerPage = 100;
+const maxWorkflowRunPagesPerStatus = 3;
+
 type WorkflowListResponse = {
   name?: string;
   path?: string;
   state?: string;
+};
+
+type BranchListResponse = {
+  name?: string;
 };
 
 type PullRequestReference = {
@@ -415,6 +462,115 @@ export async function fetchWorkflowDefinitions(
   }
 }
 
+export async function fetchRepositoryBranches(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<string[]> {
+  try {
+    const result = await executor.execute("gh", [
+      "api",
+      `repos/${target.owner}/${target.repo}/branches?per_page=100`,
+    ]);
+
+    assertSuccessfulGhResult(result);
+    return [...new Set(parseJson<BranchListResponse[]>(result.stdout)
+      .map((branch) => branch.name?.trim())
+      .filter((name): name is string => Boolean(name)))]
+      .sort((left, right) => left.localeCompare(right));
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function fetchWorkflowRuns(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  options: WorkflowRunDiscoveryOptions = {},
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<WorkflowRunDiscoveryBatch> {
+  try {
+    const [activeResponses, catchUpResponse] = await Promise.all([
+      Promise.all(
+      activeWorkflowRunStatuses.map((status) => fetchWorkflowRunPages(target, status, executor)),
+      ),
+      options.createdAfter && options.createdBefore
+        ? fetchWorkflowRunPages(
+            target,
+            undefined,
+            executor,
+            {
+              createdAfter: options.createdAfter,
+              createdBefore: options.createdBefore,
+              startPage: options.catchUpPage ?? 1,
+            },
+          )
+        : Promise.resolve({ runs: [] } as { runs: RepositoryWorkflowRunResponse[]; nextPage?: number }),
+    ]);
+    const runsById = new Map(
+      [...activeResponses, catchUpResponse]
+        .flatMap((response) => response.runs)
+        .map(normalizeRepositoryWorkflowRun)
+        .filter((run): run is WorkflowRun => Boolean(run))
+        .map((run) => [run.runId, run]),
+    );
+
+    return {
+      runs: [...runsById.values()].sort(compareWorkflowRunsByUpdatedAt),
+      ...(catchUpResponse.nextPage ? { nextCatchUpPage: catchUpResponse.nextPage } : {}),
+    };
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export function isWorkflowRunActive(run: Pick<WorkflowRun, "status">): boolean {
+  return activeWorkflowRunStatuses.includes(run.status as typeof activeWorkflowRunStatuses[number]);
+}
+
+async function fetchWorkflowRunPages(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  status: typeof activeWorkflowRunStatuses[number] | undefined,
+  executor: ShellExecutor,
+  completedScan?: {
+    createdAfter: string;
+    createdBefore: string;
+    startPage: number;
+  },
+): Promise<{ runs: RepositoryWorkflowRunResponse[]; nextPage?: number }> {
+  const runs: RepositoryWorkflowRunResponse[] = [];
+  const startPage = completedScan?.startPage ?? 1;
+  const lastPage = startPage + maxWorkflowRunPagesPerStatus - 1;
+
+  for (let page = startPage; page <= lastPage; page += 1) {
+    const query = new URLSearchParams();
+
+    if (status) {
+      query.set("status", status);
+    }
+
+    query.set("per_page", String(workflowRunsPerPage));
+    query.set("page", String(page));
+
+    if (completedScan) {
+      query.set("created", `${completedScan.createdAfter}..${completedScan.createdBefore}`);
+    }
+
+    const result = await executor.execute("gh", [
+      "api",
+      `repos/${target.owner}/${target.repo}/actions/runs?${query.toString()}`,
+    ]);
+
+    assertSuccessfulGhResult(result);
+    const pageRuns = parseJson<RepositoryWorkflowRunsResponse>(result.stdout).workflow_runs ?? [];
+    runs.push(...pageRuns);
+
+    if (pageRuns.length < workflowRunsPerPage) {
+      return { runs };
+    }
+  }
+
+  return { runs, nextPage: lastPage + 1 };
+}
+
 export async function fetchActiveWorkflowRuns(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
   executor: ShellExecutor = createTauriShellExecutor(),
@@ -503,6 +659,40 @@ function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWo
     ...(branchName ? { branchName } : {}),
     ...(response.createdAt ? { createdAt: response.createdAt } : {}),
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
+    url,
+  };
+}
+
+function normalizeRepositoryWorkflowRun(response: RepositoryWorkflowRunResponse): WorkflowRun | undefined {
+  const runId = getRunDatabaseId(response.id);
+  const workflowName = response.name?.trim();
+  const title = joinTitle(workflowName, response.display_title);
+  const status = response.status?.trim();
+  const url = response.html_url?.trim();
+
+  if (!runId || !status || !url || title === "GitHub Actions") {
+    return undefined;
+  }
+
+  const actorLogin = response.actor?.login?.trim();
+  const branchName = response.head_branch?.trim();
+  const conclusion = response.conclusion?.trim();
+  const event = response.event?.trim();
+  const workflowId = getRunDatabaseId(response.workflow_id);
+
+  return {
+    runId,
+    title,
+    ...(event ? { event } : {}),
+    ...(actorLogin ? { actorLogin } : {}),
+    ...(workflowId ? { workflowId } : {}),
+    ...(workflowName ? { workflowName } : {}),
+    status,
+    ...(conclusion ? { conclusion } : {}),
+    ...(branchName ? { branchName } : {}),
+    ...(response.created_at ? { createdAt: response.created_at } : {}),
+    ...(response.run_started_at ? { startedAt: response.run_started_at } : {}),
+    ...(response.updated_at ? { updatedAt: response.updated_at } : {}),
     url,
   };
 }
