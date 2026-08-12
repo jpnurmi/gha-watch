@@ -199,6 +199,7 @@ impl DesktopNotificationActionId {
         }
     }
 
+    #[cfg(any(target_os = "linux", windows, test))]
     fn from_native_id(action: &str) -> Option<Self> {
         match action {
             "open" | "default" => Some(Self::Open),
@@ -209,6 +210,7 @@ impl DesktopNotificationActionId {
         }
     }
 
+    #[cfg(any(target_os = "linux", windows))]
     fn native_id(self) -> &'static str {
         match self {
             Self::Open => "open",
@@ -390,6 +392,8 @@ fn show_clickable_notification(
     app: AppHandle,
     notification: DesktopNotification,
 ) -> Result<(), String> {
+    // WinRT supports only short or long durations, not millisecond timeouts.
+    let _requested_timeout_ms = notification.timeout_ms;
     let app_id = if tauri::is_dev() {
         Toast::POWERSHELL_APP_ID.to_string()
     } else {
