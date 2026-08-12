@@ -32,6 +32,7 @@ type RunViewResponse = {
   created_at?: string;
   display_title?: string;
   head_branch?: string | null;
+  head_sha?: string | null;
   html_url?: string;
   jobs_url?: string;
   name?: string;
@@ -1041,6 +1042,7 @@ function toRunSnapshot(
       workflowName: response.name,
       runTitle: response.display_title,
       branchName: response.head_branch ?? undefined,
+      commitSha: response.head_sha ?? undefined,
     }),
     ...(failedChildren ? { hasFailedChildren: true } : {}),
     ...(prNumber ? { prNumber } : {}),

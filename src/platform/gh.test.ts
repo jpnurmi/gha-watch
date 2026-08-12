@@ -65,6 +65,7 @@ describe("fetchWatchState", () => {
         display_title: "Run tests",
         name: "CI",
         head_branch: "feature/build-status",
+        head_sha: "abc123",
         created_at: "2026-05-16T12:00:00Z",
         run_started_at: "2026-05-16T12:02:00Z",
         updated_at: "2026-05-16T12:03:00Z",
@@ -98,6 +99,7 @@ describe("fetchWatchState", () => {
         workflowName: "CI",
         runTitle: "Run tests",
         branchName: "feature/build-status",
+        commitSha: "abc123",
       },
       prNumber: "51",
       timing: {

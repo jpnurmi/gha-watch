@@ -18,6 +18,7 @@ export type WatchMetadata = {
   runTitle?: string;
   jobName?: string;
   branchName?: string;
+  commitSha?: string;
 };
 
 export type WatchRecord = {

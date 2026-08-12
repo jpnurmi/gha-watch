@@ -100,6 +100,8 @@ export type RepoCiStatusViewModel = {
   tone: RepoCiStatusTone;
   label: string;
   description: string;
+  defaultBranch?: string;
+  commitSha?: string;
   workflows: RepoCiWorkflowStatusViewModel[];
   url?: string;
 };
@@ -137,7 +139,9 @@ export function createPopupViewModel(
   repoOrder: string[] = [],
   repoCiStatuses: Record<string, RepoCiStatusViewModel> = {},
 ): PopupViewModel {
-  const rows = watches.map((watch) => createWatchRowViewModel(watch, now));
+  const rows = watches.map((watch) =>
+    createWatchRowViewModel(watch, now, repoCiStatuses[getRepoLabel(watch.target)]),
+  );
   const counts = countRows(rows);
 
   return {
@@ -148,7 +152,11 @@ export function createPopupViewModel(
   };
 }
 
-function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewModel {
+function createWatchRowViewModel(
+  watch: WatchRecord,
+  now: Date,
+  repoCiStatus?: RepoCiStatusViewModel,
+): WatchRowViewModel {
   if (watch.error) {
     return {
       id: watch.id,
@@ -165,7 +173,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
       unseenStatusChange: hasUnseenStatusChange(watch),
       canRerun: canRerun(watch),
       canRerunFailed: canRerunFailed(watch),
-      doneCandidate: isDoneCandidate(watch, "error"),
+      doneCandidate: isDoneCandidate(watch, "error", repoCiStatus),
       triageState: getWatchTriageState(watch),
       url: watch.target.url,
     };
@@ -177,22 +185,22 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
 
   if (status === "completed") {
     if (conclusion === "success") {
-      return createRow(watch, "Successful", "This check was successful.", "success", now);
+      return createRow(watch, "Successful", "This check was successful.", "success", now, repoCiStatus);
     }
 
     if (conclusion === "cancelled") {
-      return createRow(watch, "Cancelled", "This check was cancelled.", "cancelled", now);
+      return createRow(watch, "Cancelled", "This check was cancelled.", "cancelled", now, repoCiStatus);
     }
 
     if (conclusion === "skipped") {
-      return createRow(watch, "Skipped", "This check was skipped.", "skipped", now);
+      return createRow(watch, "Skipped", "This check was skipped.", "skipped", now, repoCiStatus);
     }
 
-    return createRow(watch, "Failed", "This check was not successful.", "failure", now);
+    return createRow(watch, "Failed", "This check was not successful.", "failure", now, repoCiStatus);
   }
 
   if (status === "queued" || status === "pending" || status === "requested" || status === "waiting") {
-    return createRow(watch, "Queued", "Waiting to run this check...", "queued", now);
+    return createRow(watch, "Queued", "Waiting to run this check...", "queued", now, repoCiStatus);
   }
 
   if (status === "in_progress") {
@@ -204,10 +212,11 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
       hasFailedChildren ? "This check is still running, but at least one job has failed." : "This check has started...",
       "in-progress",
       now,
+      repoCiStatus,
     );
   }
 
-  return createRow(watch, titleCase(status), "Waiting for the next status update...", "pending", now);
+  return createRow(watch, titleCase(status), "Waiting for the next status update...", "pending", now, repoCiStatus);
 }
 
 function createRow(
@@ -216,6 +225,7 @@ function createRow(
   description: string,
   tone: RowTone,
   now: Date,
+  repoCiStatus?: RepoCiStatusViewModel,
 ): WatchRowViewModel {
   return {
     id: watch.id,
@@ -232,20 +242,44 @@ function createRow(
     unseenStatusChange: hasUnseenStatusChange(watch),
     canRerun: canRerun(watch),
     canRerunFailed: canRerunFailed(watch),
-    doneCandidate: isDoneCandidate(watch, tone),
+    doneCandidate: isDoneCandidate(watch, tone, repoCiStatus),
     triageState: getWatchTriageState(watch),
     url: watch.target.url,
   };
 }
 
-function isDoneCandidate(watch: WatchRecord, tone: RowTone): boolean {
+function isDoneCandidate(
+  watch: WatchRecord,
+  tone: RowTone,
+  repoCiStatus?: RepoCiStatusViewModel,
+): boolean {
   const isPullRequest = watch.target.kind === "pr" || Boolean(watch.target.prNumber || watch.source || watch.sourceState);
 
   if (isPullRequest) {
     return watch.sourceState === "merged" || watch.sourceState === "closed";
   }
 
-  return tone === "success";
+  if (tone === "success") {
+    return true;
+  }
+
+  if (tone !== "cancelled" || watch.target.kind !== "run") {
+    return false;
+  }
+
+  const branchName = watch.metadata?.branchName?.trim();
+  const runCommitSha = watch.metadata?.commitSha?.trim();
+  const defaultBranch = repoCiStatus?.defaultBranch?.trim();
+  const defaultBranchCommitSha = repoCiStatus?.commitSha?.trim();
+
+  return Boolean(
+    branchName &&
+      runCommitSha &&
+      defaultBranch &&
+      defaultBranchCommitSha &&
+      branchName === defaultBranch &&
+      runCommitSha.toLowerCase() !== defaultBranchCommitSha.toLowerCase(),
+  );
 }
 
 function getPullRequestReference(watch: WatchRecord): string | undefined {

@@ -695,6 +695,39 @@ describe("createPopupViewModel", () => {
     expect(model.rows.map((row) => row.doneCandidate)).toEqual([true, true, true, false, false]);
   });
 
+  it("suggests Done for cancelled runs on an older default-branch commit", () => {
+    const cancelledRun = (id: string, branchName: string, commitSha: string) =>
+      watch({
+        id,
+        metadata: { branchName, commitSha },
+        status: "completed:cancelled",
+        active: false,
+        lastState: { status: "completed", conclusion: "cancelled" },
+      });
+    const model = createPopupViewModel(
+      [
+        cancelledRun("getsentry/sentry/run/old", "main", "old123"),
+        cancelledRun("getsentry/sentry/run/head", "main", "head456"),
+        cancelledRun("getsentry/sentry/run/branch", "feature/test", "old123"),
+      ],
+      new Date(),
+      [],
+      [],
+      {
+        "getsentry/sentry": {
+          tone: "success",
+          label: "Passing",
+          description: "main: 1 workflow passed",
+          defaultBranch: "main",
+          commitSha: "head456",
+          workflows: [],
+        },
+      },
+    );
+
+    expect(model.rows.map((row) => row.doneCandidate)).toEqual([true, false, false]);
+  });
+
   it("classifies leaf rows by watched check target even when they come from a PR", () => {
     const model = createPopupViewModel([
       watch({

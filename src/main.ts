@@ -3123,6 +3123,8 @@ function toRepoCiStatusViewModel(status: RepositoryCiStatus): RepoCiStatusViewMo
     tone: status.tone,
     label: status.label,
     description: status.description,
+    defaultBranch: status.defaultBranch,
+    ...(status.commitSha ? { commitSha: status.commitSha } : {}),
     workflows: status.workflows.map((workflow) => ({
       tone: workflow.tone,
       label: workflow.label,
