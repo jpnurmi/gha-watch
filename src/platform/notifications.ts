@@ -6,23 +6,24 @@ import {
   removeAllActive,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
-import type { WatchNotification } from "../app/watchNotification";
+import type { DesktopNotificationActionId, WatchNotification } from "../app/watchNotification";
 
-export type DesktopNotificationClick = {
+export type DesktopNotificationAction = {
   watchId: string;
-  url: string;
+  action: DesktopNotificationActionId;
+  url?: string;
 };
 
 export type DesktopNotificationDeps = {
   isPermissionGranted(): Promise<boolean>;
   requestPermission(): Promise<NotificationPermission>;
   showNotification(notification: WatchNotification): Promise<void>;
-  listenToNotificationClicks?(listener: (payload: unknown) => void): Promise<() => void>;
+  listenToNotificationActions?(listener: (payload: unknown) => void): Promise<() => void>;
   cancelAllNotifications?(): Promise<void>;
   removeAllActiveNotifications?(): Promise<void>;
 };
 
-const notificationClickEvent = "desktop-notification-clicked";
+const notificationActionEvent = "desktop-notification-action";
 
 export class NotificationPermissionDeniedError extends Error {
   readonly code = "notification-permission-denied";
@@ -39,8 +40,8 @@ const desktopNotificationDeps: DesktopNotificationDeps = {
   async showNotification(notification) {
     await invoke("show_desktop_notification", { notification });
   },
-  async listenToNotificationClicks(listener) {
-    return listen<unknown>(notificationClickEvent, (event) => {
+  async listenToNotificationActions(listener) {
+    return listen<unknown>(notificationActionEvent, (event) => {
       listener(event.payload);
     });
   },
@@ -75,25 +76,54 @@ export async function clearDesktopNotifications(
   ]);
 }
 
-export async function listenForDesktopNotificationClicks(
-  onClick: (click: DesktopNotificationClick) => void,
+export async function listenForDesktopNotificationActions(
+  onAction: (action: DesktopNotificationAction) => void,
   deps: DesktopNotificationDeps = desktopNotificationDeps,
 ): Promise<() => void> {
   return (
-    deps.listenToNotificationClicks?.((payload) => {
-      if (isDesktopNotificationClick(payload)) {
-        onClick(payload);
+    deps.listenToNotificationActions?.((payload) => {
+      if (isDesktopNotificationAction(payload)) {
+        onAction(payload);
       }
     }) ?? Promise.resolve(() => {})
   );
 }
 
-function isDesktopNotificationClick(payload: unknown): payload is DesktopNotificationClick {
+export function isDesktopNotificationAction(payload: unknown): payload is DesktopNotificationAction {
   if (!payload || typeof payload !== "object") {
     return false;
   }
 
-  const click = payload as Record<string, unknown>;
+  const action = payload as Record<string, unknown>;
+  const keys = Object.keys(action);
 
-  return typeof click.watchId === "string" && click.watchId.length > 0 && typeof click.url === "string";
+  return keys.every((key) => key === "watchId" || key === "action" || key === "url") &&
+    typeof action.watchId === "string" &&
+    action.watchId.trim() === action.watchId &&
+    action.watchId.length > 0 &&
+    isDesktopNotificationActionId(action.action) &&
+    (action.url === undefined ||
+      (typeof action.url === "string" && isVerifiedGitHubNotificationUrl(action.url)));
+}
+
+export function isVerifiedGitHubNotificationUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+
+    return parsed.protocol === "https:" &&
+      parsed.hostname === "github.com" &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      pathParts.length >= 2;
+  } catch {
+    return false;
+  }
+}
+
+function isDesktopNotificationActionId(action: unknown): action is DesktopNotificationActionId {
+  return action === "open" ||
+    action === "rerun-failed" ||
+    action === "save" ||
+    action === "done";
 }

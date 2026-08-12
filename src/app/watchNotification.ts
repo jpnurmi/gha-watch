@@ -1,6 +1,13 @@
 import type { PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
-import { getWatchId, type WatchRecord } from "../domain/watches";
+import { getWatchId, getWatchTriageState, type WatchRecord, type WatchTriageState } from "../domain/watches";
 import { createPopupViewModel } from "./viewModel";
+
+export type DesktopNotificationActionId = "open" | "rerun-failed" | "save" | "done";
+
+export type WatchNotificationAction = {
+  id: Exclude<DesktopNotificationActionId, "open">;
+  label: string;
+};
 
 export type WatchNotification = {
   watchId: string;
@@ -12,6 +19,7 @@ export type WatchNotification = {
   timeoutMs?: number;
   summary?: string;
   group?: string;
+  actions: WatchNotificationAction[];
 };
 
 const transientNotificationTimeoutMs = 15_000;
@@ -40,6 +48,7 @@ export function createWatchNotification(
     ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary: repoLabel,
     group: repoLabel,
+    actions: getNotificationActions(row.canRerunFailed, row.triageState),
   };
 }
 
@@ -70,6 +79,10 @@ export function createPullRequestNotification(
     ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary,
     group: summary,
+    actions: getNotificationActions(
+      node.tone === "failure" || node.hasFailedChildren,
+      getNotificationTriageState(sourceWatches, getPullRequestNotificationId(source)),
+    ),
   };
 }
 
@@ -99,7 +112,33 @@ export function createWorkflowNotification(
     ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary: repoLabel,
     group: repoLabel,
+    actions: getNotificationActions(
+      node.tone === "failure" || node.hasFailedChildren,
+      getNotificationTriageState(sourceWatches, getWatchId(source)),
+    ),
   };
+}
+
+function getNotificationActions(
+  canRerunFailed: boolean,
+  triageState: WatchTriageState,
+): WatchNotificationAction[] {
+  return [
+    ...(canRerunFailed
+      ? [{ id: "rerun-failed" as const, label: "Re-run failed" }]
+      : []),
+    triageState === "saved"
+      ? { id: "done", label: "Done" }
+      : { id: "save", label: "Save" },
+  ];
+}
+
+function getNotificationTriageState(
+  watches: WatchRecord[],
+  watchId: string,
+): WatchTriageState {
+  const watch = watches.find((item) => item.id === watchId);
+  return watch ? getWatchTriageState(watch) : "inbox";
 }
 
 export function getPullRequestNotificationStatus(

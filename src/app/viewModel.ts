@@ -358,7 +358,7 @@ function canRerun(watch: WatchRecord): boolean {
     state.conclusion !== "skipped";
 }
 
-function canRerunFailed(watch: WatchRecord): boolean {
+export function canRerunFailed(watch: WatchRecord): boolean {
   const state = getWatchState(watch);
 
   return state?.status === "completed" &&

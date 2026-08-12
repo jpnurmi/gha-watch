@@ -1,12 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Mutex;
+use std::{collections::HashSet, sync::Mutex};
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 use notify_rust::{Notification as NativeNotification, Timeout, Urgency};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSView;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
 use tauri::Emitter;
 #[cfg(any(not(target_os = "linux"), test))]
 use tauri::PhysicalPosition;
@@ -20,10 +19,9 @@ use tauri::{
 #[cfg(any(target_os = "macos", test))]
 use tauri::{LogicalPosition, Monitor, PhysicalRect, PhysicalSize};
 #[cfg(windows)]
-use tauri_plugin_notification::NotificationExt;
+use tauri_winrt_notification::{Duration as ToastDuration, Scenario as ToastScenario, Toast};
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-const DESKTOP_NOTIFICATION_CLICKED_EVENT: &str = "desktop-notification-clicked";
+const DESKTOP_NOTIFICATION_ACTION_EVENT: &str = "desktop-notification-action";
 #[cfg(target_os = "macos")]
 const MACOS_POPUP_CORNER_RADIUS: f64 = 12.0;
 #[cfg(target_os = "linux")]
@@ -59,23 +57,37 @@ struct TrayIndicatorIconKey {
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopNotification {
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     watch_id: String,
     title: String,
     body: String,
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     url: String,
     persistent: bool,
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     timeout_ms: Option<u64>,
+    actions: Vec<DesktopNotificationActionDefinition>,
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DesktopNotificationActionDefinition {
+    id: DesktopNotificationActionId,
+    label: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum DesktopNotificationActionId {
+    Open,
+    RerunFailed,
+    Save,
+    Done,
+}
+
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DesktopNotificationClick {
+struct DesktopNotificationAction {
     watch_id: String,
-    url: String,
+    action: DesktopNotificationActionId,
+    url: Option<String>,
 }
 
 #[tauri::command]
@@ -130,7 +142,96 @@ fn show_desktop_notification(
     app: AppHandle,
     notification: DesktopNotification,
 ) -> Result<(), String> {
+    validate_desktop_notification(&notification)?;
     show_clickable_notification(app, notification)
+}
+
+fn validate_desktop_notification(notification: &DesktopNotification) -> Result<(), String> {
+    if notification.watch_id.trim().is_empty()
+        || notification.watch_id.trim() != notification.watch_id
+    {
+        return Err("The desktop notification watch ID is invalid.".to_string());
+    }
+
+    if !is_verified_github_url(&notification.url) {
+        return Err("The desktop notification URL is invalid.".to_string());
+    }
+
+    if notification.actions.len() > 2 {
+        return Err("Desktop notifications support at most two custom actions.".to_string());
+    }
+
+    let mut action_ids = HashSet::new();
+
+    for action in &notification.actions {
+        if action.id == DesktopNotificationActionId::Open
+            || action.label != action.id.expected_label()
+            || !action_ids.insert(action.id)
+        {
+            return Err("The desktop notification actions are invalid.".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+fn is_verified_github_url(url: &str) -> bool {
+    let Some(path) = url.strip_prefix("https://github.com/") else {
+        return false;
+    };
+
+    !url.chars().any(char::is_whitespace)
+        && path
+            .split(['/', '?', '#'])
+            .filter(|part| !part.is_empty())
+            .take(2)
+            .count()
+            == 2
+}
+
+impl DesktopNotificationActionId {
+    fn expected_label(self) -> &'static str {
+        match self {
+            Self::Open => "Open",
+            Self::RerunFailed => "Re-run failed",
+            Self::Save => "Save",
+            Self::Done => "Done",
+        }
+    }
+
+    fn from_native_id(action: &str) -> Option<Self> {
+        match action {
+            "open" | "default" => Some(Self::Open),
+            "rerun-failed" => Some(Self::RerunFailed),
+            "save" => Some(Self::Save),
+            "done" => Some(Self::Done),
+            _ => None,
+        }
+    }
+
+    fn native_id(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::RerunFailed => "rerun-failed",
+            Self::Save => "save",
+            Self::Done => "done",
+        }
+    }
+}
+
+fn emit_desktop_notification_action(
+    app: &AppHandle,
+    notification: &DesktopNotification,
+    action: DesktopNotificationActionId,
+) {
+    let _ = app.emit(
+        DESKTOP_NOTIFICATION_ACTION_EVENT,
+        DesktopNotificationAction {
+            watch_id: notification.watch_id.clone(),
+            action,
+            url: Some(notification.url.clone()),
+        },
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -154,22 +255,50 @@ fn show_clickable_notification(
             });
         }
 
-        let response = mac_notification_sys::Notification::new()
+        let action_labels = notification
+            .actions
+            .iter()
+            .map(|action| action.label.as_str())
+            .collect::<Vec<_>>();
+        let mut native = mac_notification_sys::Notification::new();
+        native
             .title(&notification.title)
             .message(&notification.body)
-            .wait_for_click(true)
-            .send();
+            .wait_for_click(true);
+
+        match action_labels.as_slice() {
+            [label] => {
+                native.main_button(mac_notification_sys::MainButton::SingleAction(label));
+            }
+            [_, _, ..] => {
+                native.main_button(mac_notification_sys::MainButton::DropdownActions(
+                    "Actions",
+                    &action_labels,
+                ));
+            }
+            [] => {}
+        }
+
+        let response = native.send();
 
         match response {
-            Ok(mac_notification_sys::NotificationResponse::Click)
-            | Ok(mac_notification_sys::NotificationResponse::ActionButton(_)) => {
-                let _ = app.emit(
-                    DESKTOP_NOTIFICATION_CLICKED_EVENT,
-                    DesktopNotificationClick {
-                        watch_id: notification.watch_id,
-                        url: notification.url,
-                    },
+            Ok(mac_notification_sys::NotificationResponse::Click) => {
+                emit_desktop_notification_action(
+                    &app,
+                    &notification,
+                    DesktopNotificationActionId::Open,
                 );
+                dismiss_macos_notification(&notification.title, &notification.body);
+            }
+            Ok(mac_notification_sys::NotificationResponse::ActionButton(label)) => {
+                if let Some(action) = notification
+                    .actions
+                    .iter()
+                    .find(|action| action.label == label)
+                {
+                    emit_desktop_notification_action(&app, &notification, action.id);
+                    dismiss_macos_notification(&notification.title, &notification.body);
+                }
             }
             Ok(_) => {}
             Err(error) => {
@@ -210,6 +339,18 @@ fn show_clickable_notification(
     native.summary(&notification.title).body(&notification.body);
     native.action("default", "Open");
 
+    let supports_custom_actions = notify_rust::get_capabilities().is_ok_and(|capabilities| {
+        capabilities
+            .iter()
+            .any(|capability| capability == "actions")
+    });
+
+    if supports_custom_actions {
+        for action in &notification.actions {
+            native.action(action.id.native_id(), &action.label);
+        }
+    }
+
     if notification.persistent {
         native.timeout(Timeout::Never).urgency(Urgency::Critical);
     } else {
@@ -225,14 +366,18 @@ fn show_clickable_notification(
     let handle = native.show().map_err(|error| error.to_string())?;
     std::thread::spawn(move || {
         handle.wait_for_action(|action| {
-            if action == "default" {
-                let _ = app.emit(
-                    DESKTOP_NOTIFICATION_CLICKED_EVENT,
-                    DesktopNotificationClick {
-                        watch_id: notification.watch_id,
-                        url: notification.url,
-                    },
-                );
+            let action_id = DesktopNotificationActionId::from_native_id(action);
+            let is_registered = action_id == Some(DesktopNotificationActionId::Open)
+                || (supports_custom_actions
+                    && action_id.is_some_and(|id| {
+                        notification
+                            .actions
+                            .iter()
+                            .any(|registered| registered.id == id)
+                    }));
+
+            if let Some(action_id) = action_id.filter(|_| is_registered) {
+                emit_desktop_notification_action(&app, &notification, action_id);
             }
         });
     });
@@ -245,25 +390,48 @@ fn show_clickable_notification(
     app: AppHandle,
     notification: DesktopNotification,
 ) -> Result<(), String> {
-    if !notification.persistent {
-        return app
-            .notification()
-            .builder()
-            .title(notification.title)
-            .body(notification.body)
-            .show()
-            .map_err(|error| error.to_string());
+    let app_id = if tauri::is_dev() {
+        Toast::POWERSHELL_APP_ID.to_string()
+    } else {
+        app.config().identifier.clone()
+    };
+    let activation_notification = notification.clone();
+    let activation_app = app.clone();
+    let mut toast = Toast::new(&app_id)
+        .title(&notification.title)
+        .text1(&notification.body)
+        .duration(if notification.persistent {
+            ToastDuration::Long
+        } else {
+            ToastDuration::Short
+        })
+        .on_activated(move |native_action| {
+            let action = native_action
+                .as_deref()
+                .and_then(DesktopNotificationActionId::from_native_id)
+                .unwrap_or(DesktopNotificationActionId::Open);
+            let is_registered = action == DesktopNotificationActionId::Open
+                || activation_notification
+                    .actions
+                    .iter()
+                    .any(|registered| registered.id == action);
+
+            if is_registered {
+                emit_desktop_notification_action(&activation_app, &activation_notification, action);
+            }
+
+            Ok(())
+        });
+
+    if notification.persistent {
+        toast = toast.scenario(ToastScenario::Reminder);
     }
 
-    let mut native = NativeNotification::new();
-    native.summary(&notification.title).body(&notification.body);
-    native.timeout(Timeout::Never).urgency(Urgency::Critical);
-
-    if !tauri::is_dev() {
-        native.app_id(&app.config().identifier);
+    for action in &notification.actions {
+        toast = toast.add_button(&action.label, action.id.native_id());
     }
 
-    native.show().map(|_| ()).map_err(|error| error.to_string())
+    toast.show().map_err(|error| error.to_string())
 }
 
 fn tray_icon_for_status(status: &str, has_unseen_changes: bool) -> Result<Image<'static>, String> {
@@ -997,6 +1165,27 @@ mod tests {
     use super::*;
     use tauri::{PhysicalRect, PhysicalSize};
 
+    fn desktop_notification(
+        actions: Vec<DesktopNotificationActionDefinition>,
+    ) -> DesktopNotification {
+        DesktopNotification {
+            watch_id: "getsentry/sentry/run/123".to_string(),
+            title: "CI".to_string(),
+            body: "Failed".to_string(),
+            url: "https://github.com/getsentry/sentry/actions/runs/123".to_string(),
+            persistent: true,
+            timeout_ms: None,
+            actions,
+        }
+    }
+
+    fn action(id: DesktopNotificationActionId, label: &str) -> DesktopNotificationActionDefinition {
+        DesktopNotificationActionDefinition {
+            id,
+            label: label.to_string(),
+        }
+    }
+
     fn physical_tray_rect(x: i32, y: i32, width: u32, height: u32) -> Rect {
         Rect {
             position: PhysicalPosition::new(x, y).into(),
@@ -1100,5 +1289,42 @@ mod tests {
         };
         assert_eq!(linux_resize_edge(230, 180, 460, 360, frame), None);
         assert_eq!(linux_resize_edge(230, 24, 460, 360, frame), None);
+    }
+
+    #[test]
+    fn validates_desktop_notification_actions() {
+        let notification = desktop_notification(vec![
+            action(DesktopNotificationActionId::RerunFailed, "Re-run failed"),
+            action(DesktopNotificationActionId::Save, "Save"),
+        ]);
+
+        assert!(validate_desktop_notification(&notification).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_desktop_notification_actions() {
+        let wrong_label = desktop_notification(vec![action(
+            DesktopNotificationActionId::Save,
+            "Run a command",
+        )]);
+        let open_button =
+            desktop_notification(vec![action(DesktopNotificationActionId::Open, "Open")]);
+        let duplicate = desktop_notification(vec![
+            action(DesktopNotificationActionId::Done, "Done"),
+            action(DesktopNotificationActionId::Done, "Done"),
+        ]);
+
+        assert!(validate_desktop_notification(&wrong_label).is_err());
+        assert!(validate_desktop_notification(&open_button).is_err());
+        assert!(validate_desktop_notification(&duplicate).is_err());
+        assert_eq!(DesktopNotificationActionId::from_native_id("archive"), None);
+    }
+
+    #[test]
+    fn rejects_untrusted_desktop_notification_urls() {
+        let mut notification = desktop_notification(Vec::new());
+        notification.url = "https://github.com.evil.example/getsentry/sentry".to_string();
+
+        assert!(validate_desktop_notification(&notification).is_err());
     }
 }

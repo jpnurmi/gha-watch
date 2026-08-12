@@ -295,6 +295,16 @@ function completedWorkflowRun(
 }
 
 describe("watchController", () => {
+  it("publishes a concise row error for a stale external action", () => {
+    const { deps, saves } = createDeps([]);
+    const controller = createWatchController(deps, [existingWatch()]);
+
+    controller.setWatchError(existingWatch().id, "Re-run failed is no longer available.");
+
+    expect(controller.getWatches()[0].error).toBe("Re-run failed is no longer available.");
+    expect(saves.at(-1)?.[0].error).toBe("Re-run failed is no longer available.");
+  });
+
   it("replaces saved and Done watches from sync while preserving local inbox watches", () => {
     const { deps, saves } = createDeps([]);
     const localSaved: WatchRecord = {
@@ -2529,6 +2539,7 @@ describe("watchController", () => {
         timeoutMs: 15_000,
         summary: "getsentry/sentry",
         group: "getsentry/sentry",
+        actions: [{ id: "save", label: "Save" }],
       },
     ]);
   });

@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { WatchNotification } from "../app/watchNotification";
 import {
   clearDesktopNotifications,
-  listenForDesktopNotificationClicks,
+  isDesktopNotificationAction,
+  listenForDesktopNotificationActions,
   sendDesktopNotification,
-  type DesktopNotificationClick,
+  type DesktopNotificationAction,
   type DesktopNotificationDeps,
 } from "./notifications";
 
@@ -18,6 +19,9 @@ function notification(overrides: Partial<WatchNotification> = {}): WatchNotifica
     summary: "jpnurmi/gha",
     group: "jpnurmi/gha",
     persistent: true,
+    actions: [
+      { id: "save", label: "Save" },
+    ],
     ...overrides,
   };
 }
@@ -43,8 +47,8 @@ describe("sendDesktopNotification", () => {
   });
 
   it("listens for native notification click events", async () => {
-    const clicks: DesktopNotificationClick[] = [];
-    let emitClick: ((payload: unknown) => void) | undefined;
+    const actions: DesktopNotificationAction[] = [];
+    let emitAction: ((payload: unknown) => void) | undefined;
     const unlisten = vi.fn();
     const deps: DesktopNotificationDeps = {
       async isPermissionGranted() {
@@ -54,25 +58,27 @@ describe("sendDesktopNotification", () => {
         return "denied";
       },
       async showNotification() {},
-      async listenToNotificationClicks(listener) {
-        emitClick = listener;
+      async listenToNotificationActions(listener) {
+        emitAction = listener;
         return unlisten;
       },
     };
 
-    const stopListening = await listenForDesktopNotificationClicks((click) => {
-      clicks.push(click);
+    const stopListening = await listenForDesktopNotificationActions((action) => {
+      actions.push(action);
     }, deps);
 
-    emitClick?.({
+    emitAction?.({
       watchId: "jpnurmi/gha/job/456",
+      action: "open",
       url: "https://github.com/jpnurmi/gha/actions/runs/123/job/456",
     });
     stopListening();
 
-    expect(clicks).toEqual([
+    expect(actions).toEqual([
       {
         watchId: "jpnurmi/gha/job/456",
+        action: "open",
         url: "https://github.com/jpnurmi/gha/actions/runs/123/job/456",
       },
     ]);
@@ -80,8 +86,8 @@ describe("sendDesktopNotification", () => {
   });
 
   it("ignores malformed native notification click events", async () => {
-    const clicks: DesktopNotificationClick[] = [];
-    let emitClick: ((payload: unknown) => void) | undefined;
+    const actions: DesktopNotificationAction[] = [];
+    let emitAction: ((payload: unknown) => void) | undefined;
     const unlisten = () => {};
     const deps: DesktopNotificationDeps = {
       async isPermissionGranted() {
@@ -91,18 +97,36 @@ describe("sendDesktopNotification", () => {
         return "denied";
       },
       async showNotification() {},
-      async listenToNotificationClicks(listener) {
-        emitClick = listener;
+      async listenToNotificationActions(listener) {
+        emitAction = listener;
         return unlisten;
       },
     };
 
-    await listenForDesktopNotificationClicks((click) => {
-      clicks.push(click);
+    await listenForDesktopNotificationActions((action) => {
+      actions.push(action);
     }, deps);
-    emitClick?.({ watchId: "jpnurmi/gha/job/456" });
+    emitAction?.({ watchId: "jpnurmi/gha/job/456", action: "archive" });
+    emitAction?.({ watchId: "jpnurmi/gha/job/456", action: "open", command: "gh run rerun" });
+    emitAction?.({
+      watchId: "jpnurmi/gha/job/456",
+      action: "open",
+      url: "https://github.com.evil.example/jpnurmi/gha",
+    });
 
-    expect(clicks).toEqual([]);
+    expect(actions).toEqual([]);
+  });
+
+  it("accepts only the typed action payload shape", () => {
+    expect(isDesktopNotificationAction({
+      watchId: "jpnurmi/gha/job/456",
+      action: "done",
+    })).toBe(true);
+    expect(isDesktopNotificationAction({
+      watchId: " jpnurmi/gha/job/456",
+      action: "done",
+    })).toBe(false);
+    expect(isDesktopNotificationAction(null)).toBe(false);
   });
 
   it("passes transient notifications through the native bridge", async () => {

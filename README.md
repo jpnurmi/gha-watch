@@ -20,6 +20,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Show queued, in-progress, successful, failed, cancelled, and errored states.
 - Mark unseen status changes with a blue indicator.
 - Re-run all jobs or only failed jobs for workflow runs and pull requests.
+- Open, save, finish, or re-run failures directly from completion notifications when the desktop supports notification actions.
 - Clear finished watches or clear all watches from the menu.
 - Automatically retain Done history for one month, capped at the 100 newest items.
 - Open watched runs or jobs in GitHub.
@@ -33,6 +34,8 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 ```sh
 gh auth login
 ```
+
+Notification action placement varies by platform. Open remains the default notification click; macOS may place additional actions in a menu, Windows exposes toast buttons, and Linux actions depend on the notification daemon's capabilities. The same actions remain available in the popup when a desktop does not display them.
 
 On Windows and Linux, tray and notification behavior depends on the desktop environment, notification daemon, and tray support.
 

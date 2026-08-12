@@ -44,6 +44,7 @@ describe("createWatchNotification", () => {
       group: "getsentry/sentry",
       persistent: false,
       timeoutMs: 15_000,
+      actions: [{ id: "save", label: "Save" }],
     });
   });
 
@@ -93,8 +94,20 @@ describe("createWatchNotification", () => {
 
     expect(notification).toMatchObject({
       persistent: true,
+      actions: [
+        { id: "rerun-failed", label: "Re-run failed" },
+        { id: "save", label: "Save" },
+      ],
     });
     expect(notification).not.toHaveProperty("timeoutMs");
+  });
+
+  it("offers Done instead of Save for an already saved watch", () => {
+    expect(
+      createWatchNotification(watch({ triageState: "saved" })),
+    ).toMatchObject({
+      actions: [{ id: "done", label: "Done" }],
+    });
   });
 
   it("uses the exact watched URL for notification clicks", () => {

@@ -14,4 +14,12 @@ describe("macOS notification configuration", () => {
     expect(rustSource).toContain("dismiss_macos_notification(&title, &body)");
     expect(rustSource).toContain("center.removeDeliveredNotification(&notification)");
   });
+
+  it("keeps content click as Open and maps validated action labels", () => {
+    expect(rustSource).toContain("mac_notification_sys::MainButton::SingleAction(label)");
+    expect(rustSource).toContain("mac_notification_sys::MainButton::DropdownActions(");
+    expect(rustSource).toContain("DesktopNotificationActionId::Open");
+    expect(rustSource).toContain(".find(|action| action.label == label)");
+    expect(rustSource).toContain("emit_desktop_notification_action(&app, &notification, action.id)");
+  });
 });
