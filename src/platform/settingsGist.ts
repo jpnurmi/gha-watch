@@ -126,6 +126,7 @@ export function serializeSettingsDocument(state: SyncedState): string {
     format: settingsFormat,
     version: settingsFormatVersion,
     settings: {
+      globalAddShortcut: normalized.globalAddShortcut,
       watchedRepos: normalized.watchedRepos.map(({ repoIconUrl: _repoIconUrl, ...repo }) => repo),
       repoOrder: normalized.repoOrder,
     },

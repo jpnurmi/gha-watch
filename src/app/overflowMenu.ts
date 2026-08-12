@@ -1,6 +1,6 @@
 export type OverflowMenuItem =
   | {
-      action: "toggle-autostart";
+      action: "toggle-autostart" | "toggle-global-add-shortcut";
       checked: boolean;
       checkbox: "checked" | "empty";
       disabled: boolean;
@@ -8,7 +8,7 @@ export type OverflowMenuItem =
       label: string;
     }
   | {
-      action: "clear-done" | "done-all" | "done-finished";
+      action: "add-from-clipboard" | "clear-done" | "done-all" | "done-finished";
       disabled: boolean;
       kind: "action";
       label: string;
@@ -17,6 +17,7 @@ export type OverflowMenuItem =
 export type OverflowMenuOptions = {
   autoStartEnabled: boolean;
   autoStartBusy: boolean;
+  globalAddShortcutEnabled: boolean;
   hasWatches: boolean;
   hasFinishedWatches: boolean;
   isDoneView: boolean;
@@ -48,6 +49,12 @@ export function getOverflowMenuItems(options: OverflowMenuOptions): OverflowMenu
       ];
 
   return [
+    {
+      action: "add-from-clipboard",
+      disabled: false,
+      kind: "action",
+      label: "Add from clipboard",
+    },
     ...triageActions,
     {
       action: "toggle-autostart",
@@ -56,6 +63,14 @@ export function getOverflowMenuItems(options: OverflowMenuOptions): OverflowMenu
       disabled: options.autoStartBusy,
       kind: "checkbox",
       label: "Auto-start",
+    },
+    {
+      action: "toggle-global-add-shortcut",
+      checked: options.globalAddShortcutEnabled,
+      checkbox: options.globalAddShortcutEnabled ? "checked" : "empty",
+      disabled: false,
+      kind: "checkbox",
+      label: "Global add shortcut",
     },
   ];
 }

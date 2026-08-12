@@ -29,6 +29,10 @@ const savedWatch: WatchRecord = {
 
 const state: SyncedState = {
   settings: {
+    globalAddShortcut: {
+      accelerator: "CommandOrControl+Shift+G",
+      enabled: false,
+    },
     watchedRepos: [
       { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "user" },
     ],

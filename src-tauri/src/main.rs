@@ -297,6 +297,11 @@ fn show_main_window(app: &AppHandle, tray_rect: Option<Rect>) {
     }
 }
 
+#[tauri::command]
+fn show_main_window_for_shortcut(app: AppHandle) {
+    show_main_window(&app, None);
+}
+
 fn toggle_main_window(app: &AppHandle, tray_rect: Rect) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -785,6 +790,8 @@ fn main() {
     );
 
     builder
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
@@ -799,7 +806,8 @@ fn main() {
         .manage(TrayIndicatorState::default())
         .invoke_handler(tauri::generate_handler![
             set_tray_indicator,
-            show_desktop_notification
+            show_desktop_notification,
+            show_main_window_for_shortcut
         ])
         .on_window_event(|window, event| match event {
             #[cfg(target_os = "linux")]

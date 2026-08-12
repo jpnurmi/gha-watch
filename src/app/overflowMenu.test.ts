@@ -7,11 +7,12 @@ describe("getOverflowMenuItems", () => {
       getOverflowMenuItems({
         autoStartEnabled: true,
         autoStartBusy: false,
+        globalAddShortcutEnabled: false,
         hasWatches: true,
         hasFinishedWatches: true,
         isDoneView: false,
       }).map((item) => item.action),
-    ).toEqual(["done-all", "done-finished", "toggle-autostart"]);
+    ).toEqual(["add-from-clipboard", "done-all", "done-finished", "toggle-autostart", "toggle-global-add-shortcut"]);
   });
 
   it("shows Auto-start as a checkable menu item", () => {
@@ -19,10 +20,11 @@ describe("getOverflowMenuItems", () => {
       getOverflowMenuItems({
         autoStartEnabled: false,
         autoStartBusy: false,
+        globalAddShortcutEnabled: false,
         hasWatches: true,
         hasFinishedWatches: true,
         isDoneView: false,
-      }).slice(2),
+      }).slice(3),
     ).toEqual([
       {
         action: "toggle-autostart",
@@ -32,6 +34,14 @@ describe("getOverflowMenuItems", () => {
         kind: "checkbox",
         label: "Auto-start",
       },
+      {
+        action: "toggle-global-add-shortcut",
+        checked: false,
+        checkbox: "empty",
+        disabled: false,
+        kind: "checkbox",
+        label: "Global add shortcut",
+      },
     ]);
   });
 
@@ -40,11 +50,18 @@ describe("getOverflowMenuItems", () => {
       getOverflowMenuItems({
         autoStartEnabled: false,
         autoStartBusy: true,
+        globalAddShortcutEnabled: false,
         hasWatches: false,
         hasFinishedWatches: false,
         isDoneView: false,
       }),
     ).toEqual([
+      {
+        action: "add-from-clipboard",
+        disabled: false,
+        kind: "action",
+        label: "Add from clipboard",
+      },
       {
         action: "done-all",
         disabled: true,
@@ -65,6 +82,14 @@ describe("getOverflowMenuItems", () => {
         kind: "checkbox",
         label: "Auto-start",
       },
+      {
+        action: "toggle-global-add-shortcut",
+        checked: false,
+        checkbox: "empty",
+        disabled: false,
+        kind: "checkbox",
+        label: "Global add shortcut",
+      },
     ]);
   });
 
@@ -72,12 +97,18 @@ describe("getOverflowMenuItems", () => {
     const items = getOverflowMenuItems({
       autoStartEnabled: false,
       autoStartBusy: false,
+      globalAddShortcutEnabled: false,
       hasWatches: true,
       hasFinishedWatches: false,
       isDoneView: true,
     });
 
-    expect(items.map((item) => item.action)).toEqual(["clear-done", "toggle-autostart"]);
-    expect(items[0]).toMatchObject({ label: "Clear all done" });
+    expect(items.map((item) => item.action)).toEqual([
+      "add-from-clipboard",
+      "clear-done",
+      "toggle-autostart",
+      "toggle-global-add-shortcut",
+    ]);
+    expect(items[1]).toMatchObject({ label: "Clear all done" });
   });
 });

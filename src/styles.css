@@ -254,7 +254,8 @@ input {
   top: 34px;
   right: 0;
   display: grid;
-  min-width: 168px;
+  width: min(286px, calc(100vw - 24px));
+  min-width: 220px;
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 14%);
   border-radius: 8px;
@@ -311,7 +312,8 @@ input {
   display: block;
 }
 
-.clear-menu-popover button:hover:not(:disabled) {
+.clear-menu-popover button:hover:not(:disabled),
+.clear-menu-popover button:focus-visible:not(:disabled) {
   background: #2d3642;
   color: #ffffff;
 }
@@ -319,6 +321,68 @@ input {
 .clear-menu-popover button:disabled {
   color: rgb(216 222 231 / 36%);
   cursor: default;
+}
+
+.global-shortcut-setting {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  padding: 9px 11px 10px;
+  color: rgb(216 222 231 / 72%);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.global-shortcut-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.global-shortcut-field input {
+  min-width: 0;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 5px;
+  padding: 6px 7px;
+  outline: none;
+  background: #151b23;
+  color: #eef1f5;
+  font: inherit;
+}
+
+.global-shortcut-field input:focus-visible {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgb(88 166 255 / 16%);
+}
+
+.clear-menu-popover .global-shortcut-apply {
+  width: auto;
+  border: 1px solid rgb(88 166 255 / 28%);
+  border-radius: 5px;
+  padding: 6px 8px;
+  color: #79c0ff;
+  text-align: center;
+}
+
+.global-shortcut-status {
+  color: rgb(216 222 231 / 55%);
+  font-size: 10px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.global-shortcut-status.is-error {
+  color: #ff7b72;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .watch-action-button {
