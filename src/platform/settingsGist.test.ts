@@ -1,17 +1,40 @@
 import { describe, expect, it } from "vitest";
-import type { AppSettings } from "../domain/settings";
+import type { WatchRecord } from "../domain/watches";
 import type { ShellExecutor, ShellResult } from "./gh";
 import {
   createSettingsGistRemote,
+  normalizeSyncedWatches,
   parseSettingsDocument,
   serializeSettingsDocument,
+  type SyncedState,
 } from "./settingsGist";
 
-const settings: AppSettings = {
-  watchedRepos: [
-    { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "user" },
-  ],
-  repoOrder: ["jpnurmi/gha-watch"],
+const savedWatch: WatchRecord = {
+  id: "jpnurmi/gha-watch/run/123",
+  target: {
+    kind: "run",
+    owner: "jpnurmi",
+    repo: "gha-watch",
+    runId: "123",
+    url: "https://github.com/jpnurmi/gha-watch/actions/runs/123",
+  },
+  label: "CI",
+  status: "completed:success",
+  lastSeenStatus: "completed:success",
+  lastState: { status: "completed", conclusion: "success" },
+  triageState: "saved",
+  active: false,
+  error: undefined,
+};
+
+const state: SyncedState = {
+  settings: {
+    watchedRepos: [
+      { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "user" },
+    ],
+    repoOrder: ["jpnurmi/gha-watch"],
+  },
+  watches: [savedWatch],
 };
 
 function createSequenceExecutor(results: ShellResult[]): {
@@ -72,7 +95,7 @@ describe("settings Gist", () => {
           id: "newer",
           files: {
             "gha-watch-settings.json": {
-              content: serializeSettingsDocument(settings),
+              content: serializeSettingsDocument(state),
             },
           },
         }),
@@ -80,7 +103,7 @@ describe("settings Gist", () => {
       },
     ]);
 
-    await expect(createSettingsGistRemote(executor).load()).resolves.toEqual(settings);
+    await expect(createSettingsGistRemote(executor).load()).resolves.toEqual(state);
     expect(calls).toEqual([
       {
         program: "gh",
@@ -100,11 +123,14 @@ describe("settings Gist", () => {
     ]);
 
     await createSettingsGistRemote(executor).save({
-      ...settings,
-      watchedRepos: settings.watchedRepos.map((repo) => ({
-        ...repo,
-        repoIconUrl: "https://avatars.example/jpnurmi.png",
-      })),
+      settings: {
+        ...state.settings,
+        watchedRepos: state.settings.watchedRepos.map((repo) => ({
+          ...repo,
+          repoIconUrl: "https://avatars.example/jpnurmi.png",
+        })),
+      },
+      watches: [{ ...savedWatch, repoIconUrl: "https://avatars.example/watch.png" }],
     });
 
     expect(calls[1]).toMatchObject({
@@ -144,7 +170,7 @@ describe("settings Gist", () => {
         stdout: JSON.stringify({
           id: "existing",
           files: {
-            "gha-watch-settings.json": { content: serializeSettingsDocument(settings) },
+            "gha-watch-settings.json": { content: serializeSettingsDocument(state) },
           },
         }),
         stderr: "",
@@ -152,7 +178,7 @@ describe("settings Gist", () => {
     ]);
     const remote = createSettingsGistRemote(executor);
 
-    await remote.save(settings);
+    await remote.save(state);
     await remote.load();
 
     expect(calls).toHaveLength(3);
@@ -168,13 +194,34 @@ describe("settings Gist", () => {
   });
 
   it("rejects unrelated or unsupported documents", () => {
-    expect(() => parseSettingsDocument(JSON.stringify({ settings }))).toThrow(
+    expect(() => parseSettingsDocument(JSON.stringify({ settings: state.settings }))).toThrow(
       "unsupported format",
     );
     expect(() => parseSettingsDocument(JSON.stringify({
       format: "dev.jpnurmi.gha-watch/settings",
       version: 2,
-      settings,
+      settings: state.settings,
     }))).toThrow("unsupported version");
+  });
+
+  it("loads older settings-only documents with empty synced history", () => {
+    expect(parseSettingsDocument(JSON.stringify({
+      format: "dev.jpnurmi.gha-watch/settings",
+      version: 1,
+      settings: state.settings,
+    }))).toEqual({
+      settings: state.settings,
+      watches: [],
+      historyInitialized: false,
+    });
+  });
+
+  it("ignores malformed and inbox watch records", () => {
+    expect(normalizeSyncedWatches([
+      savedWatch,
+      { ...savedWatch, id: "wrong" },
+      { ...savedWatch, triageState: "inbox" },
+      { ...savedWatch, target: { kind: "run" } },
+    ])).toEqual([savedWatch]);
   });
 });

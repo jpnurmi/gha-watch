@@ -1,90 +1,153 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AppSettings } from "../domain/settings";
-import type { SettingsRemote } from "../platform/settingsGist";
-import { createSettingsSync, restoreLocalRepoIcons, toSyncedSettings } from "./settingsSync";
+import type { WatchRecord, WatchTriageState } from "../domain/watches";
+import type { SettingsRemote, SyncedState } from "../platform/settingsGist";
+import { createSettingsSync, restoreLocalCaches, toSyncedState } from "./settingsSync";
 
-const localSettings: AppSettings = {
-  watchedRepos: [
-    {
+function watch(id: string, triageState: WatchTriageState, repoIconUrl?: string): WatchRecord {
+  return {
+    id: `jpnurmi/gha-watch/run/${id}`,
+    target: {
+      kind: "run",
       owner: "jpnurmi",
       repo: "gha-watch",
-      repoIconUrl: "https://avatars.example/jpnurmi.png",
-      pullRequestScope: "user",
+      runId: id,
+      url: `https://github.com/jpnurmi/gha-watch/actions/runs/${id}`,
     },
+    label: `Run ${id}`,
+    status: "completed:success",
+    lastSeenStatus: "completed:success",
+    lastState: { status: "completed", conclusion: "success" },
+    ...(repoIconUrl ? { repoIconUrl } : {}),
+    triageState,
+    ...(triageState === "done" ? { doneAt: "2026-08-10T00:00:00.000Z" } : {}),
+    active: false,
+    error: undefined,
+  };
+}
+
+const localState: SyncedState = {
+  settings: {
+    watchedRepos: [
+      {
+        owner: "jpnurmi",
+        repo: "gha-watch",
+        repoIconUrl: "https://avatars.example/jpnurmi.png",
+        pullRequestScope: "user",
+      },
+    ],
+    repoOrder: ["jpnurmi/gha-watch"],
+  },
+  watches: [
+    watch("1", "inbox"),
+    watch("2", "saved", "https://avatars.example/watch.png"),
   ],
-  repoOrder: ["jpnurmi/gha-watch"],
 };
 
-const remoteSettings: AppSettings = {
-  watchedRepos: [
-    { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "all" },
-    { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
-  ],
-  repoOrder: ["getsentry/sentry", "jpnurmi/gha-watch"],
+const remoteState: SyncedState = {
+  settings: {
+    watchedRepos: [
+      { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "all" },
+      { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+    ],
+    repoOrder: ["getsentry/sentry", "jpnurmi/gha-watch"],
+  },
+  watches: [watch("2", "done"), watch("3", "saved")],
 };
 
 describe("settings sync", () => {
-  it("uses the whole remote document while preserving local icon caches", async () => {
+  it("uses the whole remote state while preserving local icon caches", async () => {
     const remote: SettingsRemote = {
-      load: vi.fn(async () => remoteSettings),
+      load: vi.fn(async () => remoteState),
       save: vi.fn(async () => undefined),
     };
 
-    await expect(createSettingsSync(remote).sync(localSettings)).resolves.toEqual({
-      watchedRepos: [
-        {
-          owner: "jpnurmi",
-          repo: "gha-watch",
-          repoIconUrl: "https://avatars.example/jpnurmi.png",
-          pullRequestScope: "all",
-        },
-        { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+    await expect(createSettingsSync(remote).sync(localState)).resolves.toEqual({
+      settings: {
+        watchedRepos: [
+          {
+            owner: "jpnurmi",
+            repo: "gha-watch",
+            repoIconUrl: "https://avatars.example/jpnurmi.png",
+            pullRequestScope: "all",
+          },
+          { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+        ],
+        repoOrder: ["getsentry/sentry", "jpnurmi/gha-watch"],
+      },
+      watches: [
+        { ...watch("2", "done"), repoIconUrl: "https://avatars.example/watch.png" },
+        watch("3", "saved"),
       ],
-      repoOrder: ["getsentry/sentry", "jpnurmi/gha-watch"],
     });
     expect(remote.save).not.toHaveBeenCalled();
   });
 
-  it("creates the initial remote document without local icon caches", async () => {
+  it("creates the initial remote state without inbox watches or icon caches", async () => {
     const remote: SettingsRemote = {
       load: vi.fn(async () => undefined),
       save: vi.fn(async () => undefined),
     };
 
-    await createSettingsSync(remote).sync(localSettings);
+    await createSettingsSync(remote).sync(localState);
 
     expect(remote.save).toHaveBeenCalledWith({
-      watchedRepos: [
-        { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "user" },
-      ],
-      repoOrder: ["jpnurmi/gha-watch"],
+      settings: {
+        watchedRepos: [
+          { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "user" },
+        ],
+        repoOrder: ["jpnurmi/gha-watch"],
+      },
+      watches: [watch("2", "saved")],
     });
   });
 
+  it("seeds local history when upgrading a settings-only Gist", async () => {
+    const remote: SettingsRemote = {
+      load: vi.fn(async () => ({
+        settings: remoteState.settings,
+        watches: [],
+        historyInitialized: false,
+      })),
+      save: vi.fn(async () => undefined),
+    };
+
+    const synced = await createSettingsSync(remote).sync(localState);
+
+    expect(remote.save).toHaveBeenCalledWith({
+      settings: remoteState.settings,
+      watches: [watch("2", "saved")],
+    });
+    expect(synced.watches).toEqual([
+      { ...watch("2", "saved"), repoIconUrl: "https://avatars.example/watch.png" },
+    ]);
+  });
+
   it("keeps a failed explicit upload pending for the next sync", async () => {
-    let storedSettings: AppSettings | undefined;
+    let storedState: SyncedState | undefined;
     let shouldFail = true;
     const remote: SettingsRemote = {
       async load() {
-        return storedSettings;
+        return storedState;
       },
-      async save(settings) {
+      async save(state) {
         if (shouldFail) {
           shouldFail = false;
           throw new Error("offline");
         }
 
-        storedSettings = settings;
+        storedState = state;
       },
     };
     const sync = createSettingsSync(remote);
 
-    await expect(sync.push(localSettings)).rejects.toThrow("offline");
-    await expect(sync.sync(localSettings)).resolves.toEqual(localSettings);
-    expect(storedSettings).toEqual(toSyncedSettings(localSettings));
+    await expect(sync.push(localState)).rejects.toThrow("offline");
+    await expect(sync.sync(localState)).resolves.toEqual(
+      restoreLocalCaches(toSyncedState(localState), localState),
+    );
+    expect(storedState).toEqual(toSyncedState(localState));
   });
 
-  it("finishes rapid explicit uploads with the latest whole document", async () => {
+  it("finishes rapid explicit uploads with the latest whole state", async () => {
     let releaseFirstSave: (() => void) | undefined;
     let firstSaveStarted: (() => void) | undefined;
     const firstSave = new Promise<void>((resolve) => {
@@ -93,13 +156,13 @@ describe("settings sync", () => {
     const started = new Promise<void>((resolve) => {
       firstSaveStarted = resolve;
     });
-    const saved: AppSettings[] = [];
+    const saved: SyncedState[] = [];
     const remote: SettingsRemote = {
       async load() {
         return saved.at(-1);
       },
-      async save(settings) {
-        saved.push(settings);
+      async save(state) {
+        saved.push(state);
 
         if (saved.length === 1) {
           firstSaveStarted?.();
@@ -108,31 +171,29 @@ describe("settings sync", () => {
       },
     };
     const sync = createSettingsSync(remote);
-    const firstPush = sync.push(localSettings);
+    const firstPush = sync.push(localState);
     await started;
-    const secondPush = sync.push(remoteSettings);
+    const secondPush = sync.push(remoteState);
 
     releaseFirstSave?.();
     await Promise.all([firstPush, secondPush]);
 
-    expect(saved.at(-1)).toEqual(toSyncedSettings(remoteSettings));
+    expect(saved.at(-1)).toEqual(toSyncedState(remoteState));
   });
 });
 
 describe("settings sync helpers", () => {
-  it("strips repository icon caches from synced settings", () => {
-    expect(toSyncedSettings(localSettings).watchedRepos[0]).not.toHaveProperty("repoIconUrl");
+  it("keeps only saved and done watches in the remote state", () => {
+    expect(toSyncedState({
+      ...localState,
+      watches: [...localState.watches, watch("3", "done")],
+    }).watches).toEqual([watch("2", "saved"), watch("3", "done")]);
   });
 
-  it("restores icons only for repositories present on both machines", () => {
-    expect(restoreLocalRepoIcons(remoteSettings, localSettings).watchedRepos).toEqual([
-      {
-        owner: "jpnurmi",
-        repo: "gha-watch",
-        repoIconUrl: "https://avatars.example/jpnurmi.png",
-        pullRequestScope: "all",
-      },
-      { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+  it("restores icons only for matching remote records", () => {
+    expect(restoreLocalCaches(remoteState, localState).watches).toEqual([
+      { ...watch("2", "done"), repoIconUrl: "https://avatars.example/watch.png" },
+      watch("3", "saved"),
     ]);
   });
 });

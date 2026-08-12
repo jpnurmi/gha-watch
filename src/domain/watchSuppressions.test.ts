@@ -30,10 +30,10 @@ describe("watch suppressions", () => {
     expect(removeWatchSuppression(suppressions, "run-1")).toEqual([]);
   });
 
-  it("expires suppressions after five months", () => {
+  it("expires suppressions after one month", () => {
     const suppressions = [
-      { id: "expired", clearedAt: "2026-03-01T00:00:00.000Z" },
-      { id: "recent", clearedAt: "2026-04-01T00:00:00.000Z" },
+      { id: "expired", clearedAt: "2026-07-01T00:00:00.000Z" },
+      { id: "recent", clearedAt: "2026-07-15T00:00:00.000Z" },
     ];
 
     expect(

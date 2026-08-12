@@ -55,6 +55,7 @@ export type WatchControllerDeps = {
 
 export type WatchController = {
   add(target: ParsedWatchTarget): Promise<void>;
+  replaceSyncedWatches(watches: WatchRecord[]): void;
   setTriageState(ids: string[], state: WatchTriageState): void;
   reorderGroupWithinRepo(draggedIds: string[], targetIds: string[], position: WatchDropPosition): void;
   reorderWithinRepo(draggedId: string, targetId: string, position: WatchDropPosition): void;
@@ -129,6 +130,20 @@ export function createWatchController(
     watches = nextWatches;
     void deps.save(watches);
     emitChange();
+  }
+
+  function setWatchesWithDonePruning(nextWatches: WatchRecord[], now = getNow()): void {
+    const retainedWatches = clearExpiredDoneWatches(nextWatches, now);
+
+    if (retainedWatches !== nextWatches) {
+      const retainedIds = new Set(retainedWatches.map((watch) => watch.id));
+      const clearedIds = nextWatches
+        .filter((watch) => !retainedIds.has(watch.id))
+        .map((watch) => watch.id);
+      setSuppressions(addWatchSuppressions(suppressions, clearedIds, now));
+    }
+
+    setWatches(retainedWatches);
   }
 
   function setSuppressions(nextSuppressions: WatchSuppression[]): void {
@@ -661,11 +676,31 @@ export function createWatchController(
       await refreshWatchPullRequestDetails(getWatchId(target));
     },
 
+    replaceSyncedWatches(syncedWatches) {
+      const now = getNow();
+      const retainedSyncedWatches = clearExpiredDoneWatches(
+        syncedWatches
+          .map(normalizeWatchSeenStatus)
+          .map((watch) => normalizeWatchDoneAt(watch, now)),
+        now,
+      );
+      const syncedIds = new Set(retainedSyncedWatches.map((watch) => watch.id));
+      const localInboxWatches = watches.filter(
+        (watch) => getWatchTriageState(watch) === "inbox" && !syncedIds.has(watch.id),
+      );
+      const next = [...localInboxWatches, ...retainedSyncedWatches];
+
+      if (JSON.stringify(next) !== JSON.stringify(watches)) {
+        setWatchesWithDonePruning(next, now);
+      }
+    },
+
     setTriageState(ids, state) {
-      const next = setWatchesTriageState(watches, ids, state, getNow());
+      const now = getNow();
+      const next = setWatchesTriageState(watches, ids, state, now);
 
       if (next !== watches) {
-        setWatches(next);
+        state === "done" ? setWatchesWithDonePruning(next, now) : setWatches(next);
       }
     },
 
@@ -694,27 +729,29 @@ export function createWatchController(
     },
 
     markAllDone(state) {
+      const now = getNow();
       const ids = watches
         .filter((watch) => state !== "done" && getWatchTriageState(watch) === state)
         .map((watch) => watch.id);
-      const next = setWatchesTriageState(watches, ids, "done", getNow());
+      const next = setWatchesTriageState(watches, ids, "done", now);
 
       if (next !== watches) {
-        setWatches(next);
+        setWatchesWithDonePruning(next, now);
       }
     },
 
     markFinishedDone(state) {
+      const now = getNow();
       const ids = watches
         .filter(
           (watch) =>
             state !== "done" && getWatchTriageState(watch) === state && !watch.active,
         )
         .map((watch) => watch.id);
-      const next = setWatchesTriageState(watches, ids, "done", getNow());
+      const next = setWatchesTriageState(watches, ids, "done", now);
 
       if (next !== watches) {
-        setWatches(next);
+        setWatchesWithDonePruning(next, now);
       }
     },
 

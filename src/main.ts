@@ -161,7 +161,7 @@ let rateLimit: RateLimit | undefined;
 let lastSuccessfulRefreshAt: Date | undefined;
 let lastRefreshFailed = false;
 let settings = loadSettings();
-let settingsRevision = 0;
+let syncedStateRevision = 0;
 const settingsSync = createSettingsSync(createSettingsGistRemote());
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
@@ -1684,10 +1684,13 @@ function bindEvents(): void {
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open-github-url"]')) {
     button.addEventListener("click", (event) => {
       event.preventDefault();
+      const ids = getTreeNodeRowIds(button);
 
-      for (const id of getTreeNodeRowIds(button)) {
+      for (const id of ids) {
         controller.markSeen(id);
       }
+
+      queueSyncedStateUploadForWatchIds(ids);
 
       if (button.dataset.url) {
         void openUrl(button.dataset.url);
@@ -1742,6 +1745,7 @@ function bindEvents(): void {
     () => {
       isClearMenuOpen = false;
       controller.markFinishedDone(currentWatchView);
+      queueSyncedStateUpload();
     },
   );
 
@@ -1750,6 +1754,7 @@ function bindEvents(): void {
     () => {
       isClearMenuOpen = false;
       controller.markAllDone(currentWatchView);
+      queueSyncedStateUpload();
     },
   );
 
@@ -1762,6 +1767,7 @@ function bindEvents(): void {
           .filter((watch) => getWatchTriageState(watch) === "done")
           .map((watch) => watch.id),
       );
+      queueSyncedStateUpload();
     },
   );
 
@@ -1858,6 +1864,7 @@ function bindEvents(): void {
 
       if (triageState) {
         controller.setTriageState(getTreeNodeRowIds(button), triageState);
+        queueSyncedStateUpload();
       }
     });
   }
@@ -1867,6 +1874,7 @@ function bindEvents(): void {
       event.preventDefault();
       event.stopPropagation();
       controller.clearDone(getTreeNodeRowIds(button));
+      queueSyncedStateUpload();
     });
   }
 
@@ -1880,6 +1888,8 @@ function bindEvents(): void {
       for (const id of ids) {
         controller.markSeen(id);
       }
+
+      queueSyncedStateUploadForWatchIds(ids);
     });
   }
 
@@ -2423,6 +2433,7 @@ function reorderRepos(sourceKey: string, targetKey: string, position: RepoDropPo
 
 function reorderWatchesWithinRepo(sourceIds: string[], targetIds: string[], position: RepoDropPosition): void {
   controller.reorderGroupWithinRepo(sourceIds, targetIds, position);
+  queueSyncedStateUploadForWatchIds([...sourceIds, ...targetIds]);
 }
 
 function getVisibleRepoOrder(): string[] {
@@ -2819,9 +2830,16 @@ async function confirmRerun(id: string, mode: RerunMode): Promise<void> {
   }
 
   pendingWatchAction = undefined;
+  const removesSyncedWatch = controller.getWatches().some(
+    (watch) => watch.id === id && getWatchTriageState(watch) !== "inbox",
+  );
 
   try {
     await controller.rerun(id, mode);
+
+    if (removesSyncedWatch) {
+      queueSyncedStateUpload();
+    }
 
     if (!isDemoMode) {
       window.setTimeout(() => {
@@ -2944,15 +2962,46 @@ async function updateAppSettings(nextSettings: typeof settings, syncRemote: bool
   settings = nextSettings;
 
   if (syncRemote) {
-    settingsRevision += 1;
+    syncedStateRevision += 1;
   }
 
   await saveSettings(nextSettings);
 
   if (syncRemote && !isDemoMode) {
-    void settingsSync.push(nextSettings).catch((error) => {
-      console.warn("Could not upload synced settings.", error);
-    });
+    uploadSyncedState();
+  }
+}
+
+function getLocalSyncedState() {
+  return {
+    settings,
+    watches: controller.getWatches(),
+  };
+}
+
+function uploadSyncedState(): void {
+  if (isDemoMode) {
+    return;
+  }
+
+  void settingsSync.push(getLocalSyncedState()).catch((error) => {
+    console.warn("Could not upload synced state.", error);
+  });
+}
+
+function queueSyncedStateUpload(): void {
+  syncedStateRevision += 1;
+  uploadSyncedState();
+}
+
+function queueSyncedStateUploadForWatchIds(ids: string[]): void {
+  const idSet = new Set(ids);
+  const includesSyncedWatch = controller.getWatches().some(
+    (watch) => idSet.has(watch.id) && getWatchTriageState(watch) !== "inbox",
+  );
+
+  if (includesSyncedWatch) {
+    queueSyncedStateUpload();
   }
 }
 
@@ -2961,26 +3010,30 @@ async function syncSettingsFromGist(): Promise<void> {
     return;
   }
 
-  const revision = settingsRevision;
-  const localSettings = settings;
+  const revision = syncedStateRevision;
+  const localState = getLocalSyncedState();
 
   try {
-    const syncedSettings = await settingsSync.sync(localSettings);
+    const syncedState = await settingsSync.sync(localState);
 
-    if (settingsRevision !== revision) {
+    if (syncedStateRevision !== revision) {
       return;
     }
 
-    if (JSON.stringify(syncedSettings) !== JSON.stringify(settings)) {
-      await updateAppSettings(syncedSettings, false);
-      render();
-
-      for (const watchedRepo of settings.watchedRepos) {
-        void refreshWatchedRepoIcon(watchedRepo);
-      }
+    if (JSON.stringify(syncedState.settings) !== JSON.stringify(settings)) {
+      await updateAppSettings(syncedState.settings, false);
     }
+
+    controller.replaceSyncedWatches(syncedState.watches);
+    render();
+
+    for (const watchedRepo of settings.watchedRepos) {
+      void refreshWatchedRepoIcon(watchedRepo);
+    }
+
+    void controller.refreshRepositoryIcons();
   } catch (error) {
-    console.warn("Could not sync settings.", error);
+    console.warn("Could not sync state.", error);
   }
 }
 

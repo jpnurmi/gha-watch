@@ -1,4 +1,5 @@
 import { normalizeAppSettings, type AppSettings } from "../domain/settings";
+import { getWatchId, getWatchTriageState, type WatchRecord } from "../domain/watches";
 import { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "./gh";
 
 const gistDescription = "GHA Watch synced settings";
@@ -21,11 +22,21 @@ type SyncedSettingsDocument = {
   format: typeof settingsFormat;
   version: typeof settingsFormatVersion;
   settings: AppSettings;
+  watches?: WatchRecord[];
+};
+
+export type SyncedState = {
+  settings: AppSettings;
+  watches: WatchRecord[];
+};
+
+export type LoadedSyncedState = SyncedState & {
+  historyInitialized?: boolean;
 };
 
 export type SettingsRemote = {
-  load(): Promise<AppSettings | undefined>;
-  save(settings: AppSettings): Promise<void>;
+  load(): Promise<LoadedSyncedState | undefined>;
+  save(state: SyncedState): Promise<void>;
 };
 
 export function createSettingsGistRemote(
@@ -74,8 +85,8 @@ export function createSettingsGistRemote(
       return parseSettingsDocument(getGistContent(parseJson<GistResponse>(result.stdout)));
     },
 
-    async save(settings) {
-      const content = serializeSettingsDocument(settings);
+    async save(state) {
+      const content = serializeSettingsDocument(state);
       const id = await discoverGistId();
 
       if (id) {
@@ -109,8 +120,8 @@ export function createSettingsGistRemote(
   };
 }
 
-export function serializeSettingsDocument(settings: AppSettings): string {
-  const normalized = normalizeAppSettings(settings);
+export function serializeSettingsDocument(state: SyncedState): string {
+  const normalized = normalizeAppSettings(state.settings);
   const document: SyncedSettingsDocument = {
     format: settingsFormat,
     version: settingsFormatVersion,
@@ -118,11 +129,12 @@ export function serializeSettingsDocument(settings: AppSettings): string {
       watchedRepos: normalized.watchedRepos.map(({ repoIconUrl: _repoIconUrl, ...repo }) => repo),
       repoOrder: normalized.repoOrder,
     },
+    watches: normalizeSyncedWatches(state.watches).map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch),
   };
   return `${JSON.stringify(document, null, 2)}\n`;
 }
 
-export function parseSettingsDocument(content: string): AppSettings {
+export function parseSettingsDocument(content: string): LoadedSyncedState {
   const document = parseJson<unknown>(content);
 
   if (!isRecord(document) || document.format !== settingsFormat) {
@@ -137,7 +149,55 @@ export function parseSettingsDocument(content: string): AppSettings {
     throw new Error("The GHA Watch settings Gist does not contain settings.");
   }
 
-  return normalizeAppSettings(document.settings);
+  return {
+    settings: normalizeAppSettings(document.settings),
+    watches: normalizeSyncedWatches(document.watches),
+    ...(!Object.hasOwn(document, "watches") ? { historyInitialized: false } : {}),
+  };
+}
+
+export function normalizeSyncedWatches(value: unknown): WatchRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const watches: WatchRecord[] = [];
+  const seen = new Set<string>();
+
+  for (const item of value) {
+    if (!isRecord(item) || !isWatchTarget(item.target)) {
+      continue;
+    }
+
+    const triageState = getWatchTriageState(item as WatchRecord);
+    const id = getWatchId(item.target);
+
+    if (
+      (triageState !== "saved" && triageState !== "done") ||
+      item.id !== id ||
+      seen.has(id) ||
+      typeof item.label !== "string" ||
+      typeof item.status !== "string" ||
+      typeof item.active !== "boolean"
+    ) {
+      continue;
+    }
+
+    seen.add(id);
+    watches.push({
+      ...(item as WatchRecord),
+      id,
+      target: item.target,
+      label: item.label,
+      status: item.status,
+      lastState: isRecord(item.lastState) ? item.lastState as WatchRecord["lastState"] : undefined,
+      triageState,
+      active: item.active,
+      error: typeof item.error === "string" ? item.error : undefined,
+    });
+  }
+
+  return watches;
 }
 
 function normalizeGistPages(value: unknown): GistResponse[] {
@@ -183,4 +243,29 @@ function assertSuccessfulResult(result: ShellResult): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isWatchTarget(value: unknown): value is WatchRecord["target"] {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const hasBase =
+    typeof value.owner === "string" &&
+    typeof value.repo === "string" &&
+    typeof value.url === "string";
+
+  if (!hasBase) {
+    return false;
+  }
+
+  if (value.kind === "run") {
+    return typeof value.runId === "string";
+  }
+
+  if (value.kind === "job") {
+    return typeof value.jobId === "string";
+  }
+
+  return value.kind === "pr" && typeof value.prNumber === "string";
 }

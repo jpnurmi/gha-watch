@@ -205,18 +205,18 @@ describe("watch operations", () => {
     });
   });
 
-  it("clears Done watches manually or after five months", () => {
+  it("clears Done watches manually or after one month", () => {
     const inbox = watch({ id: "inbox" });
     const saved = watch({ id: "saved", triageState: "saved" });
     const recentDone = watch({
       id: "recent-done",
       triageState: "done",
-      doneAt: "2026-04-01T00:00:00.000Z",
+      doneAt: "2026-07-15T00:00:00.000Z",
     });
     const expiredDone = watch({
       id: "expired-done",
       triageState: "done",
-      doneAt: "2026-03-01T00:00:00.000Z",
+      doneAt: "2026-07-01T00:00:00.000Z",
     });
     const watches = [inbox, saved, recentDone, expiredDone];
 
@@ -228,6 +228,24 @@ describe("watch operations", () => {
     expect(
       clearDoneWatches(watches, ["recent-done"]).map((item) => item.id),
     ).toEqual(["inbox", "saved", "expired-done"]);
+  });
+
+  it("keeps at most the 100 newest Done watches", () => {
+    const doneWatches = Array.from({ length: 102 }, (_, index) =>
+      watch({
+        id: `done-${String(index)}`,
+        triageState: "done",
+        doneAt: new Date(Date.UTC(2026, 7, 1, 0, index)).toISOString(),
+      })
+    );
+    const retained = clearExpiredDoneWatches(
+      doneWatches,
+      new Date("2026-08-15T00:00:00Z"),
+    );
+
+    expect(retained).toHaveLength(100);
+    expect(retained.map((item) => item.id)).not.toContain("done-0");
+    expect(retained.map((item) => item.id)).not.toContain("done-1");
   });
 
   it("moves a watch within its repository while preserving other repository slots", () => {

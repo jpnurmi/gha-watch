@@ -3,7 +3,8 @@ import type { WatchState } from "./status";
 
 export type PrSourceState = "draft" | "ready" | "merged" | "closed";
 export type WatchTriageState = "inbox" | "saved" | "done";
-export const watchRetentionMonths = 5;
+export const watchRetentionMonths = 1;
+export const doneWatchRetentionLimit = 100;
 
 export type WatchTiming = {
   queuedAt?: string;
@@ -174,12 +175,23 @@ export function clearExpiredDoneWatches(
   now = new Date(),
 ): WatchRecord[] {
   const nowMs = now.getTime();
+  const retainedDoneIds = new Set(
+    watches
+      .filter(
+        (watch) =>
+          getWatchTriageState(watch) === "done" &&
+          (!watch.doneAt || !isWatchRetentionExpired(watch.doneAt, nowMs)),
+      )
+      .sort((left, right) => getWatchDoneTimestamp(right) - getWatchDoneTimestamp(left))
+      .slice(0, doneWatchRetentionLimit)
+      .map((watch) => watch.id),
+  );
   const nextWatches = watches.filter((watch) => {
-    if (getWatchTriageState(watch) !== "done" || !watch.doneAt) {
+    if (getWatchTriageState(watch) !== "done") {
       return true;
     }
 
-    return !isWatchRetentionExpired(watch.doneAt, nowMs);
+    return retainedDoneIds.has(watch.id);
   });
 
   return nextWatches.length === watches.length ? watches : nextWatches;
@@ -195,6 +207,11 @@ export function isWatchRetentionExpired(timestamp: string, now: Date | number): 
   expiresAt.setUTCMonth(expiresAt.getUTCMonth() + watchRetentionMonths);
   const nowMs = typeof now === "number" ? now : now.getTime();
   return expiresAt.getTime() <= nowMs;
+}
+
+function getWatchDoneTimestamp(watch: WatchRecord): number {
+  const timestamp = watch.doneAt ? Date.parse(watch.doneAt) : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 export function moveWatchWithinRepo(

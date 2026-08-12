@@ -210,6 +210,40 @@ function existingWatch(): WatchRecord {
 }
 
 describe("watchController", () => {
+  it("replaces saved and Done watches from sync while preserving local inbox watches", () => {
+    const { deps, saves } = createDeps([]);
+    const localSaved: WatchRecord = {
+      ...existingWatch(),
+      id: "getsentry/sentry/job/456",
+      target: jobTarget,
+      triageState: "saved",
+    };
+    const remoteSaved: WatchRecord = {
+      ...localSaved,
+      label: "Remote saved watch",
+    };
+    const remoteDone: WatchRecord = {
+      ...existingWatch(),
+      id: "getsentry/sentry/pull/51",
+      target: prTarget,
+      triageState: "done",
+      doneAt: "2026-08-10T00:00:00.000Z",
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T00:00:00Z") },
+      [existingWatch(), localSaved],
+    );
+
+    controller.replaceSyncedWatches([remoteSaved, remoteDone]);
+
+    expect(controller.getWatches()).toEqual([
+      existingWatch(),
+      remoteSaved,
+      remoteDone,
+    ]);
+    expect(saves.at(-1)).toEqual(controller.getWatches());
+  });
+
   it("publishes a watch with its baseline state without notifying", async () => {
     const { deps, notifications, saves } = createDeps([
       {
@@ -786,12 +820,12 @@ describe("watchController", () => {
   it("does not reopen cleared watches while syncing subscriptions", async () => {
     const { deps, fetches } = createDeps([]);
     const controller = createWatchController(
-      deps,
+      { ...deps, now: () => new Date("2026-08-12T00:00:00Z") },
       [],
       [
         {
           id: "getsentry/sentry/run/123",
-          clearedAt: "2026-07-01T00:00:00.000Z",
+          clearedAt: "2026-08-01T00:00:00.000Z",
         },
       ],
     );
@@ -1653,7 +1687,7 @@ describe("watchController", () => {
     ]);
   });
 
-  it("clears Done watches after five months", () => {
+  it("clears Done watches after one month", () => {
     const { deps, saves, suppressionSaves } = createDeps([]);
     const controller = createWatchController(
       {
@@ -1665,13 +1699,13 @@ describe("watchController", () => {
           ...existingWatch(),
           id: "expired",
           triageState: "done",
-          doneAt: "2026-03-01T00:00:00.000Z",
+          doneAt: "2026-07-01T00:00:00.000Z",
         },
         {
           ...existingWatch(),
           id: "recent",
           triageState: "done",
-          doneAt: "2026-04-01T00:00:00.000Z",
+          doneAt: "2026-07-15T00:00:00.000Z",
         },
       ],
     );

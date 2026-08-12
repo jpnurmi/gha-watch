@@ -1,14 +1,19 @@
-import { normalizeAppSettings, type AppSettings } from "../domain/settings";
+import { normalizeAppSettings } from "../domain/settings";
+import {
+  clearExpiredDoneWatches,
+  getWatchTriageState,
+  type WatchRecord,
+} from "../domain/watches";
 import { getWatchedRepoKey, type WatchedRepo } from "../domain/watchedRepos";
-import type { SettingsRemote } from "../platform/settingsGist";
+import type { SettingsRemote, SyncedState } from "../platform/settingsGist";
 
 export type SettingsSync = {
-  push(settings: AppSettings): Promise<void>;
-  sync(localSettings: AppSettings): Promise<AppSettings>;
+  push(state: SyncedState): Promise<void>;
+  sync(localState: SyncedState): Promise<SyncedState>;
 };
 
 export function createSettingsSync(remote: SettingsRemote): SettingsSync {
-  let pendingSettings: AppSettings | undefined;
+  let pendingState: SyncedState | undefined;
   let queue = Promise.resolve();
 
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -17,65 +22,93 @@ export function createSettingsSync(remote: SettingsRemote): SettingsSync {
     return result;
   }
 
-  async function flushPendingSettings(): Promise<void> {
-    while (pendingSettings) {
-      const nextSettings = pendingSettings;
-      await remote.save(nextSettings);
+  async function flushPendingState(): Promise<void> {
+    while (pendingState) {
+      const nextState = pendingState;
+      await remote.save(nextState);
 
-      if (pendingSettings === nextSettings) {
-        pendingSettings = undefined;
+      if (pendingState === nextState) {
+        pendingState = undefined;
       }
     }
   }
 
   return {
-    push(settings) {
-      pendingSettings = toSyncedSettings(settings);
-      return enqueue(flushPendingSettings);
+    push(state) {
+      pendingState = toSyncedState(state);
+      return enqueue(flushPendingState);
     },
 
-    sync(localSettings) {
+    sync(localState) {
       return enqueue(async () => {
-        await flushPendingSettings();
-        const remoteSettings = await remote.load();
+        await flushPendingState();
+        const remoteState = await remote.load();
 
-        if (remoteSettings) {
-          return restoreLocalRepoIcons(remoteSettings, localSettings);
+        if (remoteState) {
+          if (remoteState.historyInitialized === false) {
+            const migratedState = toSyncedState({
+              settings: remoteState.settings,
+              watches: localState.watches,
+            });
+            await remote.save(migratedState);
+            return restoreLocalCaches(migratedState, localState);
+          }
+
+          return restoreLocalCaches(remoteState, localState);
         }
 
-        const initialSettings = toSyncedSettings(localSettings);
-        await remote.save(initialSettings);
-        return restoreLocalRepoIcons(initialSettings, localSettings);
+        const initialState = toSyncedState(localState);
+        await remote.save(initialState);
+        return restoreLocalCaches(initialState, localState);
       });
     },
   };
 }
 
-export function toSyncedSettings(settings: AppSettings): AppSettings {
-  const normalized = normalizeAppSettings(settings);
+export function toSyncedState(state: SyncedState): SyncedState {
+  const settings = normalizeAppSettings(state.settings);
 
   return {
-    watchedRepos: normalized.watchedRepos.map(({ repoIconUrl: _repoIconUrl, ...repo }) => repo),
-    repoOrder: normalized.repoOrder,
+    settings: {
+      watchedRepos: settings.watchedRepos.map(({ repoIconUrl: _repoIconUrl, ...repo }) => repo),
+      repoOrder: settings.repoOrder,
+    },
+    watches: clearExpiredDoneWatches(state.watches)
+      .filter((watch) => {
+        const triageState = getWatchTriageState(watch);
+        return triageState === "saved" || triageState === "done";
+      })
+      .map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch),
   };
 }
 
-export function restoreLocalRepoIcons(
-  remoteSettings: AppSettings,
-  localSettings: AppSettings,
-): AppSettings {
-  const localIcons = new Map(
-    normalizeAppSettings(localSettings).watchedRepos
+export function restoreLocalCaches(
+  remoteState: SyncedState,
+  localState: SyncedState,
+): SyncedState {
+  const localRepoIcons = new Map(
+    normalizeAppSettings(localState.settings).watchedRepos
       .filter((repo): repo is WatchedRepo & { repoIconUrl: string } => Boolean(repo.repoIconUrl))
       .map((repo) => [getWatchedRepoKey(repo), repo.repoIconUrl]),
   );
-  const remote = normalizeAppSettings(remoteSettings);
+  const localWatchIcons = new Map(
+    localState.watches
+      .filter((watch): watch is WatchRecord & { repoIconUrl: string } => Boolean(watch.repoIconUrl))
+      .map((watch) => [watch.id, watch.repoIconUrl]),
+  );
+  const remoteSettings = normalizeAppSettings(remoteState.settings);
 
   return {
-    ...remote,
-    watchedRepos: remote.watchedRepos.map((repo) => {
-      const repoIconUrl = localIcons.get(getWatchedRepoKey(repo));
-      return repoIconUrl ? { ...repo, repoIconUrl } : repo;
+    settings: {
+      ...remoteSettings,
+      watchedRepos: remoteSettings.watchedRepos.map((repo) => {
+        const repoIconUrl = localRepoIcons.get(getWatchedRepoKey(repo));
+        return repoIconUrl ? { ...repo, repoIconUrl } : repo;
+      }),
+    },
+    watches: remoteState.watches.map((watch) => {
+      const repoIconUrl = localWatchIcons.get(watch.id);
+      return repoIconUrl ? { ...watch, repoIconUrl } : watch;
     }),
   };
 }

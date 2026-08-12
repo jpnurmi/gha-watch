@@ -14,9 +14,16 @@ describe("settings sync wiring", () => {
     );
   });
 
-  it("uploads only explicit settings changes", () => {
+  it("uploads explicit settings and triage changes", () => {
     expect(mainSource).toContain("updateAppSettings({ ...settings, repoOrder }, true)");
     expect(mainSource).toContain("updateAppSettings({ ...settings, watchedRepos }, true)");
     expect(mainSource).toContain("updateAppSettings({ ...settings, watchedRepos }, false)");
+    expect(mainSource).toMatch(
+      /controller\.setTriageState\([\s\S]*?queueSyncedStateUpload\(\);/,
+    );
+    expect(mainSource).toMatch(
+      /controller\.clearDone\([\s\S]*?queueSyncedStateUpload\(\);/,
+    );
+    expect(mainSource).toContain("controller.replaceSyncedWatches(syncedState.watches)");
   });
 });
