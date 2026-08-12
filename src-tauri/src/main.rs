@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use notify_rust::{Notification as NativeNotification, Timeout, Urgency};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSView;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use tauri::Emitter;
 #[cfg(any(not(target_os = "linux"), test))]
 use tauri::PhysicalPosition;
@@ -19,10 +19,10 @@ use tauri::{
 };
 #[cfg(any(target_os = "macos", test))]
 use tauri::{LogicalPosition, Monitor, PhysicalRect, PhysicalSize};
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 use tauri_plugin_notification::NotificationExt;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const DESKTOP_NOTIFICATION_CLICKED_EVENT: &str = "desktop-notification-clicked";
 #[cfg(target_os = "macos")]
 const MACOS_POPUP_CORNER_RADIUS: f64 = 12.0;
@@ -51,18 +51,18 @@ struct TrayIndicatorIconKey {
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopNotification {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     watch_id: String,
     title: String,
     body: String,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     url: String,
     persistent: bool,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     timeout_ms: Option<u64>,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopNotificationClick {
@@ -193,7 +193,46 @@ fn dismiss_macos_notification(title: &str, body: &str) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+fn show_clickable_notification(
+    app: AppHandle,
+    notification: DesktopNotification,
+) -> Result<(), String> {
+    let mut native = NativeNotification::new();
+    native.summary(&notification.title).body(&notification.body);
+    native.action("default", "Open");
+
+    if notification.persistent {
+        native.timeout(Timeout::Never).urgency(Urgency::Critical);
+    } else {
+        native.timeout(Timeout::Milliseconds(
+            notification
+                .timeout_ms
+                .unwrap_or(15_000)
+                .try_into()
+                .unwrap_or(u32::MAX),
+        ));
+    }
+
+    let handle = native.show().map_err(|error| error.to_string())?;
+    std::thread::spawn(move || {
+        handle.wait_for_action(|action| {
+            if action == "default" {
+                let _ = app.emit(
+                    DESKTOP_NOTIFICATION_CLICKED_EVENT,
+                    DesktopNotificationClick {
+                        watch_id: notification.watch_id,
+                        url: notification.url,
+                    },
+                );
+            }
+        });
+    });
+
+    Ok(())
+}
+
+#[cfg(windows)]
 fn show_clickable_notification(
     app: AppHandle,
     notification: DesktopNotification,
@@ -212,13 +251,9 @@ fn show_clickable_notification(
     native.summary(&notification.title).body(&notification.body);
     native.timeout(Timeout::Never).urgency(Urgency::Critical);
 
-    #[cfg(windows)]
     if !tauri::is_dev() {
         native.app_id(&app.config().identifier);
     }
-
-    #[cfg(not(windows))]
-    let _ = app;
 
     native.show().map(|_| ()).map_err(|error| error.to_string())
 }
