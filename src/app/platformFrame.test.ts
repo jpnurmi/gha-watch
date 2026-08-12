@@ -64,8 +64,28 @@ describe("platform frame styling", () => {
   });
 
   it("keeps Linux titlebar buttons above the titlebar drag event box", () => {
-    expect(rustSource).toContain('downcast_ref::<gtk::EventBox>()');
+    expect(rustSource).toContain('titlebar.downcast::<gtk::EventBox>()');
     expect(rustSource).toContain("event_box.set_above_child(false)");
+  });
+
+  it("uses a close-only client-side Linux titlebar on every display backend", () => {
+    expect(rustSource).toContain("gtk::HeaderBar::builder()");
+    expect(rustSource).toContain('.decoration_layout("menu:close")');
+    expect(rustSource).toContain("gtk_window.set_titlebar(Some(&event_box))");
+    expect(rustSource).toContain("configure_linux_header_bar(&header)");
+  });
+
+  it("preserves native Linux titlebar interactions", () => {
+    expect(rustSource).toContain("configure_linux_titlebar_events");
+    expect(rustSource).toContain("gtk::gdk::EventMask::BUTTON_PRESS_MASK");
+    expect(rustSource).toContain("window.begin_move_drag");
+    expect(rustSource).toContain("gdk_window.show_window_menu");
+    expect(rustSource).not.toContain("gha-watch-hover");
+  });
+
+  it("sets Linux window-manager controls when the native window is realized", () => {
+    expect(rustSource).toContain("gtk_window.connect_realize");
+    expect(rustSource).toContain("set_linux_window_manager_functions");
   });
 
   it("prevents Linux titlebar close from quitting the app", () => {

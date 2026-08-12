@@ -320,9 +320,6 @@ fn show_and_focus_window(window: &tauri::WebviewWindow) {
     let _ = window.show();
 
     #[cfg(target_os = "linux")]
-    configure_linux_window_controls(window);
-
-    #[cfg(target_os = "linux")]
     present_linux_window(window);
 
     #[cfg(target_os = "linux")]
@@ -381,6 +378,50 @@ fn configure_linux_window_frame(window: &tauri::WebviewWindow) {
 }
 
 #[cfg(target_os = "linux")]
+fn set_linux_window_manager_functions(window: &gtk::ApplicationWindow) {
+    use gtk::prelude::*;
+
+    if let Some(gdk_window) = window.window() {
+        gdk_window.set_functions(
+            gtk::gdk::WMFunction::MOVE | gtk::gdk::WMFunction::RESIZE | gtk::gdk::WMFunction::CLOSE,
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_header_bar(header: &gtk::HeaderBar) {
+    use gtk::prelude::*;
+
+    header.set_decoration_layout(Some("menu:close"));
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_titlebar_events(event_box: &gtk::EventBox, window: &gtk::ApplicationWindow) {
+    use gtk::prelude::*;
+
+    event_box.set_above_child(false);
+    event_box.add_events(gtk::gdk::EventMask::BUTTON_PRESS_MASK);
+
+    let window = window.clone();
+    event_box.connect_button_press_event(move |_, event| match event.button() {
+        1 => {
+            let (root_x, root_y) = event.root();
+            window.begin_move_drag(1, root_x as i32, root_y as i32, event.time());
+            gtk::glib::Propagation::Stop
+        }
+        3 => {
+            let Some(gdk_window) = window.window() else {
+                return gtk::glib::Propagation::Proceed;
+            };
+            let mut event = event.clone();
+            gdk_window.show_window_menu(&mut event);
+            gtk::glib::Propagation::Stop
+        }
+        _ => gtk::glib::Propagation::Proceed,
+    });
+}
+
+#[cfg(target_os = "linux")]
 fn configure_linux_window_controls(window: &tauri::WebviewWindow) {
     let window = window.clone();
     let handle = window.clone();
@@ -391,17 +432,33 @@ fn configure_linux_window_controls(window: &tauri::WebviewWindow) {
             gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Utility);
 
             if let Some(titlebar) = gtk_window.titlebar() {
-                if let Some(event_box) = titlebar.downcast_ref::<gtk::EventBox>() {
-                    event_box.set_above_child(false);
+                if let Ok(event_box) = titlebar.downcast::<gtk::EventBox>() {
+                    if let Some(child) = event_box.child() {
+                        if let Ok(header) = child.downcast::<gtk::HeaderBar>() {
+                            configure_linux_header_bar(&header);
+                        }
+                    }
+                    configure_linux_titlebar_events(&event_box, &gtk_window);
                 }
+            } else {
+                let header = gtk::HeaderBar::builder()
+                    .show_close_button(true)
+                    .decoration_layout("menu:close")
+                    .title(gtk_window.title().unwrap_or_default())
+                    .build();
+                let event_box = gtk::EventBox::new();
+                event_box.set_visible(true);
+                event_box.set_can_focus(false);
+                event_box.add(&header);
+                gtk_window.set_titlebar(Some(&event_box));
+                configure_linux_header_bar(&header);
+                configure_linux_titlebar_events(&event_box, &gtk_window);
             }
 
-            if let Some(gdk_window) = gtk_window.window() {
-                gdk_window.set_functions(
-                    gtk::gdk::WMFunction::MOVE
-                        | gtk::gdk::WMFunction::RESIZE
-                        | gtk::gdk::WMFunction::CLOSE,
-                );
+            if gtk_window.is_realized() {
+                set_linux_window_manager_functions(&gtk_window);
+            } else {
+                gtk_window.connect_realize(set_linux_window_manager_functions);
             }
         }
     });
