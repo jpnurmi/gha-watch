@@ -879,10 +879,14 @@ async function rerunPullRequestChecks(
     ]);
 
     assertSuccessfulGhResult(result, result.stdout.trim() ? [1, 8] : [8]);
-    const runIds = getFailedPullRequestRunIds(target, parseJson<PrCheckResponse[]>(result.stdout));
+    const runIds = getPullRequestRunIds(target, parseJson<PrCheckResponse[]>(result.stdout), mode);
 
     if (runIds.length === 0) {
-      throw new Error("No failed GitHub Actions jobs were found for this pull request.");
+      throw new Error(
+        mode === "failed"
+          ? "No failed GitHub Actions jobs were found for this pull request."
+          : "No failed or cancelled GitHub Actions jobs were found for this pull request.",
+      );
     }
 
     for (const runId of runIds) {
@@ -910,9 +914,16 @@ function getRerunArgs(
   ];
 }
 
-function getFailedPullRequestRunIds(target: PrWatchTarget, checks: PrCheckResponse[]): string[] {
+function getPullRequestRunIds(
+  target: PrWatchTarget,
+  checks: PrCheckResponse[],
+  mode: RerunMode,
+): string[] {
   const runIds = checks
-    .filter((check) => check.bucket?.trim() === "fail")
+    .filter((check) => {
+      const bucket = check.bucket?.trim();
+      return bucket === "fail" || (mode === "all" && bucket === "cancel");
+    })
     .map((check) => getActionsRunId(check.link, target))
     .filter((runId): runId is string => Boolean(runId));
 

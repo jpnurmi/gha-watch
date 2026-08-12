@@ -1477,9 +1477,13 @@ function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean): 
                       <button class="repo-action-item" type="button" role="menuitem" data-action="rerun-all" data-id="${escapeHtml(row.id)}">
                         <span class="repo-action-title">Re-run all jobs</span>
                       </button>
-                      <button class="repo-action-item" type="button" role="menuitem" data-action="rerun-failed" data-id="${escapeHtml(row.id)}">
-                        <span class="repo-action-title">Re-run failed jobs</span>
-                      </button>
+                      ${
+                        row.canRerunFailed
+                          ? `<button class="repo-action-item" type="button" role="menuitem" data-action="rerun-failed" data-id="${escapeHtml(row.id)}">
+                              <span class="repo-action-title">Re-run failed jobs</span>
+                            </button>`
+                          : ""
+                      }
                     </div>`
                   : ""
               }

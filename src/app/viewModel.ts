@@ -42,6 +42,7 @@ export type WatchRowViewModel = {
   timingText?: string;
   unseenStatusChange: boolean;
   canRerun: boolean;
+  canRerunFailed: boolean;
   doneCandidate: boolean;
   triageState: WatchTriageState;
   url: string;
@@ -163,6 +164,7 @@ function createWatchRowViewModel(watch: WatchRecord, now: Date): WatchRowViewMod
       timingText: getTimingText(watch, "error", now),
       unseenStatusChange: hasUnseenStatusChange(watch),
       canRerun: canRerun(watch),
+      canRerunFailed: canRerunFailed(watch),
       doneCandidate: isDoneCandidate(watch, "error"),
       triageState: getWatchTriageState(watch),
       url: watch.target.url,
@@ -227,6 +229,7 @@ function createRow(
     timingText: getTimingText(watch, tone, now),
     unseenStatusChange: hasUnseenStatusChange(watch),
     canRerun: canRerun(watch),
+    canRerunFailed: canRerunFailed(watch),
     doneCandidate: isDoneCandidate(watch, tone),
     triageState: getWatchTriageState(watch),
     url: watch.target.url,
@@ -297,6 +300,14 @@ function getPullRequestStateLabel(sourceState: PrSourceState): string {
 }
 
 function canRerun(watch: WatchRecord): boolean {
+  const state = getWatchState(watch);
+
+  return state?.status === "completed" &&
+    state.conclusion !== "success" &&
+    state.conclusion !== "skipped";
+}
+
+function canRerunFailed(watch: WatchRecord): boolean {
   const state = getWatchState(watch);
 
   return state?.status === "completed" &&

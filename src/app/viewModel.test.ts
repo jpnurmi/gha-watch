@@ -565,8 +565,8 @@ describe("createPopupViewModel", () => {
 
     expect(model.title).toBe("Some checks were cancelled");
     expect(model.subtitle).toBe("1 cancelled check");
-    expect(model.rows.map((row) => [row.statusLabel, row.description, row.tone])).toEqual([
-      ["Cancelled", "This check was cancelled.", "cancelled"],
+    expect(model.rows.map((row) => [row.statusLabel, row.description, row.tone, row.canRerun, row.canRerunFailed])).toEqual([
+      ["Cancelled", "This check was cancelled.", "cancelled", true, false],
     ]);
   });
 

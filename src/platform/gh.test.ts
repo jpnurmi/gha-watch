@@ -1492,6 +1492,53 @@ describe("rerunWatch", () => {
     ]);
   });
 
+  it("reruns all jobs in cancelled GitHub Actions runs for a pull request", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 1,
+        stdout: JSON.stringify([
+          {
+            bucket: "cancel",
+            link: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
+          },
+          {
+            bucket: "cancel",
+            link: "https://checks.example.com/build/42",
+          },
+          {
+            bucket: "pass",
+            link: "https://github.com/getsentry/sentry/actions/runs/789/job/1011",
+          },
+        ]),
+        stderr: "",
+      },
+      { code: 0, stdout: "", stderr: "" },
+    ]);
+
+    await rerunWatch(
+      {
+        kind: "pr",
+        owner: "getsentry",
+        repo: "sentry",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+      "all",
+      executor,
+    );
+
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["pr", "checks", "51", "-R", "getsentry/sentry", "--json", "bucket,link"],
+      },
+      {
+        program: "gh",
+        args: ["run", "rerun", "123", "-R", "getsentry/sentry"],
+      },
+    ]);
+  });
+
   it("rejects pull requests without failed GitHub Actions jobs", async () => {
     const { executor, calls } = createExecutor({
       code: 1,
