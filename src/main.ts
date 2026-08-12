@@ -31,6 +31,12 @@ import {
 import { getClickedUnseenWatchIds } from "./app/watchSeenAction";
 import { getRepositoryUrl, getWatchActionsUrl } from "./app/watchLinks";
 import { getWatchTriageActions } from "./app/watchTriage";
+import {
+  formatWatchViewCount,
+  getWatchViewAriaLabel,
+  getWatchViewCounts,
+  type WatchViewCounts,
+} from "./app/watchViewCounts";
 import { createTrayState } from "./app/trayState";
 import {
   createPopupViewModel,
@@ -427,6 +433,7 @@ function renderFreshnessIndicator(): string {
 
 function render(): void {
   const allWatches = controller.getWatches();
+  const watchViewCounts = getWatchViewCounts(allWatches);
   const watches = allWatches.filter((watch) => getWatchTriageState(watch) === currentWatchView);
   const showRepositoryTools = currentWatchView === "inbox";
   const viewModel = createPopupViewModel(
@@ -461,7 +468,7 @@ function render(): void {
               ${renderFreshnessIndicator()}
             </div>
           </div>
-          ${renderWatchViewSwitcher()}
+          ${renderWatchViewSwitcher(watchViewCounts)}
           <div class="header-actions">
             <button class="icon-button" type="button" data-action="toggle-add" title="Add" aria-label="Add repository or watch">
               <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -540,7 +547,7 @@ function renderWatchList(viewModel: ReturnType<typeof createPopupViewModel>): st
   `;
 }
 
-function renderWatchViewSwitcher(): string {
+function renderWatchViewSwitcher(counts: WatchViewCounts): string {
   const views: Array<{ label: string; state: WatchTriageState }> = [
     { label: "Inbox", state: "inbox" },
     { label: "Saved", state: "saved" },
@@ -551,16 +558,29 @@ function renderWatchViewSwitcher(): string {
     <div class="watch-view-switcher" role="tablist" aria-label="Watch view">
       ${views
         .map(
-          ({ label, state }) => `
+          ({ label, state }) => {
+            const count = counts[state];
+            const hasUnseenInboxItems = state === "inbox" && count.unseen > 0;
+
+            return `
             <button
-              class="watch-view-button${currentWatchView === state ? " is-active" : ""}"
+              class="watch-view-button${currentWatchView === state ? " is-active" : ""}${hasUnseenInboxItems ? " has-unseen-items" : ""}"
               type="button"
               role="tab"
               data-action="select-watch-view"
               data-watch-view="${state}"
               aria-selected="${currentWatchView === state ? "true" : "false"}"
-            >${label}</button>
-          `,
+              aria-label="${getWatchViewAriaLabel(state, count)}"
+            >
+              <span class="watch-view-label" aria-hidden="true">${label}</span>
+              ${
+                count.total > 0
+                  ? `<span class="watch-view-count" aria-hidden="true">${formatWatchViewCount(count.total)}</span>`
+                  : ""
+              }
+            </button>
+          `;
+          },
         )
         .join("")}
     </div>
