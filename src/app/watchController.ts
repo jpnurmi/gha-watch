@@ -852,7 +852,7 @@ export function createWatchController(
             status,
             lastSeenStatus: current.lastSeenStatus ?? current.status,
             lastState: nextState,
-            timing: snapshot.timing,
+            timing: mergePolledTiming(current, snapshot),
             active: !isTerminalStatus(nextState),
             error: undefined,
           };
@@ -905,6 +905,28 @@ export function createWatchController(
       };
     },
   };
+}
+
+function mergePolledTiming(
+  current: Pick<WatchRecord, "lastState" | "timing">,
+  snapshot: WatchSnapshot,
+): WatchRecord["timing"] {
+  if (
+    current.lastState?.status !== "queued" ||
+    !current.timing?.queuedAt ||
+    !isQueuedStatus(snapshot.status)
+  ) {
+    return snapshot.timing;
+  }
+
+  return {
+    ...snapshot.timing,
+    queuedAt: current.timing.queuedAt,
+  };
+}
+
+function isQueuedStatus(status: string): boolean {
+  return status === "queued" || status === "pending" || status === "requested" || status === "waiting";
 }
 
 function workflowNameIsSelected(workflowName: string | undefined, selectedWorkflowNames: string[]): boolean {

@@ -2053,4 +2053,32 @@ describe("watchController", () => {
       "completed:success",
     ]);
   });
+
+  it("keeps the fresh queue timestamp when GitHub returns the run's original creation time", async () => {
+    const now = new Date("2026-05-18T12:00:00Z");
+    const { deps } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "CI: tests",
+        timing: { queuedAt: "2026-05-17T02:00:00Z" },
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController({ ...deps, now: () => now }, [
+      {
+        ...existingWatch(),
+        status: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+      },
+    ]);
+
+    await controller.rerun("getsentry/sentry/run/123", "failed");
+    await controller.pollNow({ watchIds: ["getsentry/sentry/run/123"] });
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "queued",
+      timing: { queuedAt: "2026-05-18T12:00:00.000Z" },
+    });
+  });
 });
