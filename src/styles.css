@@ -93,6 +93,8 @@ input {
 
 .watch-view-switcher {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   border: 1px solid rgb(139 148 158 / 28%);
   border-radius: 6px;
@@ -100,17 +102,36 @@ input {
 }
 
 .watch-view-button {
-  min-width: 48px;
+  position: relative;
+  display: inline-grid;
+  width: 75px;
   height: 24px;
+  place-items: center;
   border: 0;
   border-left: 1px solid rgb(139 148 158 / 24%);
-  padding: 0 8px;
+  padding: 0;
   background: transparent;
   color: rgb(238 241 245 / 52%);
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
+  white-space: nowrap;
+}
+
+.watch-view-count {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  color: rgb(238 241 245 / 36%);
+  font-size: 8px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.watch-view-button.has-unseen-items .watch-view-count {
+  color: rgb(121 192 255 / 58%);
 }
 
 .watch-view-button:first-child {
@@ -126,6 +147,14 @@ input {
 .watch-view-button.is-active {
   background: rgb(88 166 255 / 16%);
   color: #79c0ff;
+}
+
+.watch-view-button.is-active .watch-view-count {
+  color: rgb(121 192 255 / 50%);
+}
+
+.watch-view-button.is-active.has-unseen-items .watch-view-count {
+  color: rgb(121 192 255 / 66%);
 }
 
 .header h1 {

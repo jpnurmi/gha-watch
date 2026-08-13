@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
+import { getWatchViewCounts } from "./watchViewCounts";
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } from "../domain/githubUrl";
 import type { WatchedRepo } from "../domain/watchedRepos";
 import type { WatchSuppression } from "../domain/watchSuppressions";
@@ -241,6 +242,11 @@ describe("watchController", () => {
       remoteSaved,
       remoteDone,
     ]);
+    expect(getWatchViewCounts(controller.getWatches())).toEqual({
+      inbox: { total: 1, unseen: 0 },
+      saved: { total: 1, unseen: 0 },
+      done: { total: 1, unseen: 0 },
+    });
     expect(saves.at(-1)).toEqual(controller.getWatches());
   });
 
@@ -1902,8 +1908,17 @@ describe("watchController", () => {
     await controller.add(runTarget);
     await controller.add(jobTarget);
     await controller.pollNow();
+    expect(getWatchViewCounts(controller.getWatches()).inbox).toEqual({
+      total: 2,
+      unseen: 2,
+    });
+
     controller.markAllSeen();
 
+    expect(getWatchViewCounts(controller.getWatches()).inbox).toEqual({
+      total: 2,
+      unseen: 0,
+    });
     expect(controller.getWatches()).toMatchObject([
       {
         status: "completed:success",
