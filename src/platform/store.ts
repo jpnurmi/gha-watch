@@ -4,10 +4,16 @@ import {
   type WatchSuppression,
 } from "../domain/watchSuppressions";
 import type { WatchRecord } from "../domain/watches";
+import {
+  emptyWorkflowDiscoveryState,
+  normalizeWorkflowDiscoveryState,
+  type WorkflowDiscoveryState,
+} from "../domain/workflowDiscovery";
 
 const watchesStorageKey = "gha-watch:watches";
 const watchSuppressionsStorageKey = "gha-watch:watch-suppressions";
 const settingsStorageKey = "gha-watch:settings";
+const workflowDiscoveryStorageKey = "gha-watch:workflow-discovery";
 
 export function loadWatches(): WatchRecord[] {
   const rawWatches = localStorage.getItem(watchesStorageKey);
@@ -46,6 +52,24 @@ export async function saveWatchSuppressions(
   suppressions: WatchSuppression[],
 ): Promise<void> {
   localStorage.setItem(watchSuppressionsStorageKey, JSON.stringify(suppressions));
+}
+
+export function loadWorkflowDiscoveryState(now = new Date()): WorkflowDiscoveryState {
+  const rawState = localStorage.getItem(workflowDiscoveryStorageKey);
+
+  if (!rawState) {
+    return emptyWorkflowDiscoveryState;
+  }
+
+  try {
+    return normalizeWorkflowDiscoveryState(JSON.parse(rawState), now);
+  } catch {
+    return emptyWorkflowDiscoveryState;
+  }
+}
+
+export async function saveWorkflowDiscoveryState(state: WorkflowDiscoveryState): Promise<void> {
+  localStorage.setItem(workflowDiscoveryStorageKey, JSON.stringify(state));
 }
 
 export function loadSettings(): AppSettings {

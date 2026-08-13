@@ -92,6 +92,7 @@ import {
   fetchUserActiveWorkflowRuns,
   fetchWatchState,
   fetchWorkflowDefinitions,
+  fetchWorkflowRunsSince,
   type ActiveWorkflowRun,
   type OpenPullRequest,
   type RateLimit,
@@ -106,9 +107,11 @@ import {
   loadSettings,
   loadWatches,
   loadWatchSuppressions,
+  loadWorkflowDiscoveryState,
   saveSettings,
   saveWatches,
   saveWatchSuppressions,
+  saveWorkflowDiscoveryState,
 } from "./platform/store";
 import { createSettingsGistRemote } from "./platform/settingsGist";
 import { setTrayIndicator } from "./platform/tray";
@@ -282,14 +285,17 @@ const controller = createWatchController(
       ? fetchDemoUserActiveWorkflowRuns
       : async (target) => fetchUserActiveWorkflowRuns(target, await getAuthenticatedUserLogin()),
     fetchWorkflowDefinitions: isDemoMode ? fetchDemoWorkflowDefinitions : fetchWorkflowDefinitions,
+    fetchWorkflowRunsSince: isDemoMode ? undefined : fetchWorkflowRunsSince,
     notificationsPaused: () => isPopupOpen,
     notify: notifyStatusChange,
     rerun: isDemoMode ? async () => undefined : rerunWatch,
     save: saveWatches,
     saveSuppressions: saveWatchSuppressions,
+    saveWorkflowDiscoveryState,
   },
   loadInitialWatches(),
   isDemoMode ? [] : loadWatchSuppressions(),
+  isDemoMode ? undefined : loadWorkflowDiscoveryState(),
 );
 
 function notifyStatusChange(notification: WatchNotification): Promise<void> {
