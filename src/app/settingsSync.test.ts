@@ -27,6 +27,10 @@ function watch(id: string, triageState: WatchTriageState, repoIconUrl?: string):
 
 const localState: SyncedState = {
   settings: {
+    globalAddShortcut: {
+      accelerator: "CommandOrControl+Shift+G",
+      enabled: false,
+    },
     watchedRepos: [
       {
         owner: "jpnurmi",
@@ -45,6 +49,10 @@ const localState: SyncedState = {
 
 const remoteState: SyncedState = {
   settings: {
+    globalAddShortcut: {
+      accelerator: "CommandOrControl+Shift+H",
+      enabled: true,
+    },
     watchedRepos: [
       { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "all" },
       { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
@@ -63,6 +71,10 @@ describe("settings sync", () => {
 
     await expect(createSettingsSync(remote).sync(localState)).resolves.toEqual({
       settings: {
+        globalAddShortcut: {
+          accelerator: "CommandOrControl+Shift+H",
+          enabled: true,
+        },
         watchedRepos: [
           {
             owner: "jpnurmi",
@@ -92,6 +104,10 @@ describe("settings sync", () => {
 
     expect(remote.save).toHaveBeenCalledWith({
       settings: {
+        globalAddShortcut: {
+          accelerator: "CommandOrControl+Shift+G",
+          enabled: false,
+        },
         watchedRepos: [
           { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "user" },
         ],

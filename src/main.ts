@@ -1,5 +1,9 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { addWatchFromClipboard } from "./app/clipboardWatch";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
@@ -13,7 +17,22 @@ import {
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
-import { replacePopupHtmlPreservingScroll } from "./app/popupScroll";
+import {
+  createPopupFocusReference,
+  replacePopupHtmlPreservingScroll,
+  restorePopupFocus,
+  type PopupFocusReference,
+} from "./app/popupScroll";
+import {
+  getAdjacentIndex,
+  getAdjacentWatchView,
+  getPopupEscapeLayer,
+  getReorderAnnouncement,
+  getReorderTargetIndex,
+  isTextEntryTarget,
+  shouldHandleLocalShortcut,
+  type ReorderDirection,
+} from "./app/popupKeyboard";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getPrStateIconSvg } from "./app/prStateIcon";
 import { getRepoHeaderActions, type RepoHeaderActions } from "./app/repoHeaderActions";
@@ -70,6 +89,7 @@ import {
   type RepoDropTarget,
 } from "./domain/repoOrder";
 import {
+  getWatchId,
   getWatchTriageState,
   type WatchRecord,
   type WatchTriageState,
@@ -106,6 +126,10 @@ import {
 } from "./platform/store";
 import { createSettingsGistRemote } from "./platform/settingsGist";
 import { setTrayIndicator } from "./platform/tray";
+import {
+  createGlobalShortcutRegistration,
+  type GlobalShortcutRegistrationStatus,
+} from "./platform/globalShortcut";
 import "./styles.css";
 
 const pollIntervalMs = 30_000;
@@ -143,6 +167,7 @@ const getRepositoryIconUrl = createRepositoryIconProvider(
 );
 let isAdding = false;
 let addError: string | undefined;
+let addDraftValue: string | undefined;
 let isPolling = false;
 let isClearMenuOpen = false;
 let isPopupOpen = false;
@@ -164,6 +189,9 @@ let rateLimit: RateLimit | undefined;
 let lastSuccessfulRefreshAt: Date | undefined;
 let lastRefreshFailed = false;
 let settings = loadSettings();
+let liveAnnouncement = "";
+let popoverReturnFocus: PopupFocusReference | undefined;
+let globalShortcutStatus: GlobalShortcutRegistrationStatus = { state: "disabled" };
 let syncedStateRevision = 0;
 const settingsSync = createSettingsSync(createSettingsGistRemote());
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
@@ -286,6 +314,20 @@ const controller = createWatchController(
   isDemoMode ? [] : loadWatchSuppressions(),
 );
 
+const globalShortcutRegistration = createGlobalShortcutRegistration(
+  {
+    register: (shortcut, handler) => register(shortcut, handler),
+    unregister: (shortcut) => unregister(shortcut),
+  },
+  () => {
+    void handleAddFromClipboard(true);
+  },
+  (status) => {
+    globalShortcutStatus = status;
+    render();
+  },
+);
+
 function notifyStatusChange(notification: WatchNotification): Promise<void> {
   return sendDesktopNotification(notification);
 }
@@ -297,6 +339,7 @@ controller.subscribe(() => {
 });
 
 render();
+void configureGlobalAddShortcut();
 void updateTrayIndicator();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
@@ -318,6 +361,7 @@ document.addEventListener("click", (event) => {
     }
 
     isClearMenuOpen = false;
+    popoverReturnFocus = undefined;
     render();
   }
 
@@ -331,27 +375,13 @@ document.addEventListener("click", (event) => {
     pullRequestMenu = undefined;
     repositoryWatchMenu = undefined;
     repoCiStatusMenu = undefined;
+    popoverReturnFocus = undefined;
     render();
   }
 });
-window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    if (repoPressState || repoDragState || watchPressState || watchDragState) {
-      cancelRepoPointerDrag();
-      cancelWatchPointerDrag();
-      event.preventDefault();
-      return;
-    }
-
-    if (pendingWatchAction) {
-      pendingWatchAction = undefined;
-      render();
-      event.preventDefault();
-      return;
-    }
-
-    void hideMainWindow();
-  }
+window.addEventListener("keydown", handlePopupKeydown);
+window.addEventListener("beforeunload", () => {
+  void globalShortcutRegistration.dispose();
 });
 void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   isPopupOpen = focused;
@@ -363,6 +393,327 @@ void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
     void acknowledgePopupDismissal();
   }
 });
+
+function handlePopupKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    handleEscapeKey(event);
+    return;
+  }
+
+  if (handleMenuArrowKey(event) || handleTabArrowKey(event) || handleTreeArrowKey(event)) {
+    return;
+  }
+
+  if (handleKeyboardReorder(event)) {
+    return;
+  }
+
+  if (!shouldHandleLocalShortcut({
+    altKey: event.altKey,
+    ctrlKey: event.ctrlKey,
+    metaKey: event.metaKey,
+    textEntry: isTextEntryTarget(event.target),
+  })) {
+    return;
+  }
+
+  if (event.key.toLowerCase() === "a") {
+    event.preventDefault();
+    openAddForm();
+    return;
+  }
+
+  if (event.key.toLowerCase() === "r") {
+    event.preventDefault();
+    void refreshSettingsAndStatuses(true);
+    return;
+  }
+
+  if (event.key === "/") {
+    const searchInput = app.querySelector<HTMLInputElement>('[data-role="search-input"]');
+
+    if (searchInput) {
+      event.preventDefault();
+      searchInput.focus();
+    }
+    return;
+  }
+
+  const view = {
+    "1": "inbox",
+    "2": "saved",
+    "3": "done",
+  }[event.key] as WatchTriageState | undefined;
+
+  if (view) {
+    event.preventDefault();
+    selectWatchView(view, true);
+  }
+}
+
+function handleEscapeKey(event: KeyboardEvent): void {
+  const escapeLayer = getPopupEscapeLayer({
+    addOpen: isAdding,
+    dragActive: Boolean(repoPressState || repoDragState || watchPressState || watchDragState),
+    popoverOpen: hasOpenPopover(),
+  });
+
+  event.preventDefault();
+
+  if (escapeLayer === "drag") {
+    cancelRepoPointerDrag();
+    cancelWatchPointerDrag();
+    return;
+  }
+
+  if (escapeLayer === "popover") {
+    const returnFocus = popoverReturnFocus;
+    closePopovers();
+    render();
+    restorePopupFocus(app, returnFocus);
+    popoverReturnFocus = undefined;
+    return;
+  }
+
+  if (escapeLayer === "add") {
+    isAdding = false;
+    addError = undefined;
+    addDraftValue = undefined;
+    render();
+    app.querySelector<HTMLButtonElement>('[data-action="toggle-add"]')?.focus();
+    return;
+  }
+
+  void hideMainWindow();
+}
+
+function handleMenuArrowKey(event: KeyboardEvent): boolean {
+  if (!(event.target instanceof Element) || isTextEntryTarget(event.target)) {
+    return false;
+  }
+
+  const trigger = event.target.closest<HTMLElement>('[aria-haspopup="menu"][aria-expanded="true"]');
+  const menu = event.target.closest<HTMLElement>('[role="menu"]') ??
+    trigger?.parentElement?.querySelector<HTMLElement>(":scope > [role=\"menu\"]");
+
+  if (!menu || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    return false;
+  }
+
+  const items = Array.from(
+    menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]'),
+  ).filter((item) => !item.matches(":disabled") && item.getAttribute("aria-disabled") !== "true");
+
+  if (items.length === 0) {
+    return false;
+  }
+
+  const activeItem = event.target.closest<HTMLElement>(
+    '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]',
+  );
+  const currentIndex = activeItem ? items.indexOf(activeItem) : -1;
+  const nextIndex = event.key === "Home"
+    ? 0
+    : event.key === "End"
+      ? items.length - 1
+      : getAdjacentIndex(
+          currentIndex < 0 ? (event.key === "ArrowDown" ? items.length - 1 : 0) : currentIndex,
+          items.length,
+          event.key === "ArrowUp" ? "up" : "down",
+          true,
+        );
+
+  event.preventDefault();
+  items[nextIndex]?.focus();
+  return true;
+}
+
+function handleTabArrowKey(event: KeyboardEvent): boolean {
+  if (!(event.target instanceof HTMLElement) || event.target.getAttribute("role") !== "tab") {
+    return false;
+  }
+
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+    return false;
+  }
+
+  event.preventDefault();
+  selectWatchView(
+    getAdjacentWatchView(currentWatchView, event.key === "ArrowLeft" ? "left" : "right"),
+    true,
+  );
+  return true;
+}
+
+function handleTreeArrowKey(event: KeyboardEvent): boolean {
+  if (
+    !(event.target instanceof Element) ||
+    (event.key !== "ArrowLeft" && event.key !== "ArrowRight") ||
+    event.target.closest('[role="menu"]')
+  ) {
+    return false;
+  }
+
+  const treeHeader = event.target.closest<HTMLElement>(".watch-tree-header");
+  const groupHeader = treeHeader
+    ? undefined
+    : event.target.closest<HTMLElement>(".watch-group-header");
+  const toggle = treeHeader
+    ? treeHeader.querySelector<HTMLButtonElement>(":scope > .watch-tree-chevron")
+    : groupHeader?.querySelector<HTMLButtonElement>(":scope > .watch-group-toggle-chevron");
+
+  if (!toggle) {
+    return false;
+  }
+
+  const expanded = toggle.getAttribute("aria-expanded") === "true";
+  const shouldToggle = event.key === "ArrowRight" ? !expanded : expanded;
+
+  if (!shouldToggle) {
+    return false;
+  }
+
+  event.preventDefault();
+  toggle.click();
+  return true;
+}
+
+function handleKeyboardReorder(event: KeyboardEvent): boolean {
+  if (
+    !event.altKey ||
+    !event.shiftKey ||
+    (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+    !(event.target instanceof Element) ||
+    isTextEntryTarget(event.target)
+  ) {
+    return false;
+  }
+
+  const direction: ReorderDirection = event.key === "ArrowUp" ? "up" : "down";
+  const watchElement = event.target.closest<HTMLElement>(
+    ".watch[data-reorder-key], .watch-tree-node[data-reorder-key]",
+  );
+
+  if (watchElement?.dataset.reorderKey) {
+    const sourceKey = watchElement.dataset.reorderKey;
+    const order = getVisibleWatchReorderOrder(sourceKey);
+    const sourceIndex = order.indexOf(sourceKey);
+    const targetIndex = getReorderTargetIndex(sourceIndex, order.length, direction);
+
+    if (targetIndex === undefined) {
+      return false;
+    }
+
+    const targetIds = getWatchReorderTargetIds(order[targetIndex]);
+    const sourceIds = getWatchReorderRowIds(watchElement);
+
+    if (sourceIds.length === 0 || targetIds.length === 0) {
+      return false;
+    }
+
+    event.preventDefault();
+    liveAnnouncement = getReorderAnnouncement(
+      watchElement.querySelector<HTMLElement>(".watch-title-text")?.textContent?.trim() || sourceKey,
+      "watch",
+      targetIndex + 1,
+      order.length,
+    );
+    reorderWatchesWithinRepo(sourceIds, targetIds, direction === "up" ? "before" : "after");
+    return true;
+  }
+
+  const repoElement = event.target.closest<HTMLElement>(".watch-group[data-repo]");
+  const sourceKey = repoElement?.dataset.repo;
+
+  if (!sourceKey) {
+    return false;
+  }
+
+  const order = getVisibleRepoOrder();
+  const sourceIndex = order.indexOf(sourceKey);
+  const targetIndex = getReorderTargetIndex(sourceIndex, order.length, direction);
+
+  if (targetIndex === undefined) {
+    return false;
+  }
+
+  event.preventDefault();
+  liveAnnouncement = getReorderAnnouncement(sourceKey, "repository", targetIndex + 1, order.length);
+  reorderRepos(sourceKey, order[targetIndex], direction === "up" ? "before" : "after");
+  return true;
+}
+
+function hasOpenPopover(): boolean {
+  return Boolean(
+    isClearMenuOpen ||
+    pendingWatchAction ||
+    activeWorkflowRunMenu ||
+    pullRequestMenu ||
+    repositoryWatchMenu ||
+    repoCiStatusMenu
+  );
+}
+
+function closePopovers(): void {
+  isClearMenuOpen = false;
+  pendingWatchAction = undefined;
+  activeWorkflowRunMenu = undefined;
+  pullRequestMenu = undefined;
+  repositoryWatchMenu = undefined;
+  repoCiStatusMenu = undefined;
+}
+
+function rememberPopoverOpener(button: HTMLButtonElement): void {
+  if (button.getAttribute("aria-expanded") !== "true") {
+    popoverReturnFocus = createPopupFocusReference(app, button);
+  }
+}
+
+function focusFirstOpenMenuItem(): void {
+  window.requestAnimationFrame(() => {
+    app.querySelector<HTMLElement>(
+      '[role="menu"] [role="menuitem"]:not(:disabled), [role="menu"] [role="menuitemcheckbox"]:not(:disabled)',
+    )?.focus();
+  });
+}
+
+function selectWatchView(view: WatchTriageState, focusTab = false): void {
+  if (view === currentWatchView && !isAdding) {
+    if (focusTab) {
+      focusWatchViewTab(view);
+    }
+    return;
+  }
+
+  currentWatchView = view;
+  isAdding = false;
+  addError = undefined;
+  addDraftValue = undefined;
+  closePopovers();
+  popoverReturnFocus = undefined;
+  render();
+
+  if (focusTab) {
+    focusWatchViewTab(view);
+  }
+}
+
+function focusWatchViewTab(view: WatchTriageState): void {
+  app.querySelector<HTMLButtonElement>(`[data-action="select-watch-view"][data-watch-view="${view}"]`)?.focus();
+}
+
+function openAddForm(draftValue?: string): void {
+  currentWatchView = "inbox";
+  isAdding = true;
+  addError = undefined;
+  addDraftValue = draftValue;
+  closePopovers();
+  popoverReturnFocus = undefined;
+  render();
+  const input = app.querySelector<HTMLInputElement>('input[name="url"]');
+  input?.focus();
+  input?.setSelectionRange(input.value.length, input.value.length);
+}
 
 function renderRateLimitBar(): string {
   const usedPct = rateLimit ? Math.round((rateLimit.used / rateLimit.limit) * 100) : 0;
@@ -441,6 +792,7 @@ function render(): void {
 
   replacePopupHtmlPreservingScroll(app, `
     <section class="shell">
+      <div class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(liveAnnouncement)}</div>
       <header class="header">
         <div class="header-row">
           <div class="header-brand">
@@ -558,6 +910,7 @@ function renderWatchViewSwitcher(): string {
               role="tab"
               data-action="select-watch-view"
               data-watch-view="${state}"
+              tabindex="${currentWatchView === state ? "0" : "-1"}"
               aria-selected="${currentWatchView === state ? "true" : "false"}"
             >${label}</button>
           `,
@@ -584,6 +937,7 @@ function renderAddForm(): string {
           placeholder="owner/repo#1234"
           aria-label="GitHub repository, Actions URL, or pull request slug"
           aria-describedby="add-form-hint"
+          value="${escapeHtml(addDraftValue ?? "")}"
         />
         <div class="add-field-actions">
           <button class="add-form-submit" type="submit">Add</button>
@@ -606,7 +960,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
       class="watch-group${isCollapsed ? " is-collapsed" : ""}"
       data-repo="${escapeHtml(group.repoLabel)}"
     >
-      <div class="watch-group-header">
+      <div class="watch-group-header" aria-keyshortcuts="Alt+Shift+ArrowUp Alt+Shift+ArrowDown">
         ${renderRepoGroupChevron(group, isCollapsed)}
         ${renderRepositoryWatchMenu(group)}
         <span class="watch-group-meta">
@@ -627,7 +981,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
       ${
         isCollapsed || group.rows.length === 0
           ? ""
-          : `<ul class="watch-group-list">
+          : `<ul class="watch-group-list" role="tree" aria-label="Watches for ${escapeHtml(group.repoLabel)}">
               ${group.items.map((item) => renderWatchGroupItem(item)).join("")}
             </ul>`
       }
@@ -1170,7 +1524,7 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
   const children = !hasVisibleChildren || isCollapsed
     ? ""
     : `
-      <ul class="watch-tree-children">
+      <ul class="watch-tree-children" role="group">
         ${node.children.map((child) => renderWatchTreeNode(child, depth + 1)).join("")}
         ${node.rows.map((row) => renderWatch(row, depth + 1)).join("")}
       </ul>
@@ -1179,6 +1533,9 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
   return `
     <li
       class="watch-tree-node watch-tree-node-${node.kind}${isCollapsed ? " is-collapsed" : ""}"
+      role="treeitem"
+      ${hasVisibleChildren ? `aria-expanded="${isCollapsed ? "false" : "true"}"` : ""}
+      aria-keyshortcuts="Alt+Shift+ArrowUp Alt+Shift+ArrowDown"
       data-tree-node="${escapeHtml(node.id)}"
       data-reorder-key="${escapeHtml(node.id)}"
       data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
@@ -1326,6 +1683,8 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
   return `
     <li
       class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${hasDoneCandidate ? " has-done-candidate" : ""}${hasConfirmation ? " has-confirmation" : ""}"
+      role="treeitem"
+      aria-keyshortcuts="Alt+Shift+ArrowUp Alt+Shift+ArrowDown"
       data-id="${escapeHtml(row.id)}"
       data-reorder-key="${escapeHtml(row.id)}"
       data-row-ids="${escapeHtml(row.id)}"
@@ -1613,12 +1972,15 @@ function bindEvents(): void {
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-add"]')) {
     button.addEventListener("click", () => {
       const wasAdding = isAdding && currentWatchView === "inbox";
-      currentWatchView = "inbox";
-      isAdding = !wasAdding;
-      isClearMenuOpen = false;
-      addError = undefined;
-      render();
-      app.querySelector<HTMLInputElement>('input[name="url"]')?.focus();
+
+      if (wasAdding) {
+        isAdding = false;
+        addError = undefined;
+        addDraftValue = undefined;
+        render();
+      } else {
+        openAddForm();
+      }
     });
   }
 
@@ -1626,19 +1988,11 @@ function bindEvents(): void {
     button.addEventListener("click", () => {
       const view = parseWatchTriageState(button.dataset.watchView);
 
-      if (!view || view === currentWatchView) {
+      if (!view) {
         return;
       }
 
-      currentWatchView = view;
-      isAdding = false;
-      isClearMenuOpen = false;
-      pendingWatchAction = undefined;
-      activeWorkflowRunMenu = undefined;
-      pullRequestMenu = undefined;
-      repositoryWatchMenu = undefined;
-      repoCiStatusMenu = undefined;
-      render();
+      selectWatchView(view);
     });
   }
 
@@ -1658,6 +2012,7 @@ function bindEvents(): void {
     () => {
       isAdding = false;
       addError = undefined;
+      addDraftValue = undefined;
       render();
     },
   );
@@ -1665,8 +2020,41 @@ function bindEvents(): void {
   app.querySelector<HTMLButtonElement>('[data-action="toggle-clear-menu"]')?.addEventListener(
     "click",
     () => {
-      isClearMenuOpen = !isClearMenuOpen;
+      const button = app.querySelector<HTMLButtonElement>('[data-action="toggle-clear-menu"]')!;
+      const nextOpen = !isClearMenuOpen;
+      rememberPopoverOpener(button);
+      closePopovers();
+      isClearMenuOpen = nextOpen;
       render();
+
+      if (isClearMenuOpen) {
+        focusFirstOpenMenuItem();
+      } else {
+        popoverReturnFocus = undefined;
+      }
+    },
+  );
+
+  app.querySelector<HTMLButtonElement>('[data-action="add-from-clipboard"]')?.addEventListener(
+    "click",
+    () => {
+      void handleAddFromClipboard(false);
+    },
+  );
+
+  app.querySelector<HTMLButtonElement>('[data-action="toggle-global-add-shortcut"]')?.addEventListener(
+    "click",
+    () => {
+      void setGlobalAddShortcutEnabled(!settings.globalAddShortcut.enabled);
+    },
+  );
+
+  app.querySelector<HTMLFormElement>('[data-role="global-shortcut-form"]')?.addEventListener(
+    "submit",
+    (event) => {
+      event.preventDefault();
+      const formData = new FormData(event.currentTarget as HTMLFormElement);
+      void setGlobalAddShortcutAccelerator(String(formData.get("global-shortcut") || ""));
     },
   );
 
@@ -1716,7 +2104,9 @@ function bindEvents(): void {
       event.preventDefault();
       event.stopPropagation();
 
+      rememberPopoverOpener(button);
       toggleRepoCiStatusMenu(button.dataset.repo || "");
+      focusFirstOpenMenuItem();
     });
   }
 
@@ -1785,19 +2175,23 @@ function bindEvents(): void {
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-active-workflows"]')) {
     button.addEventListener("click", () => {
+      rememberPopoverOpener(button);
       void toggleActiveWorkflowRuns({
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
       });
+      focusFirstOpenMenuItem();
     });
   }
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repository-watches"]')) {
     button.addEventListener("click", () => {
+      rememberPopoverOpener(button);
       void toggleRepositoryWatchMenu({
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
       });
+      focusFirstOpenMenuItem();
     });
   }
 
@@ -1814,10 +2208,12 @@ function bindEvents(): void {
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repo-prs"]')) {
     button.addEventListener("click", () => {
+      rememberPopoverOpener(button);
       void togglePullRequests({
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
       });
+      focusFirstOpenMenuItem();
     });
   }
 
@@ -1844,6 +2240,7 @@ function bindEvents(): void {
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-rerun"]')) {
     button.addEventListener("click", () => {
+      rememberPopoverOpener(button);
       armWatchAction(button.dataset.id || "", "rerun");
     });
   }
@@ -1912,14 +2309,59 @@ function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): stri
       ${getOverflowMenuItems({
         autoStartEnabled,
         autoStartBusy,
+        globalAddShortcutEnabled: settings.globalAddShortcut.enabled,
         hasWatches,
         hasFinishedWatches,
         isDoneView: currentWatchView === "done",
       })
         .map(renderClearMenuItem)
         .join("")}
+      ${renderGlobalShortcutSetting()}
     </div>
   `;
+}
+
+function renderGlobalShortcutSetting(): string {
+  const status = getGlobalShortcutStatusLabel(globalShortcutStatus);
+
+  return `
+    <form class="global-shortcut-setting" data-role="global-shortcut-form" role="none">
+      <label for="global-shortcut-accelerator">Shortcut</label>
+      <span class="global-shortcut-field">
+        <input
+          id="global-shortcut-accelerator"
+          name="global-shortcut"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          value="${escapeHtml(settings.globalAddShortcut.accelerator)}"
+          aria-describedby="global-shortcut-status"
+        />
+        <button class="global-shortcut-apply" type="submit" role="menuitem">Apply</button>
+      </span>
+      <span
+        id="global-shortcut-status"
+        class="global-shortcut-status${globalShortcutStatus.state === "error" ? " is-error" : ""}"
+        role="status"
+      >${escapeHtml(status)}</span>
+    </form>
+  `;
+}
+
+function getGlobalShortcutStatusLabel(status: GlobalShortcutRegistrationStatus): string {
+  if (status.state === "disabled") {
+    return "Disabled";
+  }
+
+  if (status.state === "registering") {
+    return "Registering…";
+  }
+
+  if (status.state === "registered") {
+    return `Registered: ${status.shortcut}`;
+  }
+
+  return `Unavailable: ${status.error}`;
 }
 
 function renderClearMenuItem(item: OverflowMenuItem): string {
@@ -2804,11 +3246,11 @@ function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
     return;
   }
 
-  pendingWatchAction = pendingWatchAction?.id === id && pendingWatchAction.kind === kind
+  const nextAction = pendingWatchAction?.id === id && pendingWatchAction.kind === kind
     ? undefined
     : { id, kind };
-  isClearMenuOpen = false;
-  repoCiStatusMenu = undefined;
+  closePopovers();
+  pendingWatchAction = nextAction;
   render();
 
   if (pendingWatchAction) {
@@ -2911,7 +3353,9 @@ async function acknowledgePopupDismissal(): Promise<void> {
   const dismissedState = dismissPopupUi({
     clearMenuOpen: isClearMenuOpen,
   });
+  closePopovers();
   isClearMenuOpen = dismissedState.clearMenuOpen;
+  popoverReturnFocus = undefined;
   render();
 
   if (createTrayState(controller.getWatches()).hasUnseenChanges) {
@@ -2928,18 +3372,14 @@ async function acknowledgePopupDismissal(): Promise<void> {
 async function addWatch(url: string): Promise<void> {
   try {
     const target = await parseWatchInput(url);
-
-    if (target.kind === "repo") {
-      await addWatchedRepository(target);
-    } else {
-      await controller.add(target);
-    }
+    await addParsedWatchTarget(target);
 
     currentWatchView = "inbox";
     isAdding = false;
     isClearMenuOpen = false;
     repoCiStatusMenu = undefined;
     addError = undefined;
+    addDraftValue = undefined;
   } catch (error) {
     addError = error instanceof Error ? error.message : String(error);
   }
@@ -2949,12 +3389,128 @@ async function addWatch(url: string): Promise<void> {
   void updateTrayIndicator();
 }
 
+async function addParsedWatchTarget(target: ParsedGitHubTarget): Promise<void> {
+  if (target.kind === "repo") {
+    await addWatchedRepository(target);
+  } else {
+    await controller.add(target);
+  }
+}
+
+async function handleAddFromClipboard(globalInvocation: boolean): Promise<void> {
+  isClearMenuOpen = false;
+  popoverReturnFocus = undefined;
+  render();
+
+  const result = await addWatchFromClipboard({
+    addTarget: addParsedWatchTarget,
+    parseInput: parseWatchInput,
+    readText,
+  });
+
+  if (result.status === "added") {
+    currentWatchView = "inbox";
+    isAdding = false;
+    addError = undefined;
+    addDraftValue = undefined;
+    closePopovers();
+    liveAnnouncement = "Added clipboard item to Inbox.";
+  } else {
+    currentWatchView = "inbox";
+    isAdding = true;
+    addError = result.error;
+    addDraftValue = result.prefill;
+    closePopovers();
+  }
+
+  render();
+
+  if (result.status !== "added") {
+    const input = app.querySelector<HTMLInputElement>('input[name="url"]');
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  }
+
+  if (globalInvocation) {
+    try {
+      await invoke("show_main_window_for_shortcut");
+    } catch (error) {
+      console.warn("Could not show GHA Watch after the global shortcut.", error);
+    }
+  }
+
+  if (result.status === "added") {
+    focusClipboardTarget(result.target);
+  }
+
+  void refreshListedRepositoryCiStatuses();
+  void updateTrayIndicator();
+}
+
+function focusClipboardTarget(target: ParsedGitHubTarget): void {
+  const element = target.kind === "repo"
+    ? getRepoGroupElement(getWatchedRepoKey(target))
+    : Array.from(app.querySelectorAll<HTMLElement>("[data-row-ids]")).find(
+        (candidate) => getWatchReorderRowIds(candidate).includes(getWatchId(target)),
+      );
+
+  element?.scrollIntoView({ block: "nearest" });
+  element?.querySelector<HTMLElement>(
+    ".watch-title-link, .watch-group-link, .watch-tree-chevron, button",
+  )?.focus();
+}
+
 async function parseWatchInput(input: string): Promise<ParsedGitHubTarget> {
   if (!isOwnerlessPullRequestSlug(input) && !isOwnerlessRepositorySlug(input)) {
     return parseGitHubActionsUrl(input);
   }
 
   return parseGitHubActionsUrl(input, { defaultOwner: await getAuthenticatedUserLogin() });
+}
+
+async function configureGlobalAddShortcut(): Promise<void> {
+  await globalShortcutRegistration.configure(
+    settings.globalAddShortcut.enabled,
+    settings.globalAddShortcut.accelerator,
+  );
+}
+
+async function setGlobalAddShortcutEnabled(enabled: boolean): Promise<void> {
+  await updateAppSettings(
+    {
+      ...settings,
+      globalAddShortcut: {
+        ...settings.globalAddShortcut,
+        enabled,
+      },
+    },
+    true,
+  );
+}
+
+async function setGlobalAddShortcutAccelerator(accelerator: string): Promise<void> {
+  const normalizedAccelerator = accelerator.trim();
+
+  if (!normalizedAccelerator) {
+    globalShortcutStatus = {
+      state: "error",
+      shortcut: "",
+      error: "Enter a shortcut before applying it.",
+    };
+    render();
+    return;
+  }
+
+  await updateAppSettings(
+    {
+      ...settings,
+      globalAddShortcut: {
+        ...settings.globalAddShortcut,
+        accelerator: normalizedAccelerator,
+      },
+    },
+    true,
+  );
 }
 
 async function updateRateLimit(): Promise<void> {
@@ -2967,6 +3523,9 @@ async function updateRateLimit(): Promise<void> {
 }
 
 async function updateAppSettings(nextSettings: typeof settings, syncRemote: boolean): Promise<void> {
+  const shortcutChanged =
+    nextSettings.globalAddShortcut.enabled !== settings.globalAddShortcut.enabled ||
+    nextSettings.globalAddShortcut.accelerator !== settings.globalAddShortcut.accelerator;
   settings = nextSettings;
 
   if (syncRemote) {
@@ -2974,6 +3533,10 @@ async function updateAppSettings(nextSettings: typeof settings, syncRemote: bool
   }
 
   await saveSettings(nextSettings);
+
+  if (shortcutChanged) {
+    await configureGlobalAddShortcut();
+  }
 
   if (syncRemote && !isDemoMode) {
     uploadSyncedState();

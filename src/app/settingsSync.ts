@@ -70,6 +70,7 @@ export function toSyncedState(state: SyncedState): SyncedState {
 
   return {
     settings: {
+      globalAddShortcut: settings.globalAddShortcut,
       watchedRepos: settings.watchedRepos.map(({ repoIconUrl: _repoIconUrl, ...repo }) => repo),
       repoOrder: settings.repoOrder,
     },

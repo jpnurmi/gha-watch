@@ -15,6 +15,8 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Configure all or user-specific pull request watches alongside workflow watches from the repository eye menu.
 - Sync watched repositories, repository order, and Saved/Done items across machines through an automatically discovered unlisted GitHub Gist.
 - Long-press repository headers to reorder visible repositories.
+- Reorder repositories and watch groups from the keyboard.
+- Add a validated GitHub link from the clipboard, optionally with a configurable global shortcut.
 - Load a repository's open pull requests or active workflow runs on demand and start watching from the menu.
 - Show queued, in-progress, successful, failed, cancelled, and errored states.
 - Mark unseen status changes with a blue indicator.
@@ -55,6 +57,25 @@ Repository links and `OWNER/REPO` slugs watch your open pull requests and keep t
 Ownerless repository names use the authenticated GitHub CLI user as the owner.
 Pull request links are live watches. On each poll, the app resolves the current PR head and watches the matching workflow runs for that head.
 Ownerless pull request slugs use the authenticated GitHub CLI user as the owner.
+
+## Keyboard shortcuts
+
+Keyboard shortcuts work while the tray popup has focus, except for the optional global shortcut. Local shortcuts are ignored while typing in an input, text area, select, or editable field.
+
+- `A`: open the Add form.
+- `R`: refresh GitHub status.
+- `1`, `2`, `3`: select Inbox, Saved, or Done.
+- `Left` / `Right`: select the previous or next triage tab; expand or collapse a focused repository/tree group.
+- `Up` / `Down`: move through an open menu.
+- `Alt+Shift+Up` / `Alt+Shift+Down`: move the focused repository or watch group and announce its new position.
+- `Escape`: cancel a reorder, close the innermost menu, close Add, then hide the popup.
+- `/`: focus search when a search control is available.
+
+Use **More → Add from clipboard** to read the clipboard once and validate its plain text through the same parser as the Add form. GHA Watch never writes to the clipboard and never opens or executes clipboard text before validation.
+
+The optional global add shortcut is disabled by default. Enable it under **More → Global add shortcut**, edit the accelerator, and choose **Apply**. The default is `CommandOrControl+Shift+G`. If another application owns the accelerator, registration remains disabled and the menu shows the error; GHA Watch does not replace the other application's shortcut.
+
+Global shortcut and clipboard behavior can vary by desktop environment, especially under Linux/Wayland. Clipboard permission denials and unsupported or conflicting global accelerators leave the normal Add form and **Add from clipboard** fallback available.
 
 ## Development
 
