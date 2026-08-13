@@ -83,6 +83,14 @@ describe("platform frame styling", () => {
     expect(rustSource).not.toContain("gha-watch-hover");
   });
 
+  it("starts native resize drags from client-side decoration edges", () => {
+    expect(rustSource).toContain("configure_linux_resize_events");
+    expect(rustSource).toContain("linux_frame_bounds(window, width, height)");
+    expect(rustSource).not.toContain("LINUX_RESIZE_HANDLE");
+    expect(rustSource).toContain("window.begin_resize_drag");
+    expect(rustSource).toContain("linux_resize_edge_for_event(&window, event)");
+  });
+
   it("sets Linux window-manager controls when the native window is realized", () => {
     expect(rustSource).toContain("gtk_window.connect_realize");
     expect(rustSource).toContain("set_linux_window_manager_functions");

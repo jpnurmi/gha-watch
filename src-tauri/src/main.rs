@@ -34,6 +34,14 @@ window.gha-watch-rounded:not(.maximized):not(.fullscreen):not(.tiled):not(.tiled
   border-bottom-right-radius: 12px;
 }
 "#;
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LinuxFrameBounds {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
 
 const TRAY_ID: &str = "gha-watch";
 
@@ -396,6 +404,110 @@ fn configure_linux_header_bar(header: &gtk::HeaderBar) {
 }
 
 #[cfg(target_os = "linux")]
+fn linux_resize_edge(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    frame: LinuxFrameBounds,
+) -> Option<gtk::gdk::WindowEdge> {
+    let west = x >= 0 && x <= frame.left;
+    let east = x < width && x >= frame.right.saturating_sub(1);
+    let north = y >= 0 && y <= frame.top;
+    let south = y < height && y >= frame.bottom.saturating_sub(1);
+
+    match (west, east, north, south) {
+        (true, _, true, _) => Some(gtk::gdk::WindowEdge::NorthWest),
+        (_, true, true, _) => Some(gtk::gdk::WindowEdge::NorthEast),
+        (true, _, _, true) => Some(gtk::gdk::WindowEdge::SouthWest),
+        (_, true, _, true) => Some(gtk::gdk::WindowEdge::SouthEast),
+        (true, _, _, _) => Some(gtk::gdk::WindowEdge::West),
+        (_, true, _, _) => Some(gtk::gdk::WindowEdge::East),
+        (_, _, true, _) => Some(gtk::gdk::WindowEdge::North),
+        (_, _, _, true) => Some(gtk::gdk::WindowEdge::South),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_frame_bounds(
+    window: &gtk::ApplicationWindow,
+    width: i32,
+    height: i32,
+) -> LinuxFrameBounds {
+    use gtk::prelude::*;
+
+    let mut bounds: Option<LinuxFrameBounds> = None;
+    for widget in [window.titlebar(), window.child()].into_iter().flatten() {
+        if !widget.is_visible() {
+            continue;
+        }
+        let allocation = widget.allocation();
+        let widget_bounds = LinuxFrameBounds {
+            left: allocation.x(),
+            top: allocation.y(),
+            right: allocation.x() + allocation.width(),
+            bottom: allocation.y() + allocation.height(),
+        };
+        bounds = Some(match bounds {
+            Some(bounds) => LinuxFrameBounds {
+                left: bounds.left.min(widget_bounds.left),
+                top: bounds.top.min(widget_bounds.top),
+                right: bounds.right.max(widget_bounds.right),
+                bottom: bounds.bottom.max(widget_bounds.bottom),
+            },
+            None => widget_bounds,
+        });
+    }
+
+    bounds.unwrap_or(LinuxFrameBounds {
+        left: 0,
+        top: 0,
+        right: width,
+        bottom: height,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_resize_edge_for_event(
+    window: &gtk::ApplicationWindow,
+    event: &gtk::gdk::EventButton,
+) -> Option<gtk::gdk::WindowEdge> {
+    use gtk::prelude::*;
+
+    if !window.is_resizable() || window.is_maximized() || event.button() != 1 {
+        return None;
+    }
+
+    let gdk_window = window.window()?;
+    let (root_x, root_y) = event.root();
+    let (left, top) = gdk_window.position();
+    let width = gdk_window.width();
+    let height = gdk_window.height();
+    linux_resize_edge(
+        root_x as i32 - left,
+        root_y as i32 - top,
+        width,
+        height,
+        linux_frame_bounds(window, width, height),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_resize_events(window: &gtk::ApplicationWindow) {
+    use gtk::prelude::*;
+
+    window.connect_button_press_event(|window, event| {
+        let Some(edge) = linux_resize_edge_for_event(window, event) else {
+            return gtk::glib::Propagation::Proceed;
+        };
+        let (root_x, root_y) = event.root();
+        window.begin_resize_drag(edge, 1, root_x as i32, root_y as i32, event.time());
+        gtk::glib::Propagation::Stop
+    });
+}
+
+#[cfg(target_os = "linux")]
 fn configure_linux_titlebar_events(event_box: &gtk::EventBox, window: &gtk::ApplicationWindow) {
     use gtk::prelude::*;
 
@@ -405,6 +517,9 @@ fn configure_linux_titlebar_events(event_box: &gtk::EventBox, window: &gtk::Appl
     let window = window.clone();
     event_box.connect_button_press_event(move |_, event| match event.button() {
         1 => {
+            if linux_resize_edge_for_event(&window, event).is_some() {
+                return gtk::glib::Propagation::Proceed;
+            }
             let (root_x, root_y) = event.root();
             window.begin_move_drag(1, root_x as i32, root_y as i32, event.time());
             gtk::glib::Propagation::Stop
@@ -460,6 +575,7 @@ fn configure_linux_window_controls(window: &tauri::WebviewWindow) {
             } else {
                 gtk_window.connect_realize(set_linux_window_manager_functions);
             }
+            configure_linux_resize_events(&gtk_window);
         }
     });
 }
@@ -944,5 +1060,45 @@ mod tests {
     fn loads_mixed_tray_icons() {
         assert!(tray_icon_for_status("mixed", false).is_ok());
         assert!(tray_icon_for_status("mixed", true).is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detects_linux_resize_edges_and_corners() {
+        let frame = LinuxFrameBounds {
+            left: 26,
+            top: 23,
+            right: 434,
+            bottom: 331,
+        };
+        assert_eq!(
+            linux_resize_edge(2, 2, 460, 360, frame),
+            Some(gtk::gdk::WindowEdge::NorthWest)
+        );
+        assert_eq!(
+            linux_resize_edge(434, 180, 460, 360, frame),
+            Some(gtk::gdk::WindowEdge::East)
+        );
+        assert_eq!(
+            linux_resize_edge(2, 180, 460, 360, frame),
+            Some(gtk::gdk::WindowEdge::West)
+        );
+        assert_eq!(
+            linux_resize_edge(230, 331, 460, 360, frame),
+            Some(gtk::gdk::WindowEdge::South)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ignores_linux_window_interior_for_resize() {
+        let frame = LinuxFrameBounds {
+            left: 26,
+            top: 23,
+            right: 434,
+            bottom: 331,
+        };
+        assert_eq!(linux_resize_edge(230, 180, 460, 360, frame), None);
+        assert_eq!(linux_resize_edge(230, 24, 460, 360, frame), None);
     }
 }
