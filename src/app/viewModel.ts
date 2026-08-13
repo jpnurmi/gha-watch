@@ -8,6 +8,11 @@ import {
   type WatchRecord,
   type WatchTriageState,
 } from "../domain/watches";
+import {
+  filterWatchCandidates,
+  hasActiveWatchFilters,
+  type WatchFilters,
+} from "./watchFilters";
 
 export type RowTone =
   | "pending"
@@ -119,6 +124,8 @@ export type PopupViewModel = {
   subtitle: string;
   groups: WatchGroupViewModel[];
   rows: WatchRowViewModel[];
+  filtering: boolean;
+  totalRowCount: number;
 };
 
 type Counts = {
@@ -138,17 +145,29 @@ export function createPopupViewModel(
   watchedRepos: WatchedRepo[] = [],
   repoOrder: string[] = [],
   repoCiStatuses: Record<string, RepoCiStatusViewModel> = {},
+  filters?: WatchFilters,
 ): PopupViewModel {
-  const rows = watches.map((watch) =>
-    createWatchRowViewModel(watch, now, repoCiStatuses[getRepoLabel(watch.target)]),
-  );
+  const candidates = watches.map((watch) => ({
+    watch,
+    row: createWatchRowViewModel(watch, now, repoCiStatuses[getRepoLabel(watch.target)]),
+  }));
+  const filteredCandidates = filters ? filterWatchCandidates(candidates, filters) : candidates;
+  const filteredWatches = filteredCandidates.map(({ watch }) => watch);
+  const rows = filteredCandidates.map(({ row }) => row);
   const counts = countRows(rows);
+  const filtering = Boolean(filters && hasActiveWatchFilters(filters));
+  const groups = groupRowsByRepo(filteredWatches, rows, watchedRepos, repoCiStatuses);
 
   return {
     title: getTitle(counts, rows.length),
     subtitle: getSubtitle(counts, rows.length),
-    groups: orderGroups(groupRowsByRepo(watches, rows, watchedRepos, repoCiStatuses), repoOrder),
+    groups: orderGroups(
+      filtering ? groups.filter((group) => group.rows.length > 0) : groups,
+      repoOrder,
+    ),
     rows,
+    filtering,
+    totalRowCount: watches.length,
   };
 }
 

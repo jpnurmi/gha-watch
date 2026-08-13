@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createPopupViewModel } from "./viewModel";
+import { createEmptyWatchFilters } from "./watchFilters";
 import type { WatchRecord } from "../domain/watches";
 
 function watch(overrides: Partial<WatchRecord>): WatchRecord {
@@ -22,6 +23,81 @@ function watch(overrides: Partial<WatchRecord>): WatchRecord {
 }
 
 describe("createPopupViewModel", () => {
+  it("filters source watches before grouping and excludes nonmatching siblings", () => {
+    const matching = watch({
+      label: "CI: macOS",
+      metadata: { workflowName: "CI", jobName: "macOS" },
+    });
+    const sibling = watch({
+      id: "getsentry/sentry/run/456",
+      target: {
+        kind: "run",
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "456",
+        url: "https://github.com/getsentry/sentry/actions/runs/456",
+      },
+      label: "CI: Linux",
+      metadata: { workflowName: "CI", jobName: "Linux" },
+    });
+    const otherRepo = watch({
+      id: "getsentry/relay/run/789",
+      target: {
+        kind: "run",
+        owner: "getsentry",
+        repo: "relay",
+        runId: "789",
+        url: "https://github.com/getsentry/relay/actions/runs/789",
+      },
+      label: "CI: macOS",
+    });
+    const model = createPopupViewModel(
+      [matching, sibling, otherRepo],
+      new Date(),
+      [],
+      [],
+      {},
+      { ...createEmptyWatchFilters(), query: "macos", repository: "getsentry/sentry" },
+    );
+
+    expect(model.groups).toHaveLength(1);
+    expect(model.groups[0].repoLabel).toBe("getsentry/sentry");
+    expect(model.groups[0].rows.map((row) => row.id)).toEqual([matching.id]);
+    expect(model.rows.map((row) => row.id)).toEqual([matching.id]);
+    expect(model.totalRowCount).toBe(3);
+    expect(model.filtering).toBe(true);
+  });
+
+  it("does not retain empty watched-repository groups in filtered results", () => {
+    const model = createPopupViewModel(
+      [],
+      new Date(),
+      [{ owner: "getsentry", repo: "sentry" }],
+      [],
+      {},
+      { ...createEmptyWatchFilters(), query: "missing" },
+    );
+
+    expect(model.groups).toEqual([]);
+    expect(model.rows).toEqual([]);
+    expect(model.filtering).toBe(true);
+    expect(model.totalRowCount).toBe(0);
+  });
+
+  it("retains watched repository metadata for matching filtered groups", () => {
+    const model = createPopupViewModel(
+      [watch({ label: "CI: macOS" })],
+      new Date(),
+      [{ owner: "getsentry", repo: "sentry" }],
+      [],
+      {},
+      { ...createEmptyWatchFilters(), query: "macos" },
+    );
+
+    expect(model.groups).toHaveLength(1);
+    expect(model.groups[0].watched).toBe(true);
+  });
+
   it("summarizes incomplete checks like GitHub's checks popup", () => {
     const model = createPopupViewModel([
       watch({ status: "in_progress", lastState: { status: "in_progress", conclusion: null } }),

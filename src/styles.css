@@ -432,6 +432,158 @@ input {
   font-size: 12px;
 }
 
+.watch-filters {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+  padding: 7px 12px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.watch-filter-search {
+  display: grid;
+  min-width: 0;
+  height: 30px;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 6px;
+  padding: 0 7px;
+  background: rgb(0 0 0 / 16%);
+  color: rgb(238 241 245 / 42%);
+}
+
+.watch-filter-search:focus-within {
+  border-color: rgb(88 166 255 / 72%);
+  box-shadow: 0 0 0 2px rgb(88 166 255 / 14%);
+}
+
+.watch-filter-search-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.watch-filter-search input {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #eef1f5;
+  outline: 0;
+  font-size: 12px;
+}
+
+.watch-filter-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.watch-filter-query-clear {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  padding: 0;
+  background: transparent;
+  color: rgb(238 241 245 / 46%);
+  cursor: pointer;
+}
+
+.watch-filter-query-clear:hover,
+.watch-filter-query-clear:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  color: rgb(238 241 245 / 82%);
+}
+
+.watch-filter-query-clear svg {
+  width: 12px;
+  height: 12px;
+}
+
+.watch-filter-result-count {
+  color: rgb(238 241 245 / 44%);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.watch-filter-facets {
+  display: none;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.watch-filters:focus-within .watch-filter-facets,
+.watch-filters.is-active .watch-filter-facets {
+  display: flex;
+}
+
+.watch-filter-statuses {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.watch-filter-chip,
+.watch-filter-clear {
+  height: 22px;
+  border: 1px solid rgb(139 148 158 / 26%);
+  border-radius: 999px;
+  padding: 0 7px;
+  background: transparent;
+  color: rgb(238 241 245 / 56%);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.watch-filter-chip:hover,
+.watch-filter-chip:focus-visible,
+.watch-filter-clear:hover,
+.watch-filter-clear:focus-visible {
+  border-color: rgb(139 148 158 / 48%);
+  background: rgb(255 255 255 / 7%);
+  color: rgb(238 241 245 / 84%);
+}
+
+.watch-filter-chip.is-selected {
+  border-color: rgb(88 166 255 / 42%);
+  background: rgb(88 166 255 / 14%);
+  color: #79c0ff;
+}
+
+.watch-filter-repository {
+  width: 118px;
+  height: 24px;
+  min-width: 0;
+  border: 1px solid rgb(139 148 158 / 26%);
+  border-radius: 6px;
+  padding: 0 5px;
+  background: #1f2630;
+  color: rgb(238 241 245 / 68%);
+  outline: 0;
+  font-size: 10px;
+}
+
+.watch-filter-repository:focus-visible {
+  border-color: #58a6ff;
+}
+
+.watch-filter-clear {
+  flex: 0 0 auto;
+  border-color: transparent;
+  border-radius: 5px;
+  padding: 0 4px;
+  color: rgb(238 241 245 / 46%);
+}
+
 .watch-list {
   --tree-left-padding: 6px;
   --tree-chevron-width: 10px;
