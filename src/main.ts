@@ -278,7 +278,9 @@ const controller = createWatchController(
     fetchWorkflowDefinitions: isDemoMode ? fetchDemoWorkflowDefinitions : fetchWorkflowDefinitions,
     notificationsPaused: () => isPopupOpen,
     notify: notifyStatusChange,
-    rerun: isDemoMode ? async () => undefined : rerunWatch,
+    rerun: isDemoMode
+      ? async () => undefined
+      : (target, mode, ignoredCheckKeys) => rerunWatch(target, mode, undefined, ignoredCheckKeys),
     save: saveWatches,
     saveSuppressions: saveWatchSuppressions,
   },
@@ -1325,7 +1327,7 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
 
   return `
     <li
-      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${hasDoneCandidate ? " has-done-candidate" : ""}${hasConfirmation ? " has-confirmation" : ""}"
+      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${row.pullRequestChecks.length > 0 ? " has-checks" : ""}${hasDoneCandidate ? " has-done-candidate" : ""}${hasConfirmation ? " has-confirmation" : ""}"
       data-id="${escapeHtml(row.id)}"
       data-reorder-key="${escapeHtml(row.id)}"
       data-row-ids="${escapeHtml(row.id)}"
@@ -1469,10 +1471,12 @@ function getMetadataDetail(row: WatchRowViewModel): string | undefined {
 }
 
 function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean): string {
-  const rerunMenuOpen = pendingWatchAction?.id === row.id;
+  const rerunMenuOpen = pendingWatchAction?.id === row.id && pendingWatchAction.kind === "rerun";
+  const checkMenuOpen = pendingWatchAction?.id === row.id && pendingWatchAction.kind === "checks";
 
   return `
     <div class="watch-actions">
+      ${row.pullRequestChecks.length > 0 ? renderPullRequestCheckMenu(row, checkMenuOpen) : ""}
       ${
         row.canRerun
           ? `<span class="repo-action-menu repo-action-menu-container watch-rerun-control">
@@ -1500,6 +1504,64 @@ function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean): 
       }
       ${renderTriageButtons(row.triageState, [row.id], "watch-action-button", row.label, hasDoneCandidate)}
     </div>
+  `;
+}
+
+function renderPullRequestCheckMenu(row: WatchRowViewModel, menuOpen: boolean): string {
+  return `
+    <span class="repo-action-menu repo-action-menu-container watch-check-control">
+      <button
+        class="watch-action-button watch-check-button"
+        type="button"
+        data-action="arm-checks"
+        data-id="${escapeHtml(row.id)}"
+        title="Choose watched checks"
+        aria-label="Choose watched checks for ${escapeHtml(row.label)}"
+        aria-haspopup="dialog"
+        aria-expanded="${menuOpen ? "true" : "false"}"
+      >
+        ${renderChecksActionIcon()}
+      </button>
+      ${menuOpen ? `
+        <div class="repo-action-popover watch-check-popover" role="dialog" aria-label="Checks for ${escapeHtml(row.label)}">
+          <div class="watch-check-summary">
+            ${row.noWatchedChecks ? "No watched checks" : `${row.pullRequestChecks.filter((check) => !check.ignored).length} watched`}
+          </div>
+          ${row.rerunUnavailableReason ? `<div class="watch-check-note">${escapeHtml(row.rerunUnavailableReason)}</div>` : ""}
+          ${row.pullRequestChecks.map((check) => `
+            <div class="watch-check-item${check.ignored ? " is-ignored" : ""}" role="group" aria-label="${escapeHtml(check.name)}">
+              <span class="watch-check-state status-icon-${check.tone}" title="${escapeHtml(check.statusLabel)}">
+                ${getStatusIconSvg(check.tone, `${row.id}-${check.key}`)}
+              </span>
+              <span class="watch-check-main">
+                ${check.link
+                  ? `<button class="watch-check-link" type="button" data-action="open-github-url" data-url="${escapeHtml(check.link)}" data-row-ids="${escapeHtml(row.id)}" title="Open ${escapeHtml(check.name)}">${escapeHtml(check.name)}</button>`
+                  : `<span class="watch-check-name" title="${escapeHtml(check.name)}">${escapeHtml(check.name)}</span>`}
+                <span class="watch-check-provider">${escapeHtml(check.providerLabel)} · ${escapeHtml(check.statusLabel)}</span>
+              </span>
+              <button
+                class="watch-check-toggle"
+                type="button"
+                data-action="toggle-ignored-check"
+                data-id="${escapeHtml(row.id)}"
+                data-check-key="${escapeHtml(check.key)}"
+                data-ignored="${check.ignored ? "true" : "false"}"
+                title="${check.ignored ? "Include" : "Ignore"} ${escapeHtml(check.name)}"
+              >${check.ignored ? "Include" : "Ignore"}</button>
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+    </span>
+  `;
+}
+
+function renderChecksActionIcon(): string {
+  return `
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path fill="currentColor" d="M6.2 11.4 2.8 8l1.1-1.1 2.3 2.3 5.9-5.9 1.1 1.1-7 7Z"/>
+      <path fill="currentColor" d="M3 13h10v1H3z" opacity=".55"/>
+    </svg>
   `;
 }
 
@@ -1845,6 +1907,23 @@ function bindEvents(): void {
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-rerun"]')) {
     button.addEventListener("click", () => {
       armWatchAction(button.dataset.id || "", "rerun");
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-checks"]')) {
+    button.addEventListener("click", () => {
+      armWatchAction(button.dataset.id || "", "checks");
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-ignored-check"]')) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = button.dataset.id || "";
+      const key = button.dataset.checkKey || "";
+      void controller.setPullRequestCheckIgnored(id, key, button.dataset.ignored !== "true");
+      queueSyncedStateUploadForWatchIds([id]);
     });
   }
 
@@ -2813,7 +2892,10 @@ function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
 
   if (pendingWatchAction) {
     window.requestAnimationFrame(() => {
-      app.querySelector<HTMLButtonElement>(".watch-rerun-popover .repo-action-item")?.focus();
+      const selector = pendingWatchAction?.kind === "checks"
+        ? ".watch-check-popover .watch-check-toggle"
+        : ".watch-rerun-popover .repo-action-item";
+      app.querySelector<HTMLButtonElement>(selector)?.focus();
     });
   }
 }

@@ -1512,6 +1512,123 @@ button.watch-workflow-status:focus-visible {
   flex: 0 0 auto;
 }
 
+.watch-check-control {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.watch.has-checks {
+  --tree-actions-width: 81px;
+}
+
+.watch-check-button {
+  color: rgb(238 241 245 / 60%);
+}
+
+.watch-check-popover {
+  width: min(340px, calc(100vw - 24px));
+  max-height: 320px;
+}
+
+.watch-check-summary,
+.watch-check-note {
+  padding: 8px 10px;
+  color: rgb(238 241 245 / 64%);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.watch-check-note {
+  padding-top: 0;
+  color: #d29922;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.watch-check-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  padding: 8px 10px;
+}
+
+.watch-check-item.is-ignored {
+  opacity: 0.52;
+}
+
+.watch-check-state,
+.watch-check-state svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.watch-check-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.watch-check-link,
+.watch-check-name {
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #d8dee7;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-check-link {
+  cursor: pointer;
+}
+
+.watch-check-link:hover,
+.watch-check-link:focus-visible {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.watch-check-provider {
+  overflow: hidden;
+  color: rgb(238 241 245 / 52%);
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-check-toggle {
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 5px;
+  padding: 3px 6px;
+  background: transparent;
+  color: rgb(238 241 245 / 72%);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.watch-check-toggle:hover,
+.watch-check-toggle:focus-visible {
+  border-color: rgb(88 166 255 / 55%);
+  background: rgb(88 166 255 / 10%);
+  color: #fff;
+}
+
 .watch-rerun-popover {
   width: max-content;
   min-width: 156px;

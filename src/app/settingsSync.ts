@@ -2,6 +2,7 @@ import { normalizeAppSettings } from "../domain/settings";
 import {
   clearExpiredDoneWatches,
   getWatchTriageState,
+  normalizeWatchCheckPreferences,
   type WatchRecord,
 } from "../domain/watches";
 import { getWatchedRepoKey, type WatchedRepo } from "../domain/watchedRepos";
@@ -78,6 +79,7 @@ export function toSyncedState(state: SyncedState): SyncedState {
         const triageState = getWatchTriageState(watch);
         return triageState === "saved" || triageState === "done";
       })
+      .map(normalizeWatchCheckPreferences)
       .map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch),
   };
 }

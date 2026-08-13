@@ -3,7 +3,7 @@ import {
   normalizeWatchSuppressions,
   type WatchSuppression,
 } from "../domain/watchSuppressions";
-import type { WatchRecord } from "../domain/watches";
+import { normalizeWatchCheckPreferences, type WatchRecord } from "../domain/watches";
 
 const watchesStorageKey = "gha-watch:watches";
 const watchSuppressionsStorageKey = "gha-watch:watch-suppressions";
@@ -18,7 +18,11 @@ export function loadWatches(): WatchRecord[] {
 
   try {
     const parsed = JSON.parse(rawWatches);
-    return Array.isArray(parsed) ? (parsed as WatchRecord[]) : [];
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((watch): watch is WatchRecord => typeof watch === "object" && watch !== null)
+          .map(normalizeWatchCheckPreferences)
+      : [];
   } catch {
     return [];
   }

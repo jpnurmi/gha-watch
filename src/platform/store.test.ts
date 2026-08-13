@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadWatchSuppressions, saveWatchSuppressions } from "./store";
+import { loadWatches, loadWatchSuppressions, saveWatchSuppressions } from "./store";
 
 describe("watch suppression storage", () => {
   const values = new Map<string, string>();
@@ -44,5 +44,30 @@ describe("watch suppression storage", () => {
     expect(loadWatchSuppressions()).toEqual([
       { id: "valid", clearedAt: "2026-08-09T00:00:00.000Z" },
     ]);
+  });
+
+  it("normalizes persisted check ignores and removes legacy fields", () => {
+    values.set("gha-watch:watches", JSON.stringify([{
+      id: "getsentry/sentry/pull/51",
+      target: {
+        kind: "pr",
+        owner: "getsentry",
+        repo: "sentry",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+      label: "PR #51",
+      status: "pending",
+      active: true,
+      ignoredCheckKeys: ["malformed", "check:v1:github-actions:ci:test"],
+      ignoredWorkflowNames: ["CI"],
+      ignoredTargetIds: ["123"],
+    }]));
+
+    expect(loadWatches()[0]).toMatchObject({
+      ignoredCheckKeys: ["check:v1:github-actions:ci:test"],
+    });
+    expect(loadWatches()[0]).not.toHaveProperty("ignoredWorkflowNames");
+    expect(loadWatches()[0]).not.toHaveProperty("ignoredTargetIds");
   });
 });

@@ -1,6 +1,6 @@
 import type { WatchedRepo } from "../domain/watchedRepos";
 import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, WatchTarget } from "../domain/githubUrl";
-import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
+import { formatWatchState, getStatusTransition, isTerminalStatus, type WatchState } from "../domain/status";
 import {
   addWatchSuppressions,
   clearExpiredWatchSuppressions,
@@ -19,14 +19,16 @@ import {
   hasUnseenStatusChange,
   moveWatchGroupWithinRepo,
   moveWatchWithinRepo,
+  normalizeIgnoredCheckKeys,
   normalizeWatchDoneAt,
+  normalizeWatchCheckPreferences,
   normalizeWatchSeenStatus,
   setWatchesTriageState,
   type WatchDropPosition,
   type WatchRecord,
   type WatchTriageState,
 } from "../domain/watches";
-import type { RerunMode, WatchSnapshot } from "../platform/gh";
+import { aggregatePullRequestChecks, type RerunMode, type WatchSnapshot } from "../platform/gh";
 import type {
   ActiveWorkflowRun,
   OpenPullRequest,
@@ -47,7 +49,7 @@ export type WatchControllerDeps = {
   getAuthenticatedUserLogin?(): Promise<string>;
   notificationsPaused?(): boolean;
   notify(notification: WatchNotification): Promise<void>;
-  rerun?(target: WatchTarget, mode: RerunMode): Promise<void>;
+  rerun?(target: WatchTarget, mode: RerunMode, ignoredCheckKeys?: readonly string[]): Promise<void>;
   now?(): Date;
   save(watches: WatchRecord[]): Promise<void>;
   saveSuppressions(suppressions: WatchSuppression[]): Promise<void>;
@@ -70,6 +72,7 @@ export type WatchController = {
   listOpenPullRequests(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   listWorkflowDefinitions(target: Pick<WatchedRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
   rerun(id: string, mode: RerunMode): Promise<void>;
+  setPullRequestCheckIgnored(id: string, key: string, ignored: boolean): Promise<void>;
   syncWorkflowSubscriptions(watchedRepos: WatchedRepo[]): Promise<void>;
   pollNow(options?: WatchPollOptions): Promise<void>;
   getWatches(): WatchRecord[];
@@ -89,11 +92,14 @@ export function createWatchController(
 ): WatchController {
   const initialNow = deps.now?.() ?? new Date();
   let normalizedDoneAt = false;
-  const normalizedWatches = initialWatches.map(normalizeWatchSeenStatus).map((watch) => {
-    const normalized = normalizeWatchDoneAt(watch, initialNow);
-    normalizedDoneAt ||= normalized !== watch;
-    return normalized;
-  });
+  const normalizedWatches = initialWatches
+    .map(normalizeWatchCheckPreferences)
+    .map(normalizeWatchSeenStatus)
+    .map((watch) => {
+      const normalized = normalizeWatchDoneAt(watch, initialNow);
+      normalizedDoneAt ||= normalized !== watch;
+      return normalized;
+    });
   let watches = clearExpiredDoneWatches(normalizedWatches, initialNow);
   let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
   const metadataHydratedWatchIds = new Set<string>();
@@ -233,7 +239,7 @@ export function createWatchController(
   async function loadBaselineState(id: string, target: WatchTarget): Promise<void> {
     try {
       const snapshot = await deps.fetchState(target);
-      updateWatch(id, (watch) => withBaselineSnapshot(watch, snapshot));
+      updateWatch(id, (watch) => withBaselineSnapshot(watch, applyIgnoredChecks(watch, snapshot)));
     } catch (error) {
       updateWatch(id, (watch) => ({
         ...watch,
@@ -250,7 +256,7 @@ export function createWatchController(
     try {
       const snapshot = await deps.fetchState(target);
       metadataHydratedWatchIds.add(watch.id);
-      return withBaselineSnapshot(watch, snapshot);
+      return withBaselineSnapshot(watch, applyIgnoredChecks(watch, snapshot));
     } catch (error) {
       return {
         ...watch,
@@ -678,8 +684,15 @@ export function createWatchController(
 
     replaceSyncedWatches(syncedWatches) {
       const now = getNow();
+      const localInboxById = new Map(
+        watches
+          .filter((watch) => getWatchTriageState(watch) === "inbox")
+          .map((watch) => [watch.id, watch]),
+      );
       const retainedSyncedWatches = clearExpiredDoneWatches(
         syncedWatches
+          .map(normalizeWatchCheckPreferences)
+          .map((watch) => withLocalInboxCheckPreferences(watch, localInboxById.get(watch.id)))
           .map(normalizeWatchSeenStatus)
           .map((watch) => normalizeWatchDoneAt(watch, now)),
         now,
@@ -820,7 +833,7 @@ export function createWatchController(
         return;
       }
 
-      await deps.rerun(watch.target, mode);
+      await deps.rerun(watch.target, mode, watch.ignoredCheckKeys);
       const rerunAt = getNow();
       const queuedState = { status: "queued", conclusion: null };
       const reactivated = setWatchesTriageState(watches, [id], "inbox", rerunAt);
@@ -839,6 +852,39 @@ export function createWatchController(
             : current,
         ),
       );
+    },
+
+    async setPullRequestCheckIgnored(id, key, ignored) {
+      const normalizedKey = normalizeIgnoredCheckKeys([key])[0];
+      const watch = watches.find((item) => item.id === id);
+
+      if (
+        !normalizedKey ||
+        !watch ||
+        watch.target.kind !== "pr" ||
+        !watch.pullRequestChecks?.some((check) => check.key === normalizedKey)
+      ) {
+        return;
+      }
+
+      const ignoredKeys = new Set(watch.ignoredCheckKeys ?? []);
+      ignored ? ignoredKeys.add(normalizedKey) : ignoredKeys.delete(normalizedKey);
+      const nextKeys = normalizeIgnoredCheckKeys([...ignoredKeys]);
+
+      updateWatch(id, (current) => recomputePullRequestWatch(current, nextKeys));
+
+      try {
+        const freshSnapshot = await deps.fetchState(watch.target);
+        updateWatch(id, (current) => applySnapshotWithoutNotification(
+          current,
+          applyIgnoredChecks(current, freshSnapshot),
+        ));
+      } catch (error) {
+        updateWatch(id, (current) => ({
+          ...current,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
     },
 
     async syncWorkflowSubscriptions(watchedRepos) {
@@ -869,7 +915,8 @@ export function createWatchController(
       const rowNotifications: WatchNotification[] = [];
 
       for (const watch of polledWatches) {
-        const snapshot = await deps.fetchState(watch.target);
+        const fetchedSnapshot = await deps.fetchState(watch.target);
+        const snapshot = applyIgnoredChecks(watch, fetchedSnapshot);
         metadataHydratedWatchIds.add(watch.id);
         const nextState = {
           status: snapshot.status,
@@ -890,8 +937,12 @@ export function createWatchController(
             lastSeenStatus: current.lastSeenStatus ?? current.status,
             lastState: nextState,
             timing: mergePolledTiming(current, snapshot),
-            active: !isTerminalStatus(nextState),
+            active: shouldKeepWatchActive(current, snapshot, nextState),
             error: undefined,
+            pullRequestChecks: snapshot.pullRequestChecks,
+            includedCheckCount: snapshot.includedCheckCount,
+            ignoredCheckCount: snapshot.ignoredCheckCount,
+            noWatchedChecks: snapshot.noWatchedChecks,
           };
 
           if (transition.notify) {
@@ -944,6 +995,26 @@ export function createWatchController(
   };
 }
 
+function withLocalInboxCheckPreferences(
+  syncedWatch: WatchRecord,
+  localInboxWatch: WatchRecord | undefined,
+): WatchRecord {
+  if (!localInboxWatch || syncedWatch.target.kind !== "pr" || localInboxWatch.target.kind !== "pr") {
+    return syncedWatch;
+  }
+
+  const nextWatch = {
+    ...syncedWatch,
+    ignoredCheckKeys: localInboxWatch.ignoredCheckKeys,
+  };
+
+  if (!nextWatch.ignoredCheckKeys?.length) {
+    delete nextWatch.ignoredCheckKeys;
+  }
+
+  return nextWatch;
+}
+
 function mergePolledTiming(
   current: Pick<WatchRecord, "lastState" | "timing">,
   snapshot: WatchSnapshot,
@@ -986,9 +1057,83 @@ function withBaselineSnapshot(watch: WatchRecord, snapshot: WatchSnapshot): Watc
       ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
     },
     timing: snapshot.timing,
-    active: !isTerminalStatus(snapshot),
+    active: shouldKeepWatchActive(watch, snapshot, snapshot),
     error: undefined,
+    pullRequestChecks: snapshot.pullRequestChecks,
+    includedCheckCount: snapshot.includedCheckCount,
+    ignoredCheckCount: snapshot.ignoredCheckCount,
+    noWatchedChecks: snapshot.noWatchedChecks,
   };
+}
+
+function applyIgnoredChecks(watch: WatchRecord, snapshot: WatchSnapshot): WatchSnapshot {
+  if (watch.target.kind !== "pr" || !snapshot.pullRequestChecks) {
+    return snapshot;
+  }
+
+  const aggregate = aggregatePullRequestChecks(snapshot.pullRequestChecks, watch.ignoredCheckKeys);
+
+  return {
+    ...snapshot,
+    status: aggregate.status,
+    conclusion: aggregate.conclusion,
+    hasFailedChildren: aggregate.hasFailedChildren,
+    timing: aggregate.timing,
+    pullRequestChecks: aggregate.checks,
+    includedCheckCount: aggregate.includedCheckCount,
+    ignoredCheckCount: aggregate.ignoredCheckCount,
+    noWatchedChecks: aggregate.noWatchedChecks,
+  };
+}
+
+function recomputePullRequestWatch(watch: WatchRecord, ignoredCheckKeys: string[]): WatchRecord {
+  if (watch.target.kind !== "pr" || !watch.pullRequestChecks) {
+    return watch;
+  }
+
+  const aggregate = aggregatePullRequestChecks(watch.pullRequestChecks, ignoredCheckKeys);
+  const nextState: WatchState = {
+    status: aggregate.status,
+    conclusion: aggregate.conclusion,
+    ...(aggregate.hasFailedChildren ? { hasFailedChildren: true } : {}),
+  };
+  const status = formatWatchState(nextState);
+
+  const nextWatch: WatchRecord = {
+    ...watch,
+    ignoredCheckKeys,
+    status,
+    lastSeenStatus: status,
+    lastState: nextState,
+    timing: aggregate.timing,
+    active: aggregate.noWatchedChecks || !isTerminalStatus(nextState),
+    error: undefined,
+    includedCheckCount: aggregate.includedCheckCount,
+    ignoredCheckCount: aggregate.ignoredCheckCount,
+    noWatchedChecks: aggregate.noWatchedChecks,
+  };
+
+  if (ignoredCheckKeys.length === 0) {
+    delete nextWatch.ignoredCheckKeys;
+  }
+
+  return nextWatch;
+}
+
+function applySnapshotWithoutNotification(watch: WatchRecord, snapshot: WatchSnapshot): WatchRecord {
+  const next = withBaselineSnapshot(watch, snapshot);
+  return {
+    ...next,
+    lastSeenStatus: next.status,
+  };
+}
+
+function shouldKeepWatchActive(
+  watch: Pick<WatchRecord, "target">,
+  snapshot: Pick<WatchSnapshot, "noWatchedChecks">,
+  state: WatchState,
+): boolean {
+  return (watch.target.kind === "pr" && snapshot.noWatchedChecks === true) || !isTerminalStatus(state);
 }
 
 function withSnapshotPrNumber(target: WatchTarget, prNumber: string | undefined): WatchTarget {

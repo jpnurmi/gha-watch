@@ -1,5 +1,10 @@
 import { normalizeAppSettings, type AppSettings } from "../domain/settings";
-import { getWatchId, getWatchTriageState, type WatchRecord } from "../domain/watches";
+import {
+  getWatchId,
+  getWatchTriageState,
+  normalizeWatchCheckPreferences,
+  type WatchRecord,
+} from "../domain/watches";
 import { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "./gh";
 
 const gistDescription = "GHA Watch synced settings";
@@ -184,7 +189,7 @@ export function normalizeSyncedWatches(value: unknown): WatchRecord[] {
     }
 
     seen.add(id);
-    watches.push({
+    watches.push(normalizeWatchCheckPreferences({
       ...(item as WatchRecord),
       id,
       target: item.target,
@@ -194,7 +199,7 @@ export function normalizeSyncedWatches(value: unknown): WatchRecord[] {
       triageState,
       active: item.active,
       error: typeof item.error === "string" ? item.error : undefined,
-    });
+    }));
   }
 
   return watches;

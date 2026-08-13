@@ -856,4 +856,83 @@ describe("createPopupViewModel", () => {
       "Completed 1m ago",
     ]);
   });
+
+  it("shows reversible ignored checks and the all-ignored state", () => {
+    const key = "check:v1:github-actions:ci:flaky";
+    const model = createPopupViewModel([watch({
+      id: "getsentry/sentry/pull/51",
+      target: {
+        kind: "pr",
+        owner: "getsentry",
+        repo: "sentry",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+      ignoredCheckKeys: [key],
+      pullRequestChecks: [{
+        key,
+        name: "flaky",
+        provider: "github-actions",
+        workflow: "CI",
+        bucket: "fail",
+        status: "FAILURE",
+        conclusion: "failure",
+        actionsRunId: "123",
+      }],
+      status: "pending",
+      lastState: { status: "pending", conclusion: null },
+      noWatchedChecks: true,
+      includedCheckCount: 0,
+      ignoredCheckCount: 1,
+      active: true,
+    })]);
+
+    expect(model.rows[0]).toMatchObject({
+      statusLabel: "No watched checks",
+      description: "All checks are ignored.",
+      tone: "pending",
+      canRerun: false,
+      canRerunFailed: false,
+      noWatchedChecks: true,
+      rerunUnavailableReason: "All failed checks are ignored.",
+      pullRequestChecks: [{
+        key,
+        name: "flaky",
+        providerLabel: "CI",
+        statusLabel: "Failed",
+        tone: "failure",
+        ignored: true,
+      }],
+    });
+  });
+
+  it("explains when included failures cannot be re-run by GHA Watch", () => {
+    const model = createPopupViewModel([watch({
+      id: "getsentry/sentry/pull/51",
+      target: {
+        kind: "pr",
+        owner: "getsentry",
+        repo: "sentry",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+      pullRequestChecks: [{
+        key: "check:v1:checks.example.com::quality",
+        name: "quality",
+        provider: "checks.example.com",
+        bucket: "fail",
+        status: "FAILURE",
+        conclusion: "failure",
+      }],
+      status: "completed:failure",
+      lastState: { status: "completed", conclusion: "failure" },
+      active: false,
+    })]);
+
+    expect(model.rows[0]).toMatchObject({
+      canRerun: false,
+      canRerunFailed: false,
+      rerunUnavailableReason: "Included failures are not GitHub Actions checks and cannot be re-run here.",
+    });
+  });
 });
