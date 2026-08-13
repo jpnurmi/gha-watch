@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWatchController, type WatchControllerDeps } from "./watchController";
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } from "../domain/githubUrl";
-import type { WatchedRepo } from "../domain/watchedRepos";
+import { normalizeWatchedRepos, type WatchedRepo } from "../domain/watchedRepos";
 import type { WatchSuppression } from "../domain/watchSuppressions";
 import { type WatchRecord } from "../domain/watches";
 import type { ActiveWorkflowRun, OpenPullRequest, RerunMode, WatchSnapshot, WorkflowDefinition } from "../platform/gh";
@@ -54,6 +54,7 @@ function createDeps(
   reruns: Array<[WatchTarget, RerunMode]>;
   openPullRequestFetches: WatchedRepo[];
   activeWorkflowRunFetches: WatchedRepo[];
+  workflowRunFetches: WatchedRepo[];
   defaultBranchFetches: WatchedRepo[];
   userActiveWorkflowRunFetches: WatchedRepo[];
   workflowDefinitionFetches: WatchedRepo[];
@@ -66,6 +67,7 @@ function createDeps(
   const reruns: Array<[WatchTarget, RerunMode]> = [];
   const openPullRequestFetches: WatchedRepo[] = [];
   const activeWorkflowRunFetches: WatchedRepo[] = [];
+  const workflowRunFetches: WatchedRepo[] = [];
   const defaultBranchFetches: WatchedRepo[] = [];
   const userActiveWorkflowRunFetches: WatchedRepo[] = [];
   const workflowDefinitionFetches: WatchedRepo[] = [];
@@ -79,6 +81,7 @@ function createDeps(
     reruns,
     openPullRequestFetches,
     activeWorkflowRunFetches,
+    workflowRunFetches,
     defaultBranchFetches,
     userActiveWorkflowRunFetches,
     workflowDefinitionFetches,
@@ -143,6 +146,44 @@ function createDeps(
             url: "https://github.com/getsentry/sentry/actions/runs/789",
           },
         ];
+      },
+      async fetchWorkflowRuns(target) {
+        workflowRunFetches.push(target);
+        return { runs: [
+          {
+            runId: "123",
+            title: "CI: Build",
+            event: "push",
+            actorLogin: "jpnurmi",
+            workflowName: "CI",
+            status: "in_progress",
+            branchName: "main",
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/123",
+          },
+          {
+            runId: "456",
+            title: "CodeQL: Analyze",
+            event: "schedule",
+            actorLogin: "github-actions[bot]",
+            workflowName: "CodeQL",
+            status: "in_progress",
+            branchName: "main",
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/456",
+          },
+          {
+            runId: "789",
+            title: "CI: Build",
+            event: "workflow_dispatch",
+            actorLogin: "jpnurmi",
+            workflowName: "CI",
+            status: "in_progress",
+            branchName: "feature/tray-popup",
+            updatedAt: "2026-05-17T12:00:00Z",
+            url: "https://github.com/getsentry/sentry/actions/runs/789",
+          },
+        ] };
       },
       async fetchUserActiveWorkflowRuns(target) {
         userActiveWorkflowRunFetches.push(target);
@@ -796,6 +837,321 @@ describe("watchController", () => {
     expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/123"]);
   });
 
+  it("matches normalized branch, event, and actor subscriptions from one repository scan", async () => {
+    const { deps, workflowRunFetches, defaultBranchFetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Build",
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
+      },
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Build",
+        url: "https://github.com/getsentry/sentry/actions/runs/789",
+      },
+    ]);
+    const controller = createWatchController(deps);
+
+    await controller.syncWorkflowSubscriptions([{
+      owner: "getsentry",
+      repo: "sentry",
+      workflowSubscriptions: [
+        {
+          workflowName: "CI",
+          branch: { kind: "default" },
+          events: ["push", "schedule"],
+          actor: "any",
+        },
+        {
+          workflowName: "CI",
+          branch: { kind: "any" },
+          events: ["push"],
+          actor: "any",
+        },
+        {
+          workflowName: "CI",
+          branch: { kind: "any" },
+          events: ["workflow_dispatch"],
+          actor: "currentUser",
+        },
+      ],
+    }]);
+
+    expect(workflowRunFetches).toHaveLength(1);
+    expect(defaultBranchFetches).toHaveLength(1);
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/123",
+      "getsentry/sentry/run/789",
+    ]);
+  });
+
+  it("matches exact branches", async () => {
+    const { deps, workflowRunFetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CodeQL: Analyze",
+        url: "https://github.com/getsentry/sentry/actions/runs/456",
+      },
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CodeQL: Analyze",
+        url: "https://github.com/getsentry/sentry/actions/runs/789",
+      },
+    ]);
+    deps.fetchWorkflowRuns = async (target) => {
+      workflowRunFetches.push(target);
+      return { runs: [
+        {
+          runId: "456",
+          title: "CodeQL: Analyze",
+          event: "schedule",
+          actorLogin: "github-actions[bot]",
+          workflowName: "CodeQL",
+          status: "in_progress",
+          branchName: "release/1.x",
+          url: "https://github.com/getsentry/sentry/actions/runs/456",
+        },
+        {
+          runId: "789",
+          title: "CodeQL: Analyze",
+          event: "schedule",
+          actorLogin: "octocat",
+          workflowName: "CodeQL",
+          status: "in_progress",
+          branchName: "release/1.x",
+          url: "https://github.com/getsentry/sentry/actions/runs/789",
+        },
+      ] };
+    };
+    const controller = createWatchController(deps);
+
+    await controller.syncWorkflowSubscriptions([{
+      owner: "getsentry",
+      repo: "sentry",
+      workflowSubscriptions: [{
+        workflowName: "CodeQL",
+        branch: { kind: "exact", name: "release/1.x" },
+        events: ["schedule"],
+        actor: "any",
+      }],
+    }]);
+
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/456",
+      "getsentry/sentry/run/789",
+    ]);
+  });
+
+  it("notifies when a post-baseline active discovery hydrates as completed", async () => {
+    let now = new Date("2026-08-12T10:00:00.000Z");
+    const discoveryOptions: Array<{
+      createdAfter?: string;
+      createdBefore?: string;
+      catchUpPage?: number;
+    }> = [];
+    const { deps, notifications } = createDeps([{
+      status: "completed",
+      conclusion: "success",
+      title: "CI: Fast tests",
+      metadata: { workflowName: "CI", branchName: "main" },
+      timing: {
+        queuedAt: "2026-08-12T10:00:05.000Z",
+        startedAt: "2026-08-12T10:00:07.000Z",
+        completedAt: "2026-08-12T10:00:15.000Z",
+      },
+      url: "https://github.com/getsentry/sentry/actions/runs/601",
+    }]);
+    deps.fetchWorkflowRuns = async (_target, options = {}) => {
+      discoveryOptions.push(options);
+      return {
+        runs: options.createdAfter ? [{
+          runId: "601",
+          title: "CI: Fast tests",
+          workflowName: "CI",
+          event: "push",
+          actorLogin: "jpnurmi",
+          status: "in_progress",
+          branchName: "main",
+          createdAt: "2026-08-12T10:00:05.000Z",
+          updatedAt: "2026-08-12T10:00:15.000Z",
+          url: "https://github.com/getsentry/sentry/actions/runs/601",
+        }] : [],
+      };
+    };
+    const controller = createWatchController({ ...deps, now: () => now });
+    const watchedRepos: WatchedRepo[] = [{
+      owner: "getsentry",
+      repo: "sentry",
+      workflowSubscriptions: [{
+        workflowName: "CI",
+        branch: { kind: "default" },
+        events: ["push"],
+        actor: "any",
+      }],
+    }];
+
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+    now = new Date("2026-08-12T10:00:30.000Z");
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+
+    expect(discoveryOptions).toEqual([
+      {},
+      {
+        createdAfter: "2026-08-12T10:00:00.000Z",
+        createdBefore: "2026-08-12T10:00:30.000Z",
+        catchUpPage: 1,
+      },
+    ]);
+    expect(controller.getWatches()).toMatchObject([{
+      id: "getsentry/sentry/run/601",
+      status: "completed:success",
+      lastSeenStatus: "pending",
+      active: false,
+      timing: { completedAt: "2026-08-12T10:00:15.000Z" },
+    }]);
+    expect(notifications).toHaveLength(1);
+  });
+
+  it("resumes a capped catch-up interval on later polls without advancing its boundary", async () => {
+    let now = new Date("2026-08-12T10:00:00.000Z");
+    const discoveryOptions: Array<{
+      createdAfter?: string;
+      createdBefore?: string;
+      catchUpPage?: number;
+    }> = [];
+    const { deps } = createDeps([{
+      status: "completed",
+      conclusion: "failure",
+      title: "CI: Older matching run",
+      metadata: { workflowName: "CI", branchName: "main" },
+      url: "https://github.com/getsentry/sentry/actions/runs/801",
+    }]);
+    deps.fetchWorkflowRuns = async (_target, options = {}) => {
+      discoveryOptions.push(options);
+
+      if (options.catchUpPage === 1) {
+        return { runs: [], nextCatchUpPage: 4 };
+      }
+
+      if (options.catchUpPage === 4) {
+        return { runs: [{
+          runId: "801",
+          title: "CI: Older matching run",
+          workflowName: "CI",
+          event: "push",
+          actorLogin: "jpnurmi",
+          status: "completed",
+          conclusion: "failure",
+          branchName: "main",
+          createdAt: "2026-08-12T10:00:01.000Z",
+          updatedAt: "2026-08-12T10:00:10.000Z",
+          url: "https://github.com/getsentry/sentry/actions/runs/801",
+        }] };
+      }
+
+      return { runs: [] };
+    };
+    const controller = createWatchController({ ...deps, now: () => now });
+    const watchedRepos: WatchedRepo[] = [{
+      owner: "getsentry",
+      repo: "sentry",
+      workflowSubscriptions: [{
+        workflowName: "CI",
+        branch: { kind: "default" },
+        events: ["push"],
+        actor: "any",
+      }],
+    }];
+
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+    now = new Date("2026-08-12T10:00:30.000Z");
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+    now = new Date("2026-08-12T10:01:00.000Z");
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+
+    expect(discoveryOptions).toEqual([
+      {},
+      {
+        createdAfter: "2026-08-12T10:00:00.000Z",
+        createdBefore: "2026-08-12T10:00:30.000Z",
+        catchUpPage: 1,
+      },
+      {
+        createdAfter: "2026-08-12T10:00:00.000Z",
+        createdBefore: "2026-08-12T10:00:30.000Z",
+        catchUpPage: 4,
+      },
+    ]);
+    expect(controller.getWatches()).toMatchObject([{
+      id: "getsentry/sentry/run/801",
+      status: "completed:failure",
+      lastSeenStatus: "pending",
+    }]);
+  });
+
+  it("preserves legacy authored-PR aggregation after settings migration", async () => {
+    const branchName = "jpnurmi/feat/fast-tests";
+    const pullRequestTarget = {
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry",
+      prNumber: "61",
+      url: "https://github.com/getsentry/sentry/pull/61",
+    } as const;
+    const { deps, fetches, openPullRequestFetches } = createDeps([{
+      status: "in_progress",
+      conclusion: null,
+      title: "Pull request #61",
+      prNumber: "61",
+      url: pullRequestTarget.url,
+    }]);
+    deps.fetchOpenPullRequests = async (target) => {
+      openPullRequestFetches.push(target);
+      return [{
+        number: "61",
+        title: "Run fast tests",
+        isDraft: false,
+        authorLogin: "jpnurmi",
+        headBranch: branchName,
+        updatedAt: "2026-08-12T10:00:00Z",
+        url: pullRequestTarget.url,
+      }];
+    };
+    deps.fetchWorkflowRuns = async () => ({
+      runs: [{
+        runId: "701",
+        title: "CI: Run fast tests",
+        workflowName: "CI",
+        event: "workflow_dispatch",
+        actorLogin: "jpnurmi",
+        status: "in_progress",
+        branchName,
+        url: "https://github.com/getsentry/sentry/actions/runs/701",
+      }],
+    });
+    const [migratedRepo] = normalizeWatchedRepos([{
+      owner: "getsentry",
+      repo: "sentry",
+      userWorkflowNames: ["CI"],
+    }]);
+    const controller = createWatchController(deps);
+
+    await controller.syncWorkflowSubscriptions([migratedRepo]);
+
+    expect(openPullRequestFetches).toHaveLength(1);
+    expect(fetches).toEqual([pullRequestTarget]);
+    expect(controller.getWatches()).toMatchObject([{
+      id: "getsentry/sentry/pull/61",
+      target: pullRequestTarget,
+      label: "Run fast tests",
+    }]);
+    expect(controller.getWatches().some((watch) => watch.id === "getsentry/sentry/run/701")).toBe(false);
+  });
+
   it("does not reopen done watches while syncing subscriptions", async () => {
     const { deps, fetches } = createDeps([]);
     const controller = createWatchController(deps, [
@@ -1289,7 +1645,11 @@ describe("watchController", () => {
 
   it("requires a workflow run listing dependency before loading active workflow runs", async () => {
     const { deps } = createDeps([]);
-    const controller = createWatchController({ ...deps, fetchActiveWorkflowRuns: undefined });
+    const controller = createWatchController({
+      ...deps,
+      fetchActiveWorkflowRuns: undefined,
+      fetchWorkflowRuns: undefined,
+    });
 
     await expect(controller.listActiveWorkflowRuns({ owner: "getsentry", repo: "sentry" })).rejects.toThrow(
       "Active workflow run lists need GitHub run listing support.",

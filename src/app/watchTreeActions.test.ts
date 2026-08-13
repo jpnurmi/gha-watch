@@ -163,14 +163,19 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain('renderPullRequestWatchScope(group, "user", displayLabel, selectedScope)');
     expect(mainSource).toContain('<span class="repo-action-title">Pull requests</span>');
     expect(mainSource).toContain('const displayLabel = userLogin?.trim() || "…";');
-    expect(mainSource).toContain('data-action="toggle-workflow-subscription"');
+    expect(mainSource).toContain('data-action="open-workflow-subscription-editor"');
+    expect(mainSource).toContain('data-action="remove-workflow-subscription"');
+    expect(mainSource).toContain('data-action="save-workflow-subscription"');
+    expect(mainSource).toContain('data-field="branch-kind"');
+    expect(mainSource).toContain('data-field="other-events"');
+    expect(mainSource).toContain("const missingSelectedWorkflows = (watchedRepo ? getWorkflowSubscriptions(watchedRepo) : [])");
     expect(mainSource).not.toContain("watch-group-subscribe-button");
     expect(mainSource).not.toContain("renderStarIcon");
     expect(styles).toMatch(
       /\.watch-group-watch\.is-watched \.watch-group-watch-glyph\s*\{[^}]*color:\s*#58a6ff;/s,
     );
     expect(styles).toMatch(/\.repository-watch-segmented\s*\{[^}]*height:\s*20px;/s);
-    expect(mainSource).toContain('data-scope="${scope}"');
+    expect(mainSource).toContain('getWorkflowSubscriptions(watchedRepo)');
     expect(mainSource).not.toContain("repository-pull-request-button");
   });
 

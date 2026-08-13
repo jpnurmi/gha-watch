@@ -45,16 +45,22 @@ import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
 import { createSettingsSync } from "./app/settingsSync";
 import {
+  addWatchedWorkflowSubscription,
   addWatchedRepo,
+  getWorkflowSubscriptionId,
+  getWorkflowSubscriptions,
   getWatchedPullRequestScope,
   getWatchedRepoKey,
+  isValidExactBranchName,
   isWatchedRepo,
+  normalizeWorkflowSubscription,
+  removeWatchedWorkflowSubscription,
   toggleWatchedPullRequestScope,
-  toggleWatchedWorkflowSubscription,
+  updateWatchedWorkflowSubscription,
   updateWatchedRepoIcon,
   type WatchedPullRequestScope,
   type WatchedRepo,
-  type WatchedWorkflowSubscriptionScope,
+  type WorkflowSubscription,
 } from "./domain/watchedRepos";
 import {
   isOwnerlessPullRequestSlug,
@@ -82,10 +88,12 @@ import {
   fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
+  fetchRepositoryBranches,
   fetchRepositoryIconUrl,
   fetchUserActiveWorkflowRuns,
   fetchWatchState,
   fetchWorkflowDefinitions,
+  fetchWorkflowRuns,
   type ActiveWorkflowRun,
   type OpenPullRequest,
   type RateLimit,
@@ -155,6 +163,7 @@ let currentWatchView: WatchTriageState = "inbox";
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let pullRequestMenu: PullRequestMenuState | undefined;
 let repositoryWatchMenu: RepositoryWatchMenuState | undefined;
+let workflowSubscriptionEditor: WorkflowSubscriptionEditorState | undefined;
 let repoCiStatusMenu: RepoCiStatusMenuState | undefined;
 let repoPressState: RepoPressState | undefined;
 let repoDragState: RepoDragState | undefined;
@@ -245,6 +254,7 @@ type RepositoryWatchMenuState =
       defaultBranch: string;
       userLogin: string;
       workflows: WorkflowDefinition[];
+      branches: string[];
     }
   | {
       repoKey: string;
@@ -252,6 +262,14 @@ type RepositoryWatchMenuState =
       error: string;
       userLogin?: string;
     };
+
+type WorkflowSubscriptionEditorState = {
+  repoKey: string;
+  workflowName: string;
+  subscriptionId?: string;
+  subscription: WorkflowSubscription;
+  error?: string;
+};
 
 type RepoCiStatusMenuState = {
   repoKey: string;
@@ -265,11 +283,17 @@ const controller = createWatchController(
         }
       : fetchWatchState,
     fetchActiveWorkflowRuns: isDemoMode ? fetchDemoActiveWorkflowRuns : fetchActiveWorkflowRuns,
+    fetchWorkflowRuns: isDemoMode
+      ? async () => ({
+          runs: await fetchDemoActiveWorkflowRuns(),
+        })
+      : fetchWorkflowRuns,
     fetchOpenPullRequests: isDemoMode ? fetchDemoOpenPullRequests : fetchOpenPullRequests,
     fetchPullRequestDetails: isDemoMode
       ? async (targets) => targets.map(() => ({ state: "ready" as const, title: "Demo pull request" }))
       : fetchPullRequestDetails,
     fetchRepositoryDefaultBranch: getCachedRepositoryDefaultBranch,
+    fetchRepositoryBranches: isDemoMode ? async () => ["main", "release/1.x"] : fetchRepositoryBranches,
     fetchRepositoryIconUrl: getRepositoryIconUrl,
     getAuthenticatedUserLogin,
     fetchUserActiveWorkflowRuns: isDemoMode
@@ -330,6 +354,7 @@ document.addEventListener("click", (event) => {
     activeWorkflowRunMenu = undefined;
     pullRequestMenu = undefined;
     repositoryWatchMenu = undefined;
+    workflowSubscriptionEditor = undefined;
     repoCiStatusMenu = undefined;
     render();
   }
@@ -845,7 +870,13 @@ function renderRepositoryWatchPopover(
   } else {
     const workflows = getWorkflowSubscriptionMenuWorkflows(group, menuState.workflows);
     workflowContent = workflows.length > 0
-      ? workflows.map((workflow) => renderWorkflowSubscriptionItem(group, workflow, menuState.defaultBranch, menuState.userLogin)).join("")
+      ? workflows.map((workflow) => renderWorkflowSubscriptionItem(
+          group,
+          workflow,
+          menuState.defaultBranch,
+          menuState.userLogin,
+          menuState.branches,
+        )).join("")
       : `<div class="repo-action-status">No workflows</div>`;
   }
 
@@ -905,48 +936,149 @@ function renderWorkflowSubscriptionItem(
   workflow: WorkflowDefinition,
   defaultBranch: string,
   userLogin: string,
+  branches: string[],
 ): string {
+  const watchedRepo = findWatchedRepo(group);
+  const subscriptions = watchedRepo
+    ? getWorkflowSubscriptions(watchedRepo).filter((subscription) => subscription.workflowName === workflow.name)
+    : [];
+  const editor = workflowSubscriptionEditor?.repoKey === getWatchedRepoKey(group) &&
+      workflowSubscriptionEditor.workflowName === workflow.name
+    ? workflowSubscriptionEditor
+    : undefined;
+
   return `
-    <div class="repository-watch-item" role="none">
-      <span class="repo-action-title" title="${escapeHtml(workflow.name)}">${escapeHtml(workflow.name)}</span>
-      <span class="repository-watch-segmented" role="group" aria-label="${escapeHtml(workflow.name)} watches">
-        ${renderWorkflowSubscriptionToggle(group, workflow.name, "defaultBranch", defaultBranch)}
-        ${renderWorkflowSubscriptionToggle(group, workflow.name, "user", undefined, userLogin)}
-      </span>
+    <div class="repository-watch-item workflow-subscription-item" role="none">
+      <div class="workflow-subscription-heading">
+        <span class="repo-action-title" title="${escapeHtml(workflow.name)}">${escapeHtml(workflow.name)}</span>
+        <button
+          class="workflow-subscription-add"
+          type="button"
+          data-action="open-workflow-subscription-editor"
+          data-owner="${escapeHtml(group.owner)}"
+          data-repo="${escapeHtml(group.repo)}"
+          data-workflow="${escapeHtml(workflow.name)}"
+          title="Add ${escapeHtml(workflow.name)} subscription"
+          aria-label="Add ${escapeHtml(workflow.name)} subscription"
+        >Add</button>
+      </div>
+      ${subscriptions.length > 0
+        ? `<div class="workflow-subscription-chips">${subscriptions.map((subscription) =>
+            renderWorkflowSubscriptionChip(group, subscription, defaultBranch, userLogin)).join("")}</div>`
+        : `<div class="workflow-subscription-empty">Not watched</div>`}
+      ${editor ? renderWorkflowSubscriptionEditor(group, editor, branches) : ""}
     </div>
   `;
 }
 
-function renderWorkflowSubscriptionToggle(
+const commonWorkflowEvents = ["push", "pull_request", "workflow_dispatch", "schedule", "merge_group", "release"];
+
+function renderWorkflowSubscriptionChip(
   group: WatchGroupViewModel,
-  workflowName: string,
-  scope: WatchedWorkflowSubscriptionScope,
-  defaultBranch?: string,
-  userLogin?: string,
+  subscription: WorkflowSubscription,
+  defaultBranch: string,
+  userLogin: string,
 ): string {
-  const checked = workflowIsSubscribed(group, workflowName, scope);
-  const cleanDefaultBranch = defaultBranch?.trim() || "default branch";
-  const displayLabel = scope === "defaultBranch" ? cleanDefaultBranch : userLogin?.trim() || "PRs";
-  const label = scope === "defaultBranch"
-    ? cleanDefaultBranch
-    : `manually dispatched runs triggered by ${displayLabel}`;
+  const subscriptionId = getWorkflowSubscriptionId(subscription);
+  const branch = subscription.branch.kind === "default"
+    ? defaultBranch || "default"
+    : subscription.branch.kind === "any"
+      ? "any branch"
+      : subscription.branch.name;
+  const events = subscription.events.includes("*") ? "any event" : subscription.events.join(", ");
+  const actor = subscription.actor === "any" ? "anyone" : userLogin || "current user";
+  const label = `${branch} · ${events} · ${actor}`;
 
   return `
-    <button
-      class="repository-watch-segment repository-watch-segment-${scope}${checked ? " is-selected" : ""}"
-      type="button"
-      role="menuitemcheckbox"
-      aria-checked="${checked ? "true" : "false"}"
-      data-action="toggle-workflow-subscription"
-      data-owner="${escapeHtml(group.owner)}"
-      data-repo="${escapeHtml(group.repo)}"
-      data-workflow="${escapeHtml(workflowName)}"
-      data-scope="${scope}"
-      title="${checked ? "Stop watching" : "Watch"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
-      aria-label="${checked ? "Stop watching" : "Watch"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
-    >
-      ${escapeHtml(displayLabel)}
-    </button>
+    <span class="workflow-subscription-chip">
+      <button
+        class="workflow-subscription-chip-label"
+        type="button"
+        data-action="open-workflow-subscription-editor"
+        data-owner="${escapeHtml(group.owner)}"
+        data-repo="${escapeHtml(group.repo)}"
+        data-workflow="${escapeHtml(subscription.workflowName)}"
+        data-subscription-id="${escapeHtml(subscriptionId)}"
+        title="Edit ${escapeHtml(label)}"
+      >${escapeHtml(label)}</button>
+      <button
+        class="workflow-subscription-remove"
+        type="button"
+        data-action="remove-workflow-subscription"
+        data-owner="${escapeHtml(group.owner)}"
+        data-repo="${escapeHtml(group.repo)}"
+        data-subscription-id="${escapeHtml(subscriptionId)}"
+        title="Remove ${escapeHtml(label)}"
+        aria-label="Remove ${escapeHtml(subscription.workflowName)} subscription: ${escapeHtml(label)}"
+      >×</button>
+    </span>
+  `;
+}
+
+function renderWorkflowSubscriptionEditor(
+  group: WatchGroupViewModel,
+  editor: WorkflowSubscriptionEditorState,
+  branches: string[],
+): string {
+  const { subscription } = editor;
+  const branchName = subscription.branch.kind === "exact" ? subscription.branch.name : "";
+  const knownEvents = new Set(commonWorkflowEvents);
+  const otherEvents = subscription.events.filter((event) => event !== "*" && !knownEvents.has(event));
+  const eventChoices = ["*", ...commonWorkflowEvents];
+
+  return `
+    <div class="workflow-subscription-editor" data-workflow-subscription-editor>
+      <label class="workflow-subscription-field">
+        <span>Branch</span>
+        <select data-field="branch-kind">
+          <option value="default"${subscription.branch.kind === "default" ? " selected" : ""}>Default</option>
+          <option value="any"${subscription.branch.kind === "any" ? " selected" : ""}>Any</option>
+          <option value="exact"${subscription.branch.kind === "exact" ? " selected" : ""}>Exact</option>
+        </select>
+      </label>
+      <label class="workflow-subscription-field workflow-subscription-exact${subscription.branch.kind === "exact" ? "" : " is-hidden"}">
+        <span>Exact branch</span>
+        <input data-field="branch-name" type="text" list="workflow-subscription-branches" value="${escapeHtml(branchName)}" placeholder="release/1.x"${subscription.branch.kind === "exact" ? "" : " disabled"} />
+        <datalist id="workflow-subscription-branches">
+          ${branches.map((branch) => `<option value="${escapeHtml(branch)}"></option>`).join("")}
+        </datalist>
+      </label>
+      <fieldset class="workflow-subscription-events">
+        <legend>Events</legend>
+        ${eventChoices.map((event) => `
+          <label>
+            <input
+              data-field="event"
+              type="checkbox"
+              value="${event}"
+              ${subscription.events.includes(event) ? "checked" : ""}
+            />
+            ${event === "*" ? "Any" : escapeHtml(event)}
+          </label>
+        `).join("")}
+      </fieldset>
+      <label class="workflow-subscription-field">
+        <span>Other events</span>
+        <input data-field="other-events" type="text" value="${escapeHtml(otherEvents.join(", "))}" placeholder="repository_dispatch" />
+      </label>
+      <label class="workflow-subscription-field">
+        <span>Actor</span>
+        <select data-field="actor">
+          <option value="any"${subscription.actor === "any" ? " selected" : ""}>Anyone</option>
+          <option value="currentUser"${subscription.actor === "currentUser" ? " selected" : ""}>Current user</option>
+        </select>
+      </label>
+      ${editor.error ? `<div class="workflow-subscription-error">${escapeHtml(editor.error)}</div>` : ""}
+      <div class="workflow-subscription-editor-actions">
+        <button type="button" data-action="cancel-workflow-subscription-editor">Cancel</button>
+        <button
+          type="button"
+          data-action="save-workflow-subscription"
+          data-owner="${escapeHtml(group.owner)}"
+          data-repo="${escapeHtml(group.repo)}"
+        >${editor.subscriptionId ? "Save" : "Add"}</button>
+      </div>
+    </div>
   `;
 }
 
@@ -956,30 +1088,17 @@ function getWorkflowSubscriptionMenuWorkflows(
 ): WorkflowDefinition[] {
   const watchedRepo = findWatchedRepo(group);
   const workflowNames = new Set(workflows.map((workflow) => workflow.name));
-  const missingSelectedWorkflows = [
-    ...(watchedRepo?.defaultBranchWorkflowNames ?? []),
-    ...(watchedRepo?.userWorkflowNames ?? []),
-  ]
+  const missingSelectedWorkflows = (watchedRepo ? getWorkflowSubscriptions(watchedRepo) : [])
+    .map((subscription) => subscription.workflowName)
     .filter((workflowName) => !workflowNames.has(workflowName))
     .map((workflowName) => ({
       name: workflowName,
       path: "",
     }));
 
-  return [...workflows, ...missingSelectedWorkflows];
-}
-
-function workflowIsSubscribed(
-  repo: Pick<WatchedRepo, "owner" | "repo">,
-  workflowName: string,
-  scope: WatchedWorkflowSubscriptionScope,
-): boolean {
-  const watchedRepo = findWatchedRepo(repo);
-  const workflowNames = scope === "defaultBranch"
-    ? watchedRepo?.defaultBranchWorkflowNames
-    : watchedRepo?.userWorkflowNames;
-
-  return Boolean(workflowNames?.includes(workflowName));
+  return [...workflows, ...missingSelectedWorkflows]
+    .filter((workflow, index, items) => items.findIndex((item) => item.name === workflow.name) === index)
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function findWatchedRepo(repo: Pick<WatchedRepo, "owner" | "repo">): WatchedRepo | undefined {
@@ -1801,16 +1920,58 @@ function bindEvents(): void {
     });
   }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-workflow-subscription"]')) {
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open-workflow-subscription-editor"]')) {
     button.addEventListener("click", () => {
-      toggleWorkflowSubscription({
+      openWorkflowSubscriptionEditor({
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
         workflowName: button.dataset.workflow || "",
-        scope: getWorkflowSubscriptionScope(button.dataset.scope),
+        subscriptionId: button.dataset.subscriptionId,
       });
     });
   }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="remove-workflow-subscription"]')) {
+    button.addEventListener("click", () => {
+      removeWorkflowSubscription({
+        owner: button.dataset.owner || "",
+        repo: button.dataset.repo || "",
+        subscriptionId: button.dataset.subscriptionId || "",
+      });
+    });
+  }
+
+  app.querySelector<HTMLButtonElement>('[data-action="cancel-workflow-subscription-editor"]')?.addEventListener(
+    "click",
+    () => {
+      workflowSubscriptionEditor = undefined;
+      render();
+    },
+  );
+
+  app.querySelector<HTMLSelectElement>('[data-workflow-subscription-editor] [data-field="branch-kind"]')
+    ?.addEventListener("change", (event) => {
+      const select = event.currentTarget;
+
+      if (!(select instanceof HTMLSelectElement)) {
+        return;
+      }
+
+      const editor = select.closest<HTMLElement>("[data-workflow-subscription-editor]");
+      editor?.querySelector(".workflow-subscription-exact")?.classList.toggle("is-hidden", select.value !== "exact");
+      editor?.querySelector<HTMLInputElement>('[data-field="branch-name"]')?.toggleAttribute("disabled", select.value !== "exact");
+    });
+
+  app.querySelector<HTMLButtonElement>('[data-action="save-workflow-subscription"]')?.addEventListener(
+    "click",
+    (event) => {
+      const button = event.currentTarget;
+
+      if (button instanceof HTMLButtonElement) {
+        saveWorkflowSubscription(button);
+      }
+    },
+  );
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repo-prs"]')) {
     button.addEventListener("click", () => {
@@ -2649,11 +2810,13 @@ async function toggleRepositoryWatchMenu(repo: Pick<WatchedRepo, "owner" | "repo
 
   if (repositoryWatchMenu?.repoKey === repoKey) {
     repositoryWatchMenu = undefined;
+    workflowSubscriptionEditor = undefined;
     render();
     return;
   }
 
   repositoryWatchMenu = { repoKey, status: "loading" };
+  workflowSubscriptionEditor = undefined;
   activeWorkflowRunMenu = undefined;
   pullRequestMenu = undefined;
   repoCiStatusMenu = undefined;
@@ -2673,14 +2836,15 @@ async function toggleRepositoryWatchMenu(repo: Pick<WatchedRepo, "owner" | "repo
       },
       () => undefined,
     );
-    const [workflows, defaultBranch, userLogin] = await Promise.all([
+    const [workflows, branches, defaultBranch, userLogin] = await Promise.all([
       controller.listWorkflowDefinitions(repo),
+      controller.listRepositoryBranches(repo).catch(() => []),
       getCachedRepositoryDefaultBranch(repo),
       userLoginPromise,
     ]);
 
     if (repositoryWatchMenu?.repoKey === repoKey) {
-      repositoryWatchMenu = { repoKey, status: "loaded", workflows, defaultBranch, userLogin };
+      repositoryWatchMenu = { repoKey, status: "loaded", workflows, branches, defaultBranch, userLogin };
       render();
     }
   } catch (error) {
@@ -2697,28 +2861,121 @@ async function toggleRepositoryWatchMenu(repo: Pick<WatchedRepo, "owner" | "repo
   }
 }
 
-function toggleWorkflowSubscription(
+function openWorkflowSubscriptionEditor(
   target: Pick<WatchedRepo, "owner" | "repo"> & {
-    scope: WatchedWorkflowSubscriptionScope | undefined;
     workflowName: string;
+    subscriptionId?: string;
   },
 ): void {
-  if (!target.owner || !target.repo || !target.workflowName || !target.scope) {
+  if (!target.owner || !target.repo || !target.workflowName) {
     return;
   }
 
-  const wasWatched = isWatchedRepo(settings.watchedRepos, target);
-  let watchedRepos = toggleWatchedWorkflowSubscription(
+  const watchedRepo = findWatchedRepo(target);
+  const existing = target.subscriptionId && watchedRepo
+    ? getWorkflowSubscriptions(watchedRepo).find(
+        (subscription) => getWorkflowSubscriptionId(subscription) === target.subscriptionId,
+      )
+    : undefined;
+
+  workflowSubscriptionEditor = {
+    repoKey: getWatchedRepoKey(target),
+    workflowName: target.workflowName,
+    ...(existing && target.subscriptionId ? { subscriptionId: target.subscriptionId } : {}),
+    subscription: existing ?? {
+      workflowName: target.workflowName,
+      branch: { kind: "default" },
+      events: ["push"],
+      actor: "any",
+    },
+  };
+  render();
+}
+
+function removeWorkflowSubscription(
+  target: Pick<WatchedRepo, "owner" | "repo"> & { subscriptionId: string },
+): void {
+  if (!target.owner || !target.repo || !target.subscriptionId) {
+    return;
+  }
+
+  const watchedRepos = removeWatchedWorkflowSubscription(
     settings.watchedRepos,
     target,
-    target.scope,
-    target.workflowName,
+    target.subscriptionId,
   );
+
+  if (watchedRepos === settings.watchedRepos) {
+    return;
+  }
+
+  if (workflowSubscriptionEditor?.subscriptionId === target.subscriptionId) {
+    workflowSubscriptionEditor = undefined;
+  }
+
+  void updateAppSettings({ ...settings, watchedRepos }, true);
+  render();
+}
+
+function saveWorkflowSubscription(button: HTMLButtonElement): void {
+  const editorState = workflowSubscriptionEditor;
+  const editor = button.closest<HTMLElement>("[data-workflow-subscription-editor]");
+
+  if (!editorState || !editor || !button.dataset.owner || !button.dataset.repo) {
+    return;
+  }
+
+  const branchKind = editor.querySelector<HTMLSelectElement>('[data-field="branch-kind"]')?.value;
+  const branchName = editor.querySelector<HTMLInputElement>('[data-field="branch-name"]')?.value.trim() ?? "";
+
+  if (branchKind === "exact" && !isValidExactBranchName(branchName)) {
+    showWorkflowSubscriptionEditorError(editorState, editor, "Enter a valid exact branch name.");
+    return;
+  }
+
+  const selectedEvents = [...editor.querySelectorAll<HTMLInputElement>('[data-field="event"]:checked')]
+    .map((input) => input.value);
+  const otherEvents = (editor.querySelector<HTMLInputElement>('[data-field="other-events"]')?.value ?? "")
+    .split(",")
+    .map((event) => event.trim())
+    .filter(Boolean);
+  const actor = editor.querySelector<HTMLSelectElement>('[data-field="actor"]')?.value;
+  const subscription = normalizeWorkflowSubscription({
+    workflowName: editorState.workflowName,
+    branch: branchKind === "exact"
+      ? { kind: "exact", name: branchName }
+      : { kind: branchKind },
+    events: [...selectedEvents, ...otherEvents],
+    actor,
+  });
+
+  if (!subscription) {
+    showWorkflowSubscriptionEditorError(
+      editorState,
+      editor,
+      selectedEvents.length === 0 && otherEvents.length === 0
+        ? "Select at least one event."
+        : "Use GitHub event names containing letters, numbers, and underscores.",
+    );
+    return;
+  }
+
+  const target = { owner: button.dataset.owner, repo: button.dataset.repo };
+  const wasWatched = isWatchedRepo(settings.watchedRepos, target);
+  let watchedRepos = editorState.subscriptionId
+    ? updateWatchedWorkflowSubscription(
+        settings.watchedRepos,
+        target,
+        editorState.subscriptionId,
+        subscription,
+      )
+    : addWatchedWorkflowSubscription(settings.watchedRepos, target, subscription);
 
   if (!wasWatched) {
     watchedRepos = updateWatchedRepoIcon(watchedRepos, target, findRepoIconUrl(target));
   }
 
+  workflowSubscriptionEditor = undefined;
   void updateAppSettings({ ...settings, watchedRepos }, true);
   render();
 
@@ -2729,8 +2986,21 @@ function toggleWorkflowSubscription(
   void poll();
 }
 
-function getWorkflowSubscriptionScope(value: string | undefined): WatchedWorkflowSubscriptionScope | undefined {
-  return value === "defaultBranch" || value === "user" ? value : undefined;
+function showWorkflowSubscriptionEditorError(
+  editorState: WorkflowSubscriptionEditorState,
+  editor: HTMLElement,
+  message: string,
+): void {
+  workflowSubscriptionEditor = { ...editorState, error: message };
+  let errorElement = editor.querySelector<HTMLElement>(".workflow-subscription-error");
+
+  if (!errorElement) {
+    errorElement = document.createElement("div");
+    errorElement.className = "workflow-subscription-error";
+    editor.querySelector(".workflow-subscription-editor-actions")?.before(errorElement);
+  }
+
+  errorElement.textContent = message;
 }
 
 async function watchActiveWorkflowRun(

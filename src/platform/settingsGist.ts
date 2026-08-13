@@ -5,7 +5,7 @@ import { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "
 const gistDescription = "GHA Watch synced settings";
 const gistFilename = "gha-watch-settings.json";
 const settingsFormat = "dev.jpnurmi.gha-watch/settings";
-const settingsFormatVersion = 1;
+const settingsFormatVersion = 2;
 
 type GistFile = {
   content?: string;
@@ -20,7 +20,7 @@ type GistResponse = {
 
 type SyncedSettingsDocument = {
   format: typeof settingsFormat;
-  version: typeof settingsFormatVersion;
+  version: 1 | typeof settingsFormatVersion;
   settings: AppSettings;
   watches?: WatchRecord[];
 };
@@ -32,6 +32,7 @@ export type SyncedState = {
 
 export type LoadedSyncedState = SyncedState & {
   historyInitialized?: boolean;
+  settingsMigrated?: boolean;
 };
 
 export type SettingsRemote = {
@@ -141,7 +142,7 @@ export function parseSettingsDocument(content: string): LoadedSyncedState {
     throw new Error("The GHA Watch settings Gist has an unsupported format.");
   }
 
-  if (document.version !== settingsFormatVersion) {
+  if (document.version !== 1 && document.version !== settingsFormatVersion) {
     throw new Error("The GHA Watch settings Gist has an unsupported version.");
   }
 
@@ -153,6 +154,7 @@ export function parseSettingsDocument(content: string): LoadedSyncedState {
     settings: normalizeAppSettings(document.settings),
     watches: normalizeSyncedWatches(document.watches),
     ...(!Object.hasOwn(document, "watches") ? { historyInitialized: false } : {}),
+    ...(document.version === 1 ? { settingsMigrated: true } : {}),
   };
 }
 
