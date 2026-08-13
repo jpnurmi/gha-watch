@@ -1002,6 +1002,54 @@ describe("watchController", () => {
     expect(workflowRunFetches[0].createdAfter).toBe("2026-08-12T09:55:00.000Z");
   });
 
+  it("continues syncing repositories after a catch-up failure", async () => {
+    const firstRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const secondRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "relay",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, discoverySaves, workflowRunFetches } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async (target, createdAfter, createdBefore) => {
+      workflowRunFetches.push({ target, createdAfter, createdBefore });
+
+      if (target.repo === firstRepo.repo) {
+        throw new Error("first repository failed");
+      }
+
+      return [];
+    };
+    const cursor = (repo: WatchedRepo): WorkflowDiscoveryState["repositories"][string] => ({
+      lastScannedAt: "2026-08-12T10:00:00.000Z",
+      recentRunIds: [],
+      subscriptionFingerprint: getWorkflowDiscoverySubscriptionFingerprint(repo),
+      updatedAt: "2026-08-12T10:00:00.000Z",
+    });
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      {
+        version: 2,
+        repositories: {
+          "getsentry/sentry": cursor(firstRepo),
+          "getsentry/relay": cursor(secondRepo),
+        },
+      },
+    );
+
+    await expect(controller.syncWorkflowSubscriptions([firstRepo, secondRepo]))
+      .rejects.toThrow("first repository failed");
+
+    expect(workflowRunFetches.map(({ target }) => target.repo)).toEqual(["sentry", "relay"]);
+    expect(discoverySaves.at(-1)?.repositories["getsentry/relay"].lastScannedAt)
+      .toBe("2026-08-12T10:02:00.000Z");
+  });
+
   it("establishes a first-subscription baseline without importing completed history", async () => {
     const { deps, discoverySaves } = createDeps([]);
     let now = new Date("2026-08-12T10:02:00Z");
@@ -1183,6 +1231,52 @@ describe("watchController", () => {
       watchId: "getsentry/sentry/pull/52",
       title: "Fix offline PR discovery",
     }]);
+  });
+
+  it("keeps active PR watches when catch-up details are unavailable", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "all",
+    };
+    const target: PrWatchTarget = {
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry",
+      prNumber: "52",
+      url: "https://github.com/getsentry/sentry/pull/52",
+    };
+    const activeWatch: WatchRecord = {
+      id: "getsentry/sentry/pull/52",
+      target,
+      sourceState: "ready",
+      label: "Active pull request",
+      status: "in_progress",
+      lastSeenStatus: "in_progress",
+      lastState: { status: "in_progress", conclusion: null },
+      active: true,
+      error: undefined,
+    };
+    const { deps, notificationRecords } = createDeps([]);
+    deps.fetchOpenPullRequests = async () => [];
+    deps.fetchWorkflowRunsSince = async () => [
+      completedWorkflowRun({
+        branchName: "feature/active-pr",
+        pullRequests: [{ number: "52" }],
+      }),
+    ];
+    deps.fetchPullRequestDetails = async () => [undefined];
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [activeWatch],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(controller.getWatches()).toEqual([activeWatch]);
+    expect(notificationRecords).toEqual([]);
   });
 
   it("uses batched PR authors to catch only authored offline PRs for user scope", async () => {

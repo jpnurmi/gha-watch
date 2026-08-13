@@ -744,7 +744,7 @@ export function createWatchController(
         ...(detail?.branchName || reference?.branchName
           ? { headBranch: detail?.branchName ?? reference?.branchName }
           : {}),
-        ...(detail?.state ? { state: detail.state } : { state: "closed" as const }),
+        ...(detail?.state ? { state: detail.state } : {}),
         url: target.url,
       });
     });
@@ -1251,8 +1251,22 @@ export function createWatchController(
       pruneExpiredSuppressions();
       await setDiscoveryState(pruneWorkflowDiscoveryState(workflowDiscoveryState, watchedRepos));
 
+      const failures: unknown[] = [];
+
       for (const watchedRepo of watchedRepos) {
-        await syncWatchedWorkflowSubscriptions(watchedRepo);
+        try {
+          await syncWatchedWorkflowSubscriptions(watchedRepo);
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+
+      if (failures.length === 1) {
+        throw failures[0];
+      }
+
+      if (failures.length > 1) {
+        throw new AggregateError(failures, `Could not sync ${failures.length} workflow subscriptions.`);
       }
     },
 
