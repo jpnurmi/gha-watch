@@ -71,6 +71,9 @@ type PrCheckResponse = {
 };
 
 type PullRequestDetailsResponse = {
+  author?: {
+    login?: string;
+  } | null;
   headRefName?: string;
   isDraft?: boolean;
   state?: string;
@@ -107,11 +110,13 @@ export type OpenPullRequest = {
   isDraft: boolean;
   authorLogin?: string;
   headBranch?: string;
+  state?: PrSourceState;
   updatedAt?: string;
   url: string;
 };
 
 export type PullRequestDetails = {
+  authorLogin?: string;
   branchName?: string;
   state: PrSourceState;
   title: string;
@@ -122,13 +127,30 @@ export type PullRequestDetailsBatch = Array<PullRequestDetails | undefined>;
 export type ActiveWorkflowRun = {
   runId: string;
   title: string;
+  runTitle?: string;
   event?: string;
   workflowName?: string;
+  actorLogin?: string;
   status: string;
+  conclusion?: string | null;
   branchName?: string;
+  commitSha?: string;
+  pullRequests?: WorkflowRunPullRequest[];
   createdAt?: string;
+  startedAt?: string;
   updatedAt?: string;
   url: string;
+};
+
+export type WorkflowRunSummary = ActiveWorkflowRun & {
+  conclusion: string | null;
+  createdAt: string;
+  pullRequests: WorkflowRunPullRequest[];
+};
+
+export type WorkflowRunPullRequest = {
+  number: string;
+  authorLogin?: string;
 };
 
 export type RepositoryCiStatusTone = "success" | "pending" | "failure";
@@ -190,6 +212,39 @@ type WorkflowRunListResponse = {
   workflowName?: string;
 };
 
+type WorkflowRunsApiResponse = {
+  total_count?: number;
+  workflow_runs?: WorkflowRunApiResponse[];
+};
+
+type WorkflowRunApiResponse = {
+  actor?: {
+    login?: string;
+  };
+  conclusion?: string | null;
+  created_at?: string;
+  display_title?: string;
+  event?: string;
+  head_branch?: string | null;
+  head_sha?: string | null;
+  html_url?: string;
+  id?: number | string;
+  name?: string;
+  pull_requests?: WorkflowRunPullRequestResponse[];
+  run_started_at?: string;
+  status?: string;
+  updated_at?: string;
+};
+
+type WorkflowRunPullRequestResponse = PullRequestReference & {
+  author?: {
+    login?: string;
+  } | null;
+  user?: {
+    login?: string;
+  } | null;
+};
+
 type WorkflowListResponse = {
   name?: string;
   path?: string;
@@ -198,8 +253,9 @@ type WorkflowListResponse = {
 
 type PullRequestReference = {
   base?: {
-    repo?: {
-      url?: string;
+      repo?: {
+        full_name?: string;
+        url?: string;
     };
   };
   number?: number | string;
@@ -441,6 +497,63 @@ export async function fetchUserActiveWorkflowRuns(
   );
 }
 
+const workflowRunsPerPage = 100;
+export const workflowRunCatchUpPageLimit = 10;
+
+export async function fetchWorkflowRunsSince(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  createdAfter: string,
+  createdBefore: string,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<WorkflowRunSummary[]> {
+  const runs = new Map<string, WorkflowRunSummary>();
+
+  try {
+    for (let page = 1; page <= workflowRunCatchUpPageLimit; page += 1) {
+      const result = await executor.execute("gh", [
+        "api",
+        `repos/${target.owner}/${target.repo}/actions/runs`,
+        "--method",
+        "GET",
+        "-f",
+        `created=${createdAfter}..${createdBefore}`,
+        "-F",
+        `per_page=${workflowRunsPerPage}`,
+        "-F",
+        `page=${page}`,
+      ]);
+
+      assertSuccessfulGhResult(result);
+      const response = parseJson<WorkflowRunsApiResponse>(result.stdout);
+      const pageRuns = Array.isArray(response.workflow_runs) ? response.workflow_runs : [];
+
+      for (const responseRun of pageRuns) {
+        const run = normalizeWorkflowRunSummary(responseRun, target);
+
+        if (run) {
+          runs.set(run.runId, run);
+        }
+      }
+
+      const totalCount = typeof response.total_count === "number" && response.total_count >= 0
+        ? response.total_count
+        : undefined;
+      const coveredBoundary = pageRuns.length < workflowRunsPerPage ||
+        (totalCount !== undefined && page * workflowRunsPerPage >= totalCount);
+
+      if (coveredBoundary) {
+        return [...runs.values()];
+      }
+    }
+
+    throw new Error(
+      `Workflow run catch-up exceeded the ${workflowRunCatchUpPageLimit * workflowRunsPerPage}-run scan limit.`,
+    );
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
 async function fetchActiveWorkflowRunsWithArgs(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
   extraArgs: string[],
@@ -505,6 +618,84 @@ function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWo
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
     url,
   };
+}
+
+function normalizeWorkflowRunSummary(
+  response: WorkflowRunApiResponse,
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+): WorkflowRunSummary | undefined {
+  const runId = getRunDatabaseId(response.id);
+  const status = response.status?.trim();
+  const url = response.html_url?.trim();
+  const createdAt = normalizeApiTimestamp(response.created_at);
+  const workflowName = response.name?.trim();
+  const runTitle = response.display_title?.trim();
+  const title = joinTitle(workflowName, runTitle);
+
+  if (!runId || !status || !url || !createdAt || title === "GitHub Actions") {
+    return undefined;
+  }
+
+  const event = response.event?.trim();
+  const actorLogin = response.actor?.login?.trim();
+  const branchName = response.head_branch?.trim();
+  const commitSha = response.head_sha?.trim();
+  const startedAt = normalizeApiTimestamp(response.run_started_at);
+  const updatedAt = normalizeApiTimestamp(response.updated_at);
+  const pullRequests = normalizeWorkflowRunPullRequests(response.pull_requests, target);
+
+  return {
+    runId,
+    title,
+    ...(runTitle ? { runTitle } : {}),
+    ...(event ? { event } : {}),
+    ...(workflowName ? { workflowName } : {}),
+    ...(actorLogin ? { actorLogin } : {}),
+    status,
+    conclusion: normalizeConclusion(response.conclusion),
+    ...(branchName ? { branchName } : {}),
+    ...(commitSha ? { commitSha } : {}),
+    createdAt,
+    ...(startedAt ? { startedAt } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
+    pullRequests,
+    url,
+  };
+}
+
+function normalizeWorkflowRunPullRequests(
+  references: WorkflowRunPullRequestResponse[] | undefined,
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+): WorkflowRunPullRequest[] {
+  const pullRequests = new Map<string, WorkflowRunPullRequest>();
+
+  for (const reference of references ?? []) {
+    if (!pullRequestReferenceMatchesRepository(reference, target)) {
+      continue;
+    }
+
+    const number = getPullRequestListNumber(reference.number);
+
+    if (!number) {
+      continue;
+    }
+
+    const authorLogin = reference.author?.login?.trim() || reference.user?.login?.trim();
+    pullRequests.set(number, {
+      number,
+      ...(authorLogin ? { authorLogin } : {}),
+    });
+  }
+
+  return [...pullRequests.values()];
+}
+
+function normalizeApiTimestamp(value: string | undefined): string | undefined {
+  if (!value || !Number.isFinite(Date.parse(value))) {
+    return undefined;
+  }
+
+  return value;
 }
 
 function compareWorkflowRunsByUpdatedAt(left: ActiveWorkflowRun, right: ActiveWorkflowRun): number {
@@ -1190,20 +1381,8 @@ function getPullRequestNumber(
   pullRequests: PullRequestReference[] | undefined,
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
 ): string | undefined {
-  const expectedPath = `/repos/${target.owner}/${target.repo}`.toLowerCase();
-  const reference = pullRequests?.find((pullRequest) => {
-    const repositoryUrl = pullRequest.base?.repo?.url;
-
-    if (!repositoryUrl) {
-      return false;
-    }
-
-    try {
-      return new URL(repositoryUrl).pathname.replace(/\/$/, "").toLowerCase() === expectedPath;
-    } catch {
-      return false;
-    }
-  });
+  const reference = pullRequests?.find((pullRequest) =>
+    pullRequestReferenceMatchesRepository(pullRequest, target));
   const number = reference?.number;
 
   if (typeof number === "number" && Number.isInteger(number) && number > 0) {
@@ -1215,6 +1394,28 @@ function getPullRequestNumber(
   }
 
   return undefined;
+}
+
+function pullRequestReferenceMatchesRepository(
+  pullRequest: PullRequestReference,
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+): boolean {
+  const repository = pullRequest.base?.repo;
+  const expectedName = `${target.owner}/${target.repo}`.toLowerCase();
+
+  if (repository?.full_name?.trim().toLowerCase() === expectedName) {
+    return true;
+  }
+
+  if (!repository?.url) {
+    return false;
+  }
+
+  try {
+    return new URL(repository.url).pathname.replace(/^\/repos\//, "").replace(/\/$/, "").toLowerCase() === expectedName;
+  } catch {
+    return false;
+  }
 }
 
 function createPullRequestDetailsQuery(targets: PrWatchTarget[]): { args: string[] } {
@@ -1230,7 +1431,7 @@ function createPullRequestDetailsQuery(targets: PrWatchTarget[]): { args: string
     variableDefinitions.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
     selections.push(
       `repository${index}: repository(owner: $owner${index}, name: $repo${index}) { ` +
-        `pullRequest(number: $number${index}) { title state isDraft headRefName } }`,
+        `pullRequest(number: $number${index}) { title state isDraft headRefName author { login } } }`,
     );
   });
 
@@ -1261,6 +1462,7 @@ function normalizePullRequestDetails(
     const branchName = response.headRefName?.trim();
 
     return {
+      ...(response.author?.login?.trim() ? { authorLogin: response.author.login.trim() } : {}),
       ...(branchName ? { branchName } : {}),
       state: getPullRequestState(response),
       title: requiredString(response.title?.trim(), "pull request title"),

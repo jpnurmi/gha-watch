@@ -11,6 +11,7 @@ import {
   fetchUserActiveWorkflowRuns,
   fetchWatchState,
   fetchWorkflowDefinitions,
+  fetchWorkflowRunsSince,
   rerunWatch,
   type ShellExecutor,
 } from "./gh";
@@ -333,6 +334,7 @@ describe("fetchWatchState", () => {
         data: {
           repository0: {
             pullRequest: {
+              author: { login: "jpnurmi" },
               headRefName: "feature/draft",
               isDraft: true,
               state: "OPEN",
@@ -361,7 +363,7 @@ describe("fetchWatchState", () => {
     }));
 
     await expect(fetchPullRequestDetails(targets, executor)).resolves.toEqual([
-      { branchName: "feature/draft", state: "draft", title: "Draft pull request" },
+      { authorLogin: "jpnurmi", branchName: "feature/draft", state: "draft", title: "Draft pull request" },
       { state: "ready", title: "Ready pull request" },
       { state: "merged", title: "Merged pull request" },
       { state: "closed", title: "Closed pull request" },
@@ -376,6 +378,7 @@ describe("fetchWatchState", () => {
     ]);
     expect(calls[0].args).toContain("number3=54");
     expect(calls[0].args[3]).toContain("headRefName");
+    expect(calls[0].args[3]).toContain("author { login }");
   });
 
   it("keeps missing pull request details isolated within a batch", async () => {
@@ -413,6 +416,35 @@ describe("fetchWatchState", () => {
         executor,
       ),
     ).resolves.toEqual([undefined, { state: "ready", title: "Ready pull request" }]);
+  });
+
+  it("bounds pull request detail queries to batches of 50", async () => {
+    const firstBatch = Object.fromEntries(Array.from({ length: 50 }, (_, index) => [
+      `repository${index}`,
+      { pullRequest: { isDraft: false, state: "OPEN", title: `PR ${index + 1}` } },
+    ]));
+    const { executor, calls } = createSequenceExecutor([
+      { code: 0, stdout: JSON.stringify({ data: firstBatch }), stderr: "" },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          data: { repository0: { pullRequest: { isDraft: false, state: "OPEN", title: "PR 51" } } },
+        }),
+        stderr: "",
+      },
+    ]);
+    const targets = Array.from({ length: 51 }, (_, index) => ({
+      kind: "pr" as const,
+      owner: "getsentry",
+      repo: "sentry",
+      prNumber: String(index + 1),
+      url: `https://github.com/getsentry/sentry/pull/${index + 1}`,
+    }));
+
+    await expect(fetchPullRequestDetails(targets, executor)).resolves.toHaveLength(51);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].args).toContain("number49=50");
+    expect(calls[1].args).toContain("number0=51");
   });
 
   it("treats failed pull request checks as a parsed watch state", async () => {
@@ -1317,6 +1349,134 @@ describe("fetchActiveWorkflowRuns", () => {
         url: "https://github.com/getsentry/sentry/actions/runs/101",
       },
     ]);
+  });
+});
+
+describe("fetchWorkflowRunsSince", () => {
+  it("paginates workflow runs across statuses and preserves terminal metadata", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      display_title: `Run ${index + 1}`,
+      name: "CI",
+      event: index === 0 ? "workflow_dispatch" : "push",
+      actor: { login: "jpnurmi" },
+      head_branch: "main",
+      head_sha: "abc123",
+      status: index === 0 ? "completed" : "in_progress",
+      conclusion: index === 0 ? "success" : null,
+      created_at: `2026-08-12T10:00:${String(index % 60).padStart(2, "0")}Z`,
+      run_started_at: "2026-08-12T10:00:01Z",
+      updated_at: "2026-08-12T10:00:10Z",
+      html_url: `https://github.com/getsentry/sentry/actions/runs/${index + 1}`,
+      ...(index === 0 ? {
+        pull_requests: [{
+          number: 51,
+          base: { repo: { full_name: "getsentry/sentry" } },
+          user: { login: "jpnurmi" },
+        }, {
+          number: 99,
+          base: { repo: { full_name: "octocat/other" } },
+          user: { login: "octocat" },
+        }],
+      } : {}),
+    }));
+    const { executor, calls } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({ total_count: 101, workflow_runs: firstPage }),
+        stderr: "",
+      },
+      {
+        code: 0,
+        stdout: JSON.stringify({
+          total_count: 101,
+          workflow_runs: [{
+            id: 101,
+            display_title: "Queued run",
+            name: "Deploy",
+            event: "push",
+            head_branch: "main",
+            status: "queued",
+            conclusion: null,
+            created_at: "2026-08-12T10:02:00Z",
+            updated_at: "2026-08-12T10:02:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/101",
+          }],
+        }),
+        stderr: "",
+      },
+    ]);
+
+    const runs = await fetchWorkflowRunsSince(
+      { owner: "getsentry", repo: "sentry" },
+      "2026-08-12T09:55:00.000Z",
+      "2026-08-12T10:05:00.000Z",
+      executor,
+    );
+
+    expect(runs).toHaveLength(101);
+    expect(runs[0]).toEqual({
+      runId: "1",
+      title: "CI: Run 1",
+      runTitle: "Run 1",
+      event: "workflow_dispatch",
+      pullRequests: [{ number: "51", authorLogin: "jpnurmi" }],
+      workflowName: "CI",
+      actorLogin: "jpnurmi",
+      status: "completed",
+      conclusion: "success",
+      branchName: "main",
+      commitSha: "abc123",
+      createdAt: "2026-08-12T10:00:00Z",
+      startedAt: "2026-08-12T10:00:01Z",
+      updatedAt: "2026-08-12T10:00:10Z",
+      url: "https://github.com/getsentry/sentry/actions/runs/1",
+    });
+    expect(runs.at(-1)).toMatchObject({
+      runId: "101",
+      status: "queued",
+      conclusion: null,
+    });
+    expect(calls.map((call) => call.args.at(-1))).toEqual(["page=1", "page=2"]);
+    expect(calls[0].args).toEqual([
+      "api",
+      "repos/getsentry/sentry/actions/runs",
+      "--method",
+      "GET",
+      "-f",
+      "created=2026-08-12T09:55:00.000Z..2026-08-12T10:05:00.000Z",
+      "-F",
+      "per_page=100",
+      "-F",
+      "page=1",
+    ]);
+  });
+
+  it("reports a failed later page instead of returning a partial scan", async () => {
+    const page = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      display_title: `Run ${index + 1}`,
+      name: "CI",
+      status: "completed",
+      conclusion: "success",
+      created_at: "2026-08-12T10:00:00Z",
+      html_url: `https://github.com/getsentry/sentry/actions/runs/${index + 1}`,
+    }));
+    const { executor } = createSequenceExecutor([
+      {
+        code: 0,
+        stdout: JSON.stringify({ total_count: 101, workflow_runs: page }),
+        stderr: "",
+      },
+      { code: 1, stdout: "", stderr: "network failure" },
+    ]);
+
+    await expect(fetchWorkflowRunsSince(
+      { owner: "getsentry", repo: "sentry" },
+      "2026-08-12T09:55:00.000Z",
+      "2026-08-12T10:05:00.000Z",
+      executor,
+    )).rejects.toThrow("network failure");
   });
 });
 

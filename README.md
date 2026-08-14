@@ -13,6 +13,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Group watches by repository, pull request, and workflow with collapsible tree sections.
 - Watch repositories so they stay visible after their watches are cleared.
 - Configure all or user-specific pull request watches alongside workflow watches from the repository eye menu.
+- Catch up subscribed workflow runs that finish while the app is closed, asleep, or offline.
 - Sync watched repositories, repository order, and Saved/Done items across machines through an automatically discovered unlisted GitHub Gist.
 - Long-press repository headers to reorder visible repositories.
 - Load a repository's open pull requests or active workflow runs on demand and start watching from the menu.
@@ -55,6 +56,14 @@ Repository links and `OWNER/REPO` slugs watch your open pull requests and keep t
 Ownerless repository names use the authenticated GitHub CLI user as the owner.
 Pull request links are live watches. On each poll, the app resolves the current PR head and watches the matching workflow runs for that head.
 Ownerless pull request slugs use the authenticated GitHub CLI user as the owner.
+
+## Workflow catch-up
+
+When a pull-request or workflow subscription is enabled for a repository, GHA Watch establishes a baseline at that moment and adds only currently active matches. Changing the configured PR scope or workflow sets establishes a fresh baseline, so newly enabled subscriptions do not import older completed runs.
+
+Later polls scan runs created since the repository's last successful scan, including completed runs and their referenced pull requests. This catches PRs that open and close entirely while the app is offline. A five-minute overlap protects polling and persistence boundaries; stable GitHub run IDs prevent duplicate watches and notifications. Caught-up results remain unseen in Inbox even when the popup is focused and desktop notifications are paused.
+
+Catch-up is device-local and is not included in Gist sync. Each poll processes up to 1,000 workflow runs per repository, so an offline gap is supported when it contains no more than 1,000 runs. If that bound is exceeded or any page fails, GHA Watch retains the previous cursor instead of silently skipping runs.
 
 ## Development
 

@@ -1,11 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { createWatchController, type WatchControllerDeps } from "./watchController";
+import {
+  createWatchController,
+  getWorkflowRunSubscriptionMatch,
+  workflowDiscoveryOverlapMs,
+  type WatchControllerDeps,
+} from "./watchController";
 import { getWatchViewCounts } from "./watchViewCounts";
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } from "../domain/githubUrl";
 import type { WatchedRepo } from "../domain/watchedRepos";
 import type { WatchSuppression } from "../domain/watchSuppressions";
 import { type WatchRecord } from "../domain/watches";
-import type { ActiveWorkflowRun, OpenPullRequest, RerunMode, WatchSnapshot, WorkflowDefinition } from "../platform/gh";
+import {
+  emptyWorkflowDiscoveryState,
+  getWorkflowDiscoverySubscriptionFingerprint,
+  type WorkflowDiscoveryState,
+} from "../domain/workflowDiscovery";
+import type {
+  ActiveWorkflowRun,
+  OpenPullRequest,
+  RerunMode,
+  WatchSnapshot,
+  WorkflowDefinition,
+  WorkflowRunSummary,
+} from "../platform/gh";
 
 const runTarget: CheckWatchTarget = {
   kind: "run",
@@ -51,6 +68,7 @@ function createDeps(
     : never;
   saves: WatchRecord[][];
   suppressionSaves: WatchSuppression[][];
+  discoverySaves: WorkflowDiscoveryState[];
   fetches: WatchTarget[];
   reruns: Array<[WatchTarget, RerunMode]>;
   openPullRequestFetches: WatchedRepo[];
@@ -58,11 +76,17 @@ function createDeps(
   defaultBranchFetches: WatchedRepo[];
   userActiveWorkflowRunFetches: WatchedRepo[];
   workflowDefinitionFetches: WatchedRepo[];
+  workflowRunFetches: Array<{
+    target: WatchedRepo;
+    createdAfter: string;
+    createdBefore: string;
+  }>;
 } {
   const notifications: string[] = [];
   const notificationRecords: Parameters<WatchControllerDeps["notify"]>[0][] = [];
   const saves: WatchRecord[][] = [];
   const suppressionSaves: WatchSuppression[][] = [];
+  const discoverySaves: WorkflowDiscoveryState[] = [];
   const fetches: WatchTarget[] = [];
   const reruns: Array<[WatchTarget, RerunMode]> = [];
   const openPullRequestFetches: WatchedRepo[] = [];
@@ -70,12 +94,18 @@ function createDeps(
   const defaultBranchFetches: WatchedRepo[] = [];
   const userActiveWorkflowRunFetches: WatchedRepo[] = [];
   const workflowDefinitionFetches: WatchedRepo[] = [];
+  const workflowRunFetches: Array<{
+    target: WatchedRepo;
+    createdAfter: string;
+    createdBefore: string;
+  }> = [];
 
   return {
     notifications,
     notificationRecords,
     saves,
     suppressionSaves,
+    discoverySaves,
     fetches,
     reruns,
     openPullRequestFetches,
@@ -83,6 +113,7 @@ function createDeps(
     defaultBranchFetches,
     userActiveWorkflowRunFetches,
     workflowDefinitionFetches,
+    workflowRunFetches,
     deps: {
       async fetchState(target) {
         fetches.push(target);
@@ -187,11 +218,18 @@ function createDeps(
           },
         ];
       },
+      async fetchWorkflowRunsSince(target, createdAfter, createdBefore) {
+        workflowRunFetches.push({ target, createdAfter, createdBefore });
+        return [];
+      },
       async save(watches) {
         saves.push(watches);
       },
       async saveSuppressions(suppressions) {
         suppressionSaves.push(suppressions);
+      },
+      async saveWorkflowDiscoveryState(state) {
+        discoverySaves.push(state);
       },
     },
   };
@@ -207,6 +245,50 @@ function existingWatch(): WatchRecord {
     lastState: { status: "completed", conclusion: "success" },
     active: false,
     error: undefined,
+  };
+}
+
+function discoveryState(
+  lastScannedAt = "2026-08-12T10:00:00.000Z",
+  recentRunIds: string[] = [],
+  watchedRepo: WatchedRepo = {
+    owner: "getsentry",
+    repo: "sentry",
+    defaultBranchWorkflowNames: ["CI"],
+  },
+): WorkflowDiscoveryState {
+  return {
+    version: 2,
+    repositories: {
+      "getsentry/sentry": {
+        lastScannedAt,
+        recentRunIds,
+        subscriptionFingerprint: getWorkflowDiscoverySubscriptionFingerprint(watchedRepo),
+        updatedAt: lastScannedAt,
+      },
+    },
+  };
+}
+
+function completedWorkflowRun(
+  overrides: Partial<WorkflowRunSummary> = {},
+): WorkflowRunSummary {
+  return {
+    runId: "900",
+    title: "CI: Fast checks",
+    runTitle: "Fast checks",
+    event: "push",
+    workflowName: "CI",
+    actorLogin: "jpnurmi",
+    status: "completed",
+    conclusion: "success",
+    branchName: "main",
+    createdAt: "2026-08-12T10:01:00Z",
+    startedAt: "2026-08-12T10:01:02Z",
+    updatedAt: "2026-08-12T10:01:08Z",
+    pullRequests: [],
+    url: "https://github.com/getsentry/sentry/actions/runs/900",
+    ...overrides,
   };
 }
 
@@ -800,6 +882,552 @@ describe("watchController", () => {
     expect(defaultBranchFetches).toEqual([{ owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"] }]);
     expect(openPullRequestFetches).toEqual([]);
     expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/123"]);
+  });
+
+  it("catches and notifies a workflow run that completes between polls", async () => {
+    const now = new Date("2026-08-12T10:02:00Z");
+    const { deps, fetches, notificationRecords, workflowRunFetches } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async (target, createdAfter, createdBefore) => {
+      workflowRunFetches.push({ target, createdAfter, createdBefore });
+      return [completedWorkflowRun()];
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => now },
+      [],
+      [],
+      discoveryState(),
+    );
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(workflowRunFetches).toEqual([
+      {
+        target: {
+          owner: "getsentry",
+          repo: "sentry",
+          defaultBranchWorkflowNames: ["CI"],
+        },
+        createdAfter: new Date(
+          Date.parse("2026-08-12T10:00:00.000Z") - workflowDiscoveryOverlapMs,
+        ).toISOString(),
+        createdBefore: now.toISOString(),
+      },
+    ]);
+    expect(fetches).toEqual([]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/900",
+        label: "CI: Fast checks",
+        status: "completed:success",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "completed", conclusion: "success" },
+        metadata: {
+          workflowName: "CI",
+          runTitle: "Fast checks",
+          branchName: "main",
+        },
+        timing: {
+          queuedAt: "2026-08-12T10:01:00Z",
+          startedAt: "2026-08-12T10:01:02Z",
+          completedAt: "2026-08-12T10:01:08Z",
+        },
+        active: false,
+      },
+    ]);
+    expect(notificationRecords).toMatchObject([
+      { watchId: "getsentry/sentry/run/900", title: "CI: Fast checks" },
+    ]);
+  });
+
+  it("catches runs after an offline gap without duplicating overlap notifications", async () => {
+    let now = new Date("2026-08-12T18:00:00Z");
+    const { deps, notificationRecords, discoverySaves } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async () => [
+      completedWorkflowRun({
+        createdAt: "2026-08-12T14:00:00Z",
+        updatedAt: "2026-08-12T14:00:10Z",
+      }),
+    ];
+    const controller = createWatchController(
+      { ...deps, now: () => now },
+      [],
+      [],
+      discoveryState("2026-08-12T12:00:00Z"),
+    );
+    const watchedRepos = [{
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    }];
+
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+    now = new Date("2026-08-12T18:00:30Z");
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+
+    expect(controller.getWatches()).toHaveLength(1);
+    expect(notificationRecords).toHaveLength(1);
+    expect(discoverySaves.at(-1)?.repositories["getsentry/sentry"]).toMatchObject({
+      lastScannedAt: "2026-08-12T18:00:30.000Z",
+      recentRunIds: ["900"],
+    });
+  });
+
+  it("does not advance discovery after a failed catch-up scan", async () => {
+    const { deps, discoverySaves, workflowRunFetches } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async (target, createdAfter, createdBefore) => {
+      workflowRunFetches.push({ target, createdAfter, createdBefore });
+      throw new Error("page two failed");
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState(),
+    );
+    const watchedRepos = [{
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    }];
+
+    await expect(controller.syncWorkflowSubscriptions(watchedRepos)).rejects.toThrow("page two failed");
+
+    expect(discoverySaves).toEqual([]);
+    expect(workflowRunFetches[0].createdAfter).toBe("2026-08-12T09:55:00.000Z");
+  });
+
+  it("continues syncing repositories after a catch-up failure", async () => {
+    const firstRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const secondRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "relay",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, discoverySaves, workflowRunFetches } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async (target, createdAfter, createdBefore) => {
+      workflowRunFetches.push({ target, createdAfter, createdBefore });
+
+      if (target.repo === firstRepo.repo) {
+        throw new Error("first repository failed");
+      }
+
+      return [];
+    };
+    const cursor = (repo: WatchedRepo): WorkflowDiscoveryState["repositories"][string] => ({
+      lastScannedAt: "2026-08-12T10:00:00.000Z",
+      recentRunIds: [],
+      subscriptionFingerprint: getWorkflowDiscoverySubscriptionFingerprint(repo),
+      updatedAt: "2026-08-12T10:00:00.000Z",
+    });
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      {
+        version: 2,
+        repositories: {
+          "getsentry/sentry": cursor(firstRepo),
+          "getsentry/relay": cursor(secondRepo),
+        },
+      },
+    );
+
+    await expect(controller.syncWorkflowSubscriptions([firstRepo, secondRepo]))
+      .rejects.toThrow("first repository failed");
+
+    expect(workflowRunFetches.map(({ target }) => target.repo)).toEqual(["sentry", "relay"]);
+    expect(discoverySaves.at(-1)?.repositories["getsentry/relay"].lastScannedAt)
+      .toBe("2026-08-12T10:02:00.000Z");
+  });
+
+  it("establishes a first-subscription baseline without importing completed history", async () => {
+    const { deps, discoverySaves } = createDeps([]);
+    let now = new Date("2026-08-12T10:02:00Z");
+    let catchUpEnabled = false;
+    deps.fetchActiveWorkflowRuns = async () => [];
+    deps.fetchWorkflowRunsSince = async () => {
+      if (!catchUpEnabled) {
+        throw new Error("Historical catch-up should not run during initialization.");
+      }
+
+      return [completedWorkflowRun({
+        createdAt: "2026-08-12T10:01:00Z",
+        updatedAt: "2026-08-12T10:01:08Z",
+      })];
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => now },
+    );
+    const watchedRepos = [
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ];
+
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+    catchUpEnabled = true;
+    now = new Date("2026-08-12T10:02:30Z");
+    await controller.syncWorkflowSubscriptions(watchedRepos);
+
+    expect(controller.getWatches()).toEqual([]);
+    expect(discoverySaves.at(-1)?.repositories["getsentry/sentry"]).toMatchObject({
+      baselineAt: "2026-08-12T10:02:00.000Z",
+      lastScannedAt: "2026-08-12T10:02:30.000Z",
+      recentRunIds: ["900"],
+    });
+  });
+
+  it("re-baselines active workflows when a PR-only cursor gains a workflow subscription", async () => {
+    const previousRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "all",
+    };
+    const nextRepo: WatchedRepo = {
+      ...previousRepo,
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, activeWorkflowRunFetches, discoverySaves, workflowRunFetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Build",
+        url: runTarget.url,
+      },
+    ]);
+    deps.fetchOpenPullRequests = async () => [];
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", ["800"], previousRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([nextRepo]);
+
+    expect(activeWorkflowRunFetches).toHaveLength(1);
+    expect(workflowRunFetches).toEqual([]);
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/123",
+    ]);
+    expect(discoverySaves.at(-1)?.repositories["getsentry/sentry"]).toMatchObject({
+      baselineAt: "2026-08-12T10:02:00.000Z",
+      recentRunIds: ["123"],
+      subscriptionFingerprint: getWorkflowDiscoverySubscriptionFingerprint(nextRepo),
+    });
+  });
+
+  it("re-baselines an active workflow when it becomes selected", async () => {
+    const previousRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CodeQL"],
+    };
+    const nextRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI", "CodeQL"],
+    };
+    const { deps, workflowRunFetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Build",
+        url: runTarget.url,
+      },
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CodeQL: Analyze",
+        url: "https://github.com/getsentry/sentry/actions/runs/456",
+      },
+    ]);
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", ["456"], previousRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([nextRepo]);
+
+    expect(workflowRunFetches).toEqual([]);
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/123",
+      "getsentry/sentry/run/456",
+    ]);
+  });
+
+  it("catches a PR that opened and closed while offline for all-PR scope", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "all",
+    };
+    const pullRequestDetailTargets: PrWatchTarget[][] = [];
+    const { deps, notificationRecords } = createDeps([]);
+    deps.fetchOpenPullRequests = async () => [];
+    deps.fetchWorkflowRunsSince = async () => [
+      completedWorkflowRun({
+        branchName: "feature/offline-pr",
+        pullRequests: [{ number: "52" }],
+      }),
+      completedWorkflowRun({
+        runId: "901",
+        conclusion: "failure",
+        branchName: "feature/offline-pr",
+        createdAt: "2026-08-12T10:01:01Z",
+        startedAt: "2026-08-12T10:01:03Z",
+        updatedAt: "2026-08-12T10:01:10Z",
+        pullRequests: [{ number: "52" }],
+        url: "https://github.com/getsentry/sentry/actions/runs/901",
+      }),
+    ];
+    deps.fetchPullRequestDetails = async (targets) => {
+      pullRequestDetailTargets.push(targets);
+      return [{
+        authorLogin: "octocat",
+        branchName: "feature/offline-pr",
+        state: "closed",
+        title: "Fix offline PR discovery",
+      }];
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(pullRequestDetailTargets).toMatchObject([[{ prNumber: "52" }]]);
+    expect(controller.getWatches()).toMatchObject([{
+      id: "getsentry/sentry/pull/52",
+      label: "Fix offline PR discovery",
+      sourceState: "closed",
+      status: "completed:failure",
+      lastSeenStatus: "in_progress",
+      active: false,
+      timing: {
+        queuedAt: "2026-08-12T10:01:00.000Z",
+        startedAt: "2026-08-12T10:01:02.000Z",
+        completedAt: "2026-08-12T10:01:10.000Z",
+      },
+    }]);
+    expect(notificationRecords).toMatchObject([{
+      watchId: "getsentry/sentry/pull/52",
+      title: "Fix offline PR discovery",
+    }]);
+  });
+
+  it("keeps active PR watches when catch-up details are unavailable", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "all",
+    };
+    const target: PrWatchTarget = {
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry",
+      prNumber: "52",
+      url: "https://github.com/getsentry/sentry/pull/52",
+    };
+    const activeWatch: WatchRecord = {
+      id: "getsentry/sentry/pull/52",
+      target,
+      sourceState: "ready",
+      label: "Active pull request",
+      status: "in_progress",
+      lastSeenStatus: "in_progress",
+      lastState: { status: "in_progress", conclusion: null },
+      active: true,
+      error: undefined,
+    };
+    const { deps, notificationRecords } = createDeps([]);
+    deps.fetchOpenPullRequests = async () => [];
+    deps.fetchWorkflowRunsSince = async () => [
+      completedWorkflowRun({
+        branchName: "feature/active-pr",
+        pullRequests: [{ number: "52" }],
+      }),
+    ];
+    deps.fetchPullRequestDetails = async () => [undefined];
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [activeWatch],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(controller.getWatches()).toEqual([activeWatch]);
+    expect(notificationRecords).toEqual([]);
+  });
+
+  it("uses batched PR authors to catch only authored offline PRs for user scope", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "user",
+    };
+    const detailBatches: PrWatchTarget[][] = [];
+    const { deps, notificationRecords } = createDeps([]);
+    deps.fetchOpenPullRequests = async () => [];
+    deps.fetchWorkflowRunsSince = async () => [
+      completedWorkflowRun({
+        runId: "900",
+        pullRequests: [{ number: "52" }],
+      }),
+      completedWorkflowRun({
+        runId: "901",
+        title: "CI: Other PR",
+        pullRequests: [{ number: "53" }],
+        url: "https://github.com/getsentry/sentry/actions/runs/901",
+      }),
+    ];
+    deps.fetchPullRequestDetails = async (targets) => {
+      detailBatches.push(targets);
+      return [
+        {
+          authorLogin: "jpnurmi",
+          branchName: "feature/mine",
+          state: "merged",
+          title: "My offline PR",
+        },
+        {
+          authorLogin: "octocat",
+          branchName: "feature/theirs",
+          state: "closed",
+          title: "Another offline PR",
+        },
+      ];
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(detailBatches).toHaveLength(1);
+    expect(detailBatches[0].map((target) => target.prNumber)).toEqual(["52", "53"]);
+    expect(controller.getWatches()).toMatchObject([{
+      id: "getsentry/sentry/pull/52",
+      label: "My offline PR",
+      sourceState: "merged",
+      status: "completed:success",
+    }]);
+    expect(notificationRecords).toHaveLength(1);
+  });
+
+  it("keeps caught-up terminal state unseen while popup notifications are paused", async () => {
+    const { deps, notificationRecords } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun()];
+    deps.notificationsPaused = () => true;
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState(),
+    );
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "completed:success",
+      lastSeenStatus: "in_progress",
+    });
+    expect(notificationRecords).toEqual([]);
+  });
+
+  it("keeps suppressed catch-up runs cleared", async () => {
+    const { deps, notificationRecords } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun()];
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [{ id: "getsentry/sentry/run/900", clearedAt: "2026-08-12T09:00:00Z" }],
+      discoveryState(),
+    );
+
+    await controller.syncWorkflowSubscriptions([
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        defaultBranchWorkflowNames: ["CI"],
+      },
+    ]);
+
+    expect(controller.getWatches()).toEqual([]);
+    expect(notificationRecords).toEqual([]);
+  });
+
+  it("filters catch-up runs by workflow, branch, event, author, and PR scope", () => {
+    const openPullRequest: OpenPullRequest = {
+      number: "52",
+      title: "Feature",
+      isDraft: false,
+      authorLogin: "jpnurmi",
+      headBranch: "feature/tray",
+      url: "https://github.com/getsentry/sentry/pull/52",
+    };
+    const repo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "user",
+      defaultBranchWorkflowNames: ["CI"],
+      userWorkflowNames: ["Deploy"],
+    };
+    const options = {
+      defaultBranch: "main",
+      openPullRequests: [openPullRequest],
+      userLogin: "jpnurmi",
+    };
+
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun(), options)).toEqual({
+      kind: "workflow",
+    });
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({ workflowName: "Other" }), options)).toBeUndefined();
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({ branchName: "release" }), options)).toBeUndefined();
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
+      workflowName: "Deploy",
+      branchName: "release",
+      event: "push",
+    }), options)).toBeUndefined();
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
+      workflowName: "Deploy",
+      branchName: "release",
+      event: "workflow_dispatch",
+      actorLogin: "octocat",
+    }), options)).toBeUndefined();
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
+      workflowName: "Deploy",
+      branchName: "feature/tray",
+      event: "workflow_dispatch",
+    }), options)).toEqual({ kind: "pull-request", pullRequest: openPullRequest });
   });
 
   it("does not reopen done watches while syncing subscriptions", async () => {

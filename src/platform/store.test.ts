@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadWatchSuppressions, saveWatchSuppressions } from "./store";
+import {
+  loadWatchSuppressions,
+  loadWorkflowDiscoveryState,
+  saveWatchSuppressions,
+  saveWorkflowDiscoveryState,
+} from "./store";
 
 describe("watch suppression storage", () => {
   const values = new Map<string, string>();
@@ -44,5 +49,33 @@ describe("watch suppression storage", () => {
     expect(loadWatchSuppressions()).toEqual([
       { id: "valid", clearedAt: "2026-08-09T00:00:00.000Z" },
     ]);
+  });
+
+  it("persists discovery cursors across restarts", async () => {
+    await saveWorkflowDiscoveryState({
+      version: 2,
+      repositories: {
+        "getsentry/sentry": {
+          baselineAt: "2026-08-09T00:00:00.000Z",
+          lastScannedAt: "2026-08-09T00:00:00.000Z",
+          recentRunIds: ["123", "122"],
+          subscriptionFingerprint: "{\"pullRequestScope\":null,\"defaultBranchWorkflowNames\":[\"CI\"],\"userWorkflowNames\":[]}",
+          updatedAt: "2026-08-09T00:00:00.000Z",
+        },
+      },
+    });
+
+    expect(loadWorkflowDiscoveryState(new Date("2026-08-12T00:00:00Z"))).toEqual({
+      version: 2,
+      repositories: {
+        "getsentry/sentry": {
+          baselineAt: "2026-08-09T00:00:00.000Z",
+          lastScannedAt: "2026-08-09T00:00:00.000Z",
+          recentRunIds: ["123", "122"],
+          subscriptionFingerprint: "{\"pullRequestScope\":null,\"defaultBranchWorkflowNames\":[\"CI\"],\"userWorkflowNames\":[]}",
+          updatedAt: "2026-08-09T00:00:00.000Z",
+        },
+      },
+    });
   });
 });
