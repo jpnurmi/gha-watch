@@ -3,6 +3,7 @@ import type { WatchState } from "./status";
 
 export type PrSourceState = "draft" | "ready" | "merged" | "closed";
 export type WatchTriageState = "inbox" | "saved" | "done";
+export type WatchErrorKind = "transient";
 export const watchRetentionMonths = 1;
 export const doneWatchRetentionLimit = 100;
 
@@ -41,6 +42,8 @@ export type WatchRecord = {
   doneAt?: string;
   active: boolean;
   error: string | undefined;
+  errorKind?: WatchErrorKind;
+  errorAt?: string;
 };
 
 export type WatchDropPosition = "before" | "after";

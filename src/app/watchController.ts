@@ -31,6 +31,7 @@ import {
   normalizeWatchSeenStatus,
   setWatchesTriageState,
   type WatchDropPosition,
+  type WatchErrorKind,
   type WatchRecord,
   type WatchTriageState,
 } from "../domain/watches";
@@ -85,10 +86,52 @@ export type WatchController = {
   listOpenPullRequests(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   listWorkflowDefinitions(target: Pick<WatchedRepo, "owner" | "repo">): Promise<WorkflowDefinition[]>;
   rerun(id: string, mode: RerunMode): Promise<void>;
-  syncWorkflowSubscriptions(watchedRepos: WatchedRepo[]): Promise<void>;
-  pollNow(options?: WatchPollOptions): Promise<void>;
+  syncWorkflowSubscriptions(watchedRepos: WatchedRepo[]): Promise<WorkflowSubscriptionSyncResult>;
+  pollNow(options?: WatchPollOptions): Promise<WatchPollResult>;
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
+};
+
+export type PollSummaryStatus = "successful" | "degraded" | "failed";
+
+export type WatchPollFailure = {
+  watchId: string;
+  kind: WatchErrorKind;
+  message: string;
+};
+
+export type WatchMetadataFailure = {
+  scope: "legacy-watch-metadata" | "pull-request-details";
+  watchIds: string[];
+  message: string;
+};
+
+export type NotificationDeliveryFailure = {
+  watchId: string;
+  kind: "permission-denied" | "delivery";
+  message: string;
+};
+
+export type WatchPollResult = {
+  status: PollSummaryStatus;
+  successfulWatchIds: string[];
+  watchFailures: WatchPollFailure[];
+  metadataFailures: WatchMetadataFailure[];
+  notificationFailures: NotificationDeliveryFailure[];
+  anyGithubRequestSucceeded: boolean;
+};
+
+export type WorkflowSubscriptionFailure = {
+  repository: string;
+  kind: WatchErrorKind;
+  message: string;
+};
+
+export type WorkflowSubscriptionSyncResult = {
+  status: PollSummaryStatus;
+  successfulRepositories: string[];
+  failures: WorkflowSubscriptionFailure[];
+  anyGithubRequestSucceeded: boolean;
 };
 
 export type WatchPollOptions = {
@@ -144,6 +187,28 @@ export function getWorkflowRunSubscriptionMatch(
   }
 
   return undefined;
+}
+
+type MetadataRefreshResult = {
+  successfulWatchIds: string[];
+  failures: WatchMetadataFailure[];
+  anyGithubRequestSucceeded: boolean;
+};
+
+type SettledWatchSnapshot =
+  | { watch: WatchRecord; snapshot: WatchSnapshot }
+  | { watch: WatchRecord; failure: WatchPollFailure };
+
+const pollConcurrency = 4;
+
+class WorkflowSubscriptionSyncError extends Error {
+  constructor(
+    readonly failureCause: unknown,
+    readonly anyGithubRequestSucceeded: boolean,
+  ) {
+    super(normalizeFailureMessage(failureCause));
+    this.name = "WorkflowSubscriptionSyncError";
+  }
 }
 
 export function createWatchController(
@@ -310,11 +375,12 @@ export function createWatchController(
       const snapshot = await deps.fetchState(target);
       updateWatch(id, (watch) => withBaselineSnapshot(watch, snapshot));
     } catch (error) {
+      const failure = createWatchPollFailure(id, error);
       updateWatch(id, (watch) => ({
         ...watch,
-        status: "error",
-        lastSeenStatus: "error",
-        error: error instanceof Error ? error.message : String(error),
+        error: failure.message,
+        errorKind: failure.kind,
+        errorAt: getNow().toISOString(),
       }));
     }
   }
@@ -327,18 +393,21 @@ export function createWatchController(
       metadataHydratedWatchIds.add(watch.id);
       return withBaselineSnapshot(watch, snapshot);
     } catch (error) {
+      const failure = createWatchPollFailure(watch.id, error);
       return {
         ...watch,
-        status: "error",
-        lastSeenStatus: "error",
-        error: error instanceof Error ? error.message : String(error),
+        error: failure.message,
+        errorKind: failure.kind,
+        errorAt: getNow().toISOString(),
       };
     }
   }
 
-  async function refreshPullRequestDetails(targets = getTrackedPullRequestTargets(watches)): Promise<void> {
+  async function refreshPullRequestDetails(
+    targets = getTrackedPullRequestTargets(watches),
+  ): Promise<MetadataRefreshResult> {
     if (!deps.fetchPullRequestDetails) {
-      return;
+      return emptyMetadataRefreshResult();
     }
 
     const uniqueTargets = new Map(targets.map((target) => [getPullRequestKey(target), target]));
@@ -346,7 +415,7 @@ export function createWatchController(
     const batch = [...uniqueTargets.values()];
 
     if (batch.length === 0) {
-      return;
+      return emptyMetadataRefreshResult();
     }
 
     try {
@@ -359,12 +428,26 @@ export function createWatchController(
           detailsByKey.set(getPullRequestKey(target), result);
         }
       });
-    } catch {
-      // Missing PR metadata should not interfere with check polling.
+    } catch (error) {
+      return {
+        successfulWatchIds: [],
+        failures: [
+          {
+            scope: "pull-request-details",
+            watchIds: getWatchIdsForPullRequestTargets(watches, batch),
+            message: normalizeFailureMessage(error),
+          },
+        ],
+        anyGithubRequestSucceeded: false,
+      };
     }
 
     if (detailsByKey.size === 0) {
-      return;
+      return {
+        successfulWatchIds: [],
+        failures: [],
+        anyGithubRequestSucceeded: true,
+      };
     }
 
     const nextWatches = watches.map((watch) => {
@@ -380,6 +463,12 @@ export function createWatchController(
     if (nextWatches.some((watch, index) => watch !== watches[index])) {
       setWatches(nextWatches);
     }
+
+    return {
+      successfulWatchIds: [],
+      failures: [],
+      anyGithubRequestSucceeded: true,
+    };
   }
 
   async function refreshWatchPullRequestDetails(id: string): Promise<void> {
@@ -391,7 +480,9 @@ export function createWatchController(
     }
   }
 
-  async function hydrateLegacyWatchMetadata(triageState?: WatchTriageState): Promise<void> {
+  async function hydrateLegacyWatchMetadata(
+    triageState?: WatchTriageState,
+  ): Promise<MetadataRefreshResult> {
     const watchesMissingMetadata = watches.filter(
       (watch) =>
         getWatchTriageState(watch) !== "done" &&
@@ -402,34 +493,73 @@ export function createWatchController(
         !metadataHydratedWatchIds.has(watch.id),
     );
 
-    for (const watch of watchesMissingMetadata) {
-      metadataHydratedWatchIds.add(watch.id);
+    const results = await mapWithConcurrency(
+      watchesMissingMetadata,
+      pollConcurrency,
+      async (watch): Promise<SettledWatchSnapshot> => {
+        try {
+          return { watch, snapshot: await deps.fetchState(watch.target) };
+        } catch (error) {
+          return { watch, failure: createWatchPollFailure(watch.id, error) };
+        }
+      },
+    );
+    const snapshots = new Map<string, WatchSnapshot>();
+    const failures: WatchMetadataFailure[] = [];
 
-      try {
-        const snapshot = await deps.fetchState(watch.target);
-        const nextState = {
-          status: snapshot.status,
-          conclusion: snapshot.conclusion,
-          ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
-        };
-        const status = formatWatchState(nextState);
-
-        updateWatch(watch.id, (current) => ({
-          ...current,
-          target: withSnapshotPrNumber(current.target, snapshot.prNumber),
-          label: getSnapshotLabel(current, snapshot),
-          metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
-          status,
-          lastSeenStatus: current.lastSeenStatus ?? current.status,
-          lastState: nextState,
-          timing: snapshot.timing,
-          active: !isTerminalStatus(nextState),
-          error: undefined,
-        }));
-      } catch {
-        // Metadata hydration should not turn existing watches into error rows.
+    for (const result of results) {
+      if ("failure" in result) {
+        failures.push({
+          scope: "legacy-watch-metadata",
+          watchIds: [result.watch.id],
+          message: result.failure.message,
+        });
+        continue;
       }
+
+      metadataHydratedWatchIds.add(result.watch.id);
+      snapshots.set(result.watch.id, result.snapshot);
     }
+
+    const nextWatches = watches.map((current) => {
+      const snapshot = snapshots.get(current.id);
+
+      if (!snapshot) {
+        return current;
+      }
+
+      const nextState = {
+        status: snapshot.status,
+        conclusion: snapshot.conclusion,
+        ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
+      };
+      const status = formatWatchState(nextState);
+
+      return {
+        ...current,
+        target: withSnapshotPrNumber(current.target, snapshot.prNumber),
+        label: getSnapshotLabel(current, snapshot),
+        metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
+        status,
+        lastSeenStatus: current.lastSeenStatus ?? current.status,
+        lastState: nextState,
+        timing: snapshot.timing,
+        active: !isTerminalStatus(nextState),
+        error: undefined,
+        errorKind: undefined,
+        errorAt: undefined,
+      };
+    });
+
+    if (nextWatches.some((watch, index) => watch !== watches[index])) {
+      setWatches(nextWatches);
+    }
+
+    return {
+      successfulWatchIds: [...snapshots.keys()],
+      failures,
+      anyGithubRequestSucceeded: snapshots.size > 0,
+    };
   }
 
   async function addWatchTarget(
@@ -479,7 +609,7 @@ export function createWatchController(
     await refreshPullRequestDetails([source]);
   }
 
-  async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<void> {
+  async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<boolean> {
     const defaultBranchWorkflowNames = watchedRepo.defaultBranchWorkflowNames ?? [];
     const userWorkflowNames = watchedRepo.userWorkflowNames ?? [];
     const needsPullRequestList = Boolean(watchedRepo.pullRequestScope) || userWorkflowNames.length > 0;
@@ -488,110 +618,130 @@ export function createWatchController(
     let openPullRequests: OpenPullRequest[] = [];
     let userLogin = "";
     let defaultBranch = "";
+    let anyGithubRequestSucceeded = false;
 
-    if (needsPullRequestList && !deps.fetchOpenPullRequests) {
-      throw new Error("Pull request watches need GitHub PR listing support.");
+    async function trackRequest<T>(request: Promise<T>): Promise<T> {
+      const result = await request;
+      anyGithubRequestSucceeded = true;
+      return result;
     }
 
-    if (needsUserLogin && !deps.getAuthenticatedUserLogin) {
-      throw new Error("User watches need GitHub authentication support.");
-    }
+    try {
+      if (needsPullRequestList && !deps.fetchOpenPullRequests) {
+        throw new Error("Pull request watches need GitHub PR listing support.");
+      }
 
-    if (needsDefaultBranch && !deps.fetchRepositoryDefaultBranch) {
-      throw new Error("Default branch workflow subscriptions need GitHub repository support.");
-    }
+      if (needsUserLogin && !deps.getAuthenticatedUserLogin) {
+        throw new Error("User watches need GitHub authentication support.");
+      }
 
-    [openPullRequests, userLogin, defaultBranch] = await Promise.all([
-      needsPullRequestList ? deps.fetchOpenPullRequests!(watchedRepo) : Promise.resolve([]),
-      needsUserLogin ? deps.getAuthenticatedUserLogin!() : Promise.resolve(""),
-      needsDefaultBranch ? deps.fetchRepositoryDefaultBranch!(watchedRepo) : Promise.resolve(""),
-    ]);
+      if (needsDefaultBranch && !deps.fetchRepositoryDefaultBranch) {
+        throw new Error("Default branch workflow subscriptions need GitHub repository support.");
+      }
 
-    const scanStartedAt = getNow();
-    const repositoryKey = getWorkflowDiscoveryRepositoryKey(watchedRepo);
-    const cursor = workflowDiscoveryState.repositories[repositoryKey];
-    const subscriptionFingerprint = getWorkflowDiscoverySubscriptionFingerprint(watchedRepo);
-    const establishBaseline = cursor?.subscriptionFingerprint !== subscriptionFingerprint;
+      [openPullRequests, userLogin, defaultBranch] = await Promise.all([
+        needsPullRequestList
+          ? trackRequest(deps.fetchOpenPullRequests!(watchedRepo))
+          : Promise.resolve([]),
+        needsUserLogin
+          ? trackRequest(deps.getAuthenticatedUserLogin!())
+          : Promise.resolve(""),
+        needsDefaultBranch
+          ? trackRequest(deps.fetchRepositoryDefaultBranch!(watchedRepo))
+          : Promise.resolve(""),
+      ]);
 
-    if (watchedRepo.pullRequestScope) {
-      for (const pullRequest of openPullRequests) {
-        if (
-          watchedRepo.pullRequestScope === "all" ||
-          pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()
-        ) {
-          await syncSubscribedPullRequest(watchedRepo, pullRequest, establishBaseline);
+      const scanStartedAt = getNow();
+      const repositoryKey = getWorkflowDiscoveryRepositoryKey(watchedRepo);
+      const cursor = workflowDiscoveryState.repositories[repositoryKey];
+      const subscriptionFingerprint = getWorkflowDiscoverySubscriptionFingerprint(watchedRepo);
+      const establishBaseline = cursor?.subscriptionFingerprint !== subscriptionFingerprint;
+
+      if (watchedRepo.pullRequestScope) {
+        for (const pullRequest of openPullRequests) {
+          if (
+            watchedRepo.pullRequestScope === "all" ||
+            pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()
+          ) {
+            await syncSubscribedPullRequest(watchedRepo, pullRequest, establishBaseline);
+          }
         }
       }
-    }
 
-    if (!establishBaseline && cursor) {
-      await catchUpSubscribedWorkflowRuns(
+      if (!establishBaseline && cursor) {
+        await catchUpSubscribedWorkflowRuns(
+          watchedRepo,
+          cursor.lastScannedAt,
+          scanStartedAt,
+          { defaultBranch, openPullRequests, userLogin },
+          trackRequest,
+        );
+        return anyGithubRequestSucceeded;
+      }
+
+      const targets = new Map<string, ActiveWorkflowRun>();
+
+      if (defaultBranchWorkflowNames.length > 0) {
+        if (!deps.fetchActiveWorkflowRuns) {
+          throw new Error("Default branch workflow subscriptions need GitHub run listing support.");
+        }
+
+        const runs = await trackRequest(deps.fetchActiveWorkflowRuns(watchedRepo));
+
+        for (const run of runs) {
+          const match = getWorkflowRunSubscriptionMatch(watchedRepo, run, {
+            defaultBranch,
+            openPullRequests,
+            userLogin,
+          });
+
+          if (match?.kind === "pull-request") {
+            await syncSubscribedPullRequest(watchedRepo, match.pullRequest, true);
+          } else if (match) {
+            targets.set(run.runId, run);
+          }
+        }
+      }
+
+      if (userWorkflowNames.length > 0) {
+        if (!deps.fetchUserActiveWorkflowRuns) {
+          throw new Error("User workflow subscriptions need GitHub run listing support.");
+        }
+
+        const runs = await trackRequest(deps.fetchUserActiveWorkflowRuns(watchedRepo));
+
+        for (const run of runs) {
+          const userRun = { ...run, actorLogin: run.actorLogin ?? userLogin };
+          const match = getWorkflowRunSubscriptionMatch(watchedRepo, userRun, {
+            defaultBranch,
+            openPullRequests,
+            userLogin,
+          });
+
+          if (match?.kind === "pull-request") {
+            await syncSubscribedPullRequest(watchedRepo, match.pullRequest, true);
+          } else if (match) {
+            targets.set(userRun.runId, userRun);
+          }
+        }
+      }
+
+      for (const run of targets.values()) {
+        await addSubscribedWorkflowRun(watchedRepo, run);
+      }
+
+      await setDiscoveryState(setWorkflowDiscoveryCursor(
+        workflowDiscoveryState,
         watchedRepo,
-        cursor.lastScannedAt,
         scanStartedAt,
-        { defaultBranch, openPullRequests, userLogin },
-      );
-      return;
+        [...targets.keys()],
+        true,
+      ));
+
+      return anyGithubRequestSucceeded;
+    } catch (error) {
+      throw new WorkflowSubscriptionSyncError(error, anyGithubRequestSucceeded);
     }
-
-    const targets = new Map<string, ActiveWorkflowRun>();
-
-    if (defaultBranchWorkflowNames.length > 0) {
-      if (!deps.fetchActiveWorkflowRuns) {
-        throw new Error("Default branch workflow subscriptions need GitHub run listing support.");
-      }
-
-      const runs = await deps.fetchActiveWorkflowRuns(watchedRepo);
-
-      for (const run of runs) {
-        const match = getWorkflowRunSubscriptionMatch(watchedRepo, run, {
-          defaultBranch,
-          openPullRequests,
-          userLogin,
-        });
-
-        if (match?.kind === "pull-request") {
-          await syncSubscribedPullRequest(watchedRepo, match.pullRequest, true);
-        } else if (match) {
-          targets.set(run.runId, run);
-        }
-      }
-    }
-
-    if (userWorkflowNames.length > 0) {
-      if (!deps.fetchUserActiveWorkflowRuns) {
-        throw new Error("User workflow subscriptions need GitHub run listing support.");
-      }
-
-      const runs = await deps.fetchUserActiveWorkflowRuns(watchedRepo);
-
-      for (const run of runs) {
-        const userRun = { ...run, actorLogin: run.actorLogin ?? userLogin };
-        const match = getWorkflowRunSubscriptionMatch(watchedRepo, userRun, {
-          defaultBranch,
-          openPullRequests,
-          userLogin,
-        });
-
-        if (match?.kind === "pull-request") {
-          await syncSubscribedPullRequest(watchedRepo, match.pullRequest, true);
-        } else if (match) {
-          targets.set(userRun.runId, userRun);
-        }
-      }
-    }
-
-    for (const run of targets.values()) {
-      await addSubscribedWorkflowRun(watchedRepo, run);
-    }
-
-    await setDiscoveryState(setWorkflowDiscoveryCursor(
-      workflowDiscoveryState,
-      watchedRepo,
-      scanStartedAt,
-      [...targets.keys()],
-      true,
-    ));
   }
 
   async function catchUpSubscribedWorkflowRuns(
@@ -603,17 +753,18 @@ export function createWatchController(
       openPullRequests: OpenPullRequest[];
       userLogin: string;
     },
+    trackRequest: <T>(request: Promise<T>) => Promise<T>,
   ): Promise<void> {
     if (!deps.fetchWorkflowRunsSince) {
       throw new Error("Workflow run catch-up needs GitHub run discovery support.");
     }
 
     const scanFrom = new Date(Date.parse(lastScannedAt) - workflowDiscoveryOverlapMs);
-    const fetchedRuns = await deps.fetchWorkflowRunsSince(
+    const fetchedRuns = await trackRequest(deps.fetchWorkflowRunsSince(
       watchedRepo,
       scanFrom.toISOString(),
       scanStartedAt.toISOString(),
-    );
+    ));
     const runs = [...new Map(fetchedRuns.map((run) => [run.runId, run])).values()]
       .sort(compareWorkflowRunCreation);
     const cursor = workflowDiscoveryState.repositories[getWorkflowDiscoveryRepositoryKey(watchedRepo)];
@@ -1042,6 +1193,8 @@ export function createWatchController(
           timing: subscribedWatch.timing,
           active: subscribedWatch.active,
           error: subscribedWatch.error,
+          errorKind: subscribedWatch.errorKind,
+          errorAt: subscribedWatch.errorAt,
         };
 
     const subscribedWatchIsPublished = watches.some((watch) => watch.id === subscribedWatch.id);
@@ -1241,6 +1394,8 @@ export function createWatchController(
                 timing: { queuedAt: rerunAt.toISOString() },
                 active: true,
                 error: undefined,
+                errorKind: undefined,
+                errorAt: undefined,
               }
             : current,
         ),
@@ -1251,23 +1406,34 @@ export function createWatchController(
       pruneExpiredSuppressions();
       await setDiscoveryState(pruneWorkflowDiscoveryState(workflowDiscoveryState, watchedRepos));
 
-      const failures: unknown[] = [];
+      const successfulRepositories: string[] = [];
+      const failures: WorkflowSubscriptionFailure[] = [];
+      let anyGithubRequestSucceeded = false;
 
       for (const watchedRepo of watchedRepos) {
+        const repository = getRepositoryKey(watchedRepo);
+
         try {
-          await syncWatchedWorkflowSubscriptions(watchedRepo);
+          const repositoryRequestSucceeded = await syncWatchedWorkflowSubscriptions(watchedRepo);
+          anyGithubRequestSucceeded = repositoryRequestSucceeded || anyGithubRequestSucceeded;
+          successfulRepositories.push(repository);
         } catch (error) {
-          failures.push(error);
+          anyGithubRequestSucceeded ||= getSubscriptionRequestSucceeded(error);
+          const cause = getSubscriptionFailureCause(error);
+          failures.push({
+            repository,
+            kind: classifyWatchFailure(),
+            message: normalizeFailureMessage(cause),
+          });
         }
       }
 
-      if (failures.length === 1) {
-        throw failures[0];
-      }
-
-      if (failures.length > 1) {
-        throw new AggregateError(failures, `Could not sync ${failures.length} workflow subscriptions.`);
-      }
+      return {
+        status: getPollSummaryStatus(successfulRepositories.length, failures.length),
+        successfulRepositories,
+        failures,
+        anyGithubRequestSucceeded,
+      };
     },
 
     async pollNow(pollOptions = {}) {
@@ -1283,14 +1449,47 @@ export function createWatchController(
           (!watchIdSet || watchIdSet.has(watch.id)),
       );
 
-      if (!pollOptions.includeInactive && !watchIdSet) {
-        await hydrateLegacyWatchMetadata(triageState);
-      }
+      const metadataRefresh = !pollOptions.includeInactive && !watchIdSet
+        ? await hydrateLegacyWatchMetadata(triageState)
+        : emptyMetadataRefreshResult();
 
       const rowNotifications: WatchNotification[] = [];
+      const successfulWatchIds = [...metadataRefresh.successfulWatchIds];
+      const watchFailures: WatchPollFailure[] = [];
+      const metadataFailures = [...metadataRefresh.failures];
+      const notificationFailures: NotificationDeliveryFailure[] = [];
+      const fetchResults = await mapWithConcurrency(
+        polledWatches,
+        pollConcurrency,
+        async (watch): Promise<SettledWatchSnapshot> => {
+          try {
+            return { watch, snapshot: await deps.fetchState(watch.target) };
+          } catch (error) {
+            return { watch, failure: createWatchPollFailure(watch.id, error) };
+          }
+        },
+      );
+      const resultsByWatchId = new Map(fetchResults.map((result) => [result.watch.id, result]));
 
-      for (const watch of polledWatches) {
-        const snapshot = await deps.fetchState(watch.target);
+      const nextWatches = watches.map((current) => {
+        const result = resultsByWatchId.get(current.id);
+
+        if (!result) {
+          return current;
+        }
+
+        if ("failure" in result) {
+          watchFailures.push(result.failure);
+          return {
+            ...current,
+            error: result.failure.message,
+            errorKind: result.failure.kind,
+            errorAt: notificationTime.toISOString(),
+          };
+        }
+
+        const { snapshot, watch } = result;
+        successfulWatchIds.push(watch.id);
         metadataHydratedWatchIds.add(watch.id);
         const nextState = {
           status: snapshot.status,
@@ -1299,39 +1498,33 @@ export function createWatchController(
         };
         const status = formatWatchState(nextState);
         const transition = getStatusTransition(watch.lastState, nextState);
-        let changedWatch: WatchRecord | undefined;
+        const nextWatch = {
+          ...current,
+          target: withSnapshotPrNumber(current.target, snapshot.prNumber),
+          label: getSnapshotLabel(current, snapshot),
+          metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
+          status,
+          lastSeenStatus: current.lastSeenStatus ?? current.status,
+          lastState: nextState,
+          timing: mergePolledTiming(current, snapshot),
+          active: !isTerminalStatus(nextState),
+          error: undefined,
+          errorKind: undefined,
+          errorAt: undefined,
+        };
 
-        updateWatch(watch.id, (current) => {
-          const nextWatch = {
-            ...current,
-            target: withSnapshotPrNumber(current.target, snapshot.prNumber),
-            label: getSnapshotLabel(current, snapshot),
-            metadata: mergeWatchMetadata(current.metadata, snapshot.metadata),
-            status,
-            lastSeenStatus: current.lastSeenStatus ?? current.status,
-            lastState: nextState,
-            timing: mergePolledTiming(current, snapshot),
-            active: !isTerminalStatus(nextState),
-            error: undefined,
-          };
-
-          if (transition.notify) {
-            changedWatch = nextWatch;
-          }
-
-          return nextWatch;
-        });
-
-        if (!transition.notify || !changedWatch) {
-          continue;
+        if (transition.notify && getWatchTriageState(nextWatch) === "inbox") {
+          rowNotifications.push(createWatchNotification(nextWatch, notificationTime));
         }
 
-        if (getWatchTriageState(changedWatch) === "inbox") {
-          rowNotifications.push(createWatchNotification(changedWatch, notificationTime));
-        }
+        return nextWatch;
+      });
+
+      if (nextWatches.some((watch, index) => watch !== watches[index])) {
+        setWatches(nextWatches);
       }
 
-      await refreshPullRequestDetails(
+      const pullRequestRefresh = await refreshPullRequestDetails(
         getTrackedPullRequestTargets(
           watches.filter(
             (watch) =>
@@ -1340,15 +1533,35 @@ export function createWatchController(
           ),
         ),
       );
+      metadataFailures.push(...pullRequestRefresh.failures);
 
-      if (deps.notificationsPaused?.()) {
-        return;
+      if (!deps.notificationsPaused?.()) {
+        for (const notification of rowNotifications) {
+          try {
+            await deps.notify(notification);
+          } catch (error) {
+            notificationFailures.push({
+              watchId: notification.watchId,
+              kind: classifyNotificationFailure(error),
+              message: normalizeFailureMessage(error),
+            });
+          }
+        }
       }
 
-      for (const notification of rowNotifications) {
-        await deps.notify(notification);
-      }
+      const failureCount = watchFailures.length + metadataFailures.length + notificationFailures.length;
 
+      return {
+        status: getPollSummaryStatus(successfulWatchIds.length, failureCount),
+        successfulWatchIds: [...new Set(successfulWatchIds)],
+        watchFailures,
+        metadataFailures,
+        notificationFailures,
+        anyGithubRequestSucceeded:
+          metadataRefresh.anyGithubRequestSucceeded ||
+          successfulWatchIds.length > 0 ||
+          pullRequestRefresh.anyGithubRequestSucceeded,
+      };
     },
 
     getWatches() {
@@ -1487,6 +1700,8 @@ function withBaselineSnapshot(watch: WatchRecord, snapshot: WatchSnapshot): Watc
     timing: snapshot.timing,
     active: !isTerminalStatus(snapshot),
     error: undefined,
+    errorKind: undefined,
+    errorAt: undefined,
   };
 }
 
@@ -1614,4 +1829,105 @@ function findTrackedPullRequestByBranch(
 
 function getRepositoryKey(target: Pick<ParsedWatchTarget, "owner" | "repo">): string {
   return `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}`;
+}
+
+function emptyMetadataRefreshResult(): MetadataRefreshResult {
+  return {
+    successfulWatchIds: [],
+    failures: [],
+    anyGithubRequestSucceeded: false,
+  };
+}
+
+function getPollSummaryStatus(successCount: number, failureCount: number): PollSummaryStatus {
+  if (failureCount === 0) {
+    return "successful";
+  }
+
+  return successCount > 0 ? "degraded" : "failed";
+}
+
+function createWatchPollFailure(watchId: string, error: unknown): WatchPollFailure {
+  return {
+    watchId,
+    kind: classifyWatchFailure(),
+    message: normalizeFailureMessage(error),
+  };
+}
+
+function classifyWatchFailure(): WatchErrorKind {
+  return "transient";
+}
+
+function classifyNotificationFailure(
+  error: unknown,
+): NotificationDeliveryFailure["kind"] {
+  return getErrorCode(error) === "notification-permission-denied"
+    ? "permission-denied"
+    : "delivery";
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return undefined;
+  }
+
+  return typeof error.code === "string" ? error.code : undefined;
+}
+
+function getSubscriptionRequestSucceeded(error: unknown): boolean {
+  return error instanceof WorkflowSubscriptionSyncError && error.anyGithubRequestSucceeded;
+}
+
+function getSubscriptionFailureCause(error: unknown): unknown {
+  return error instanceof WorkflowSubscriptionSyncError ? error.failureCause : error;
+}
+
+function normalizeFailureMessage(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const firstLine = rawMessage
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? "The request failed.";
+  const redacted = firstLine
+    .replace(/\b(?:ghp|github_pat)_[A-Za-z0-9_]+\b/g, "[redacted]")
+    .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/\b(token|authorization)=\S+/gi, "$1=[redacted]");
+
+  return redacted.length > 240 ? `${redacted.slice(0, 237)}...` : redacted;
+}
+
+function getWatchIdsForPullRequestTargets(
+  watches: WatchRecord[],
+  targets: PrWatchTarget[],
+): string[] {
+  const targetKeys = new Set(targets.map(getPullRequestKey));
+
+  return watches
+    .filter((watch) => {
+      const target = getWatchPullRequestTarget(watch);
+      return target ? targetKeys.has(getPullRequestKey(target)) : false;
+    })
+    .map((watch) => watch.id);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  task: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await task(items[index], index);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
 }

@@ -24,6 +24,15 @@ export type DesktopNotificationDeps = {
 
 const notificationClickEvent = "desktop-notification-clicked";
 
+export class NotificationPermissionDeniedError extends Error {
+  readonly code = "notification-permission-denied";
+
+  constructor() {
+    super("Desktop notification permission was denied.");
+    this.name = "NotificationPermissionDeniedError";
+  }
+}
+
 const desktopNotificationDeps: DesktopNotificationDeps = {
   isPermissionGranted,
   requestPermission,
@@ -50,9 +59,11 @@ export async function sendDesktopNotification(
     permissionGranted = permission === "granted";
   }
 
-  if (permissionGranted) {
-    await deps.showNotification(notification);
+  if (!permissionGranted) {
+    throw new NotificationPermissionDeniedError();
   }
+
+  await deps.showNotification(notification);
 }
 
 export async function clearDesktopNotifications(

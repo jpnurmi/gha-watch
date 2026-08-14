@@ -125,6 +125,25 @@ describe("sendDesktopNotification", () => {
     expect(shownNotifications).toEqual([transientNotification]);
   });
 
+  it("reports denied notification permission distinctly", async () => {
+    const deps: DesktopNotificationDeps = {
+      async isPermissionGranted() {
+        return false;
+      },
+      async requestPermission() {
+        return "denied";
+      },
+      async showNotification() {
+        throw new Error("should not be called");
+      },
+    };
+
+    await expect(sendDesktopNotification(notification(), deps)).rejects.toMatchObject({
+      code: "notification-permission-denied",
+      message: "Desktop notification permission was denied.",
+    });
+  });
+
   it("clears delivered native notifications", async () => {
     const cancelAllNotifications = vi.fn(async () => {});
     const removeAllActiveNotifications = vi.fn(async () => {});

@@ -566,6 +566,27 @@ describe("fetchWatchState", () => {
       ),
     ).rejects.toThrow("gh is not authenticated. Run `gh auth login` and try again.");
   });
+
+  it("keeps an ambiguous GitHub 404 recoverable", async () => {
+    const { executor } = createExecutor({
+      code: 1,
+      stdout: "",
+      stderr: "gh: Not Found (HTTP 404)",
+    });
+
+    await expect(
+      fetchWatchState(
+        {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "deleted",
+          url: "https://github.com/getsentry/sentry/actions/runs/deleted",
+        },
+        executor,
+      ),
+    ).rejects.toThrow("gh: Not Found (HTTP 404)");
+  });
 });
 
 describe("fetchRateLimit", () => {

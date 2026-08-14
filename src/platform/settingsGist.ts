@@ -194,6 +194,8 @@ export function normalizeSyncedWatches(value: unknown): WatchRecord[] {
       triageState,
       active: item.active,
       error: typeof item.error === "string" ? item.error : undefined,
+      errorKind: item.errorKind === "transient" ? item.errorKind : undefined,
+      errorAt: typeof item.errorAt === "string" ? item.errorAt : undefined,
     });
   }
 

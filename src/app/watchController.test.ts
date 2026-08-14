@@ -23,6 +23,7 @@ import type {
   WorkflowDefinition,
   WorkflowRunSummary,
 } from "../platform/gh";
+import { NotificationPermissionDeniedError } from "../platform/notifications";
 
 const runTarget: CheckWatchTarget = {
   kind: "run",
@@ -996,7 +997,14 @@ describe("watchController", () => {
       defaultBranchWorkflowNames: ["CI"],
     }];
 
-    await expect(controller.syncWorkflowSubscriptions(watchedRepos)).rejects.toThrow("page two failed");
+    await expect(controller.syncWorkflowSubscriptions(watchedRepos)).resolves.toMatchObject({
+      status: "failed",
+      successfulRepositories: [],
+      failures: [{
+        repository: "getsentry/sentry",
+        message: "page two failed",
+      }],
+    });
 
     expect(discoverySaves).toEqual([]);
     expect(workflowRunFetches[0].createdAfter).toBe("2026-08-12T09:55:00.000Z");
@@ -1042,8 +1050,14 @@ describe("watchController", () => {
       },
     );
 
-    await expect(controller.syncWorkflowSubscriptions([firstRepo, secondRepo]))
-      .rejects.toThrow("first repository failed");
+    await expect(controller.syncWorkflowSubscriptions([firstRepo, secondRepo])).resolves.toMatchObject({
+      status: "degraded",
+      successfulRepositories: ["getsentry/relay"],
+      failures: [{
+        repository: "getsentry/sentry",
+        message: "first repository failed",
+      }],
+    });
 
     expect(workflowRunFetches.map(({ target }) => target.repo)).toEqual(["sentry", "relay"]);
     expect(discoverySaves.at(-1)?.repositories["getsentry/relay"].lastScannedAt)
@@ -2758,4 +2772,301 @@ describe("watchController", () => {
       timing: { queuedAt: "2026-05-18T12:00:00.000Z" },
     });
   });
+
+  it("updates surrounding watches when the middle watch fails", async () => {
+    const firstTarget = { ...runTarget, runId: "first", url: `${runTarget.url}-first` };
+    const middleTarget = { ...runTarget, runId: "middle", url: `${runTarget.url}-middle` };
+    const lastTarget = { ...runTarget, runId: "last", url: `${runTarget.url}-last` };
+    const timing = { startedAt: "2026-08-12T12:00:00Z" };
+    const { deps, saves } = createDeps([]);
+    deps.fetchState = async (target) => {
+      if (target.kind === "run" && target.runId === "middle") {
+        throw new Error("temporary network failure token=secret\nraw command output");
+      }
+
+      return {
+        status: "completed",
+        conclusion: "success",
+        title: `CI: ${target.kind}`,
+        url: target.url,
+      };
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T12:05:00Z") },
+      [firstTarget, middleTarget, lastTarget].map((target) => ({
+        ...existingWatch(),
+        id: `getsentry/sentry/run/${target.runId}`,
+        target,
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        timing,
+        active: true,
+      })),
+    );
+
+    const result = await controller.pollNow();
+
+    expect(controller.getWatches()).toMatchObject([
+      { id: "getsentry/sentry/run/first", status: "completed:success", active: false },
+      {
+        id: "getsentry/sentry/run/middle",
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        timing,
+        active: true,
+        error: "temporary network failure token=[redacted]",
+        errorKind: "transient",
+        errorAt: "2026-08-12T12:05:00.000Z",
+      },
+      { id: "getsentry/sentry/run/last", status: "completed:success", active: false },
+    ]);
+    expect(result).toMatchObject({
+      status: "degraded",
+      successfulWatchIds: [
+        "getsentry/sentry/run/first",
+        "getsentry/sentry/run/last",
+      ],
+      watchFailures: [
+        {
+          watchId: "getsentry/sentry/run/middle",
+          kind: "transient",
+          message: "temporary network failure token=[redacted]",
+        },
+      ],
+      anyGithubRequestSucceeded: true,
+    });
+    expect(saves).toHaveLength(1);
+  });
+
+  it("clears a transient row error after a later successful poll", async () => {
+    let shouldFail = true;
+    const { deps } = createDeps([]);
+    deps.fetchState = async (target) => {
+      if (shouldFail) {
+        throw new Error("GitHub timed out");
+      }
+
+      return {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: tests",
+        url: target.url,
+      };
+    };
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+    ]);
+
+    expect((await controller.pollNow()).status).toBe("failed");
+    shouldFail = false;
+    expect((await controller.pollNow()).status).toBe("successful");
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "in_progress",
+      active: true,
+      error: undefined,
+      errorKind: undefined,
+      errorAt: undefined,
+    });
+  });
+
+  it("continues subscription sync after one repository fails", async () => {
+    const { deps } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Build",
+        url: runTarget.url,
+      },
+    ]);
+    const fetchActiveWorkflowRuns = deps.fetchActiveWorkflowRuns!;
+    deps.fetchActiveWorkflowRuns = async (target) => {
+      if (target.repo === "unavailable") {
+        throw new Error("repository request failed");
+      }
+
+      return fetchActiveWorkflowRuns(target);
+    };
+    const controller = createWatchController(deps);
+
+    const result = await controller.syncWorkflowSubscriptions([
+      { owner: "getsentry", repo: "unavailable", defaultBranchWorkflowNames: ["CI"] },
+      { owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"] },
+    ]);
+
+    expect(result).toEqual({
+      status: "degraded",
+      successfulRepositories: ["getsentry/sentry"],
+      failures: [
+        {
+          repository: "getsentry/unavailable",
+          kind: "transient",
+          message: "repository request failed",
+        },
+      ],
+      anyGithubRequestSucceeded: true,
+    });
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
+      "getsentry/sentry/run/123",
+    ]);
+  });
+
+  it("attempts later notifications and does not repeat a failed transition alert", async () => {
+    const { deps } = createDeps([]);
+    const attempts: string[] = [];
+    deps.fetchState = async (target) => ({
+      status: "completed",
+      conclusion: "failure",
+      title: target.kind === "job" ? "CI: job" : "CI: run",
+      url: target.url,
+    });
+    deps.notify = async (notification) => {
+      attempts.push(notification.watchId);
+
+      if (notification.watchId === "getsentry/sentry/run/123") {
+        throw new NotificationPermissionDeniedError();
+      }
+    };
+    const controller = createWatchController(deps, [runTarget, jobTarget].map((target) => ({
+      ...existingWatch(),
+      id: getWatchIdForTest(target),
+      target,
+      status: "in_progress",
+      lastSeenStatus: "in_progress",
+      lastState: { status: "in_progress", conclusion: null },
+      active: true,
+    })));
+
+    const firstResult = await controller.pollNow();
+    const secondResult = await controller.pollNow({ includeInactive: true });
+
+    expect(attempts).toEqual([
+      "getsentry/sentry/run/123",
+      "getsentry/sentry/job/456",
+    ]);
+    expect(firstResult).toMatchObject({
+      status: "degraded",
+      notificationFailures: [
+        {
+          watchId: "getsentry/sentry/run/123",
+          kind: "permission-denied",
+        },
+      ],
+    });
+    expect(secondResult.notificationFailures).toEqual([]);
+  });
+
+  it("keeps a 404 target active and clears the transient error after recovery", async () => {
+    let unavailable = true;
+    const { deps } = createDeps([]);
+    deps.fetchState = async (target) => {
+      if (unavailable) {
+        throw new Error("gh: Not Found (HTTP 404)");
+      }
+
+      return {
+        status: "completed",
+        conclusion: "success",
+        title: "CI: recovered",
+        url: target.url,
+      };
+    };
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+    ]);
+
+    const failedResult = await controller.pollNow();
+
+    expect(failedResult.watchFailures).toEqual([
+      {
+        watchId: "getsentry/sentry/run/123",
+        kind: "transient",
+        message: "gh: Not Found (HTTP 404)",
+      },
+    ]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "in_progress",
+      active: true,
+      errorKind: "transient",
+    });
+
+    unavailable = false;
+    const recoveredResult = await controller.pollNow();
+
+    expect(recoveredResult.status).toBe("successful");
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "completed:success",
+      active: false,
+      error: undefined,
+      errorKind: undefined,
+      errorAt: undefined,
+    });
+  });
+
+  it("reports PR metadata failures without replacing a successful check state", async () => {
+    const { deps } = createDeps([]);
+    deps.fetchState = async () => ({
+      status: "completed",
+      conclusion: "success",
+      title: "Pull request #51",
+      url: prTarget.url,
+    });
+    deps.fetchPullRequestDetails = async () => {
+      throw new Error("PR metadata unavailable");
+    };
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        id: "getsentry/sentry/pull/51",
+        target: prTarget,
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+    ]);
+
+    const result = await controller.pollNow();
+
+    expect(result).toMatchObject({
+      status: "degraded",
+      successfulWatchIds: ["getsentry/sentry/pull/51"],
+      watchFailures: [],
+      metadataFailures: [
+        {
+          scope: "pull-request-details",
+          watchIds: ["getsentry/sentry/pull/51"],
+          message: "PR metadata unavailable",
+        },
+      ],
+    });
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "completed:success",
+      active: false,
+      error: undefined,
+    });
+  });
 });
+
+function getWatchIdForTest(target: WatchTarget): string {
+  if (target.kind === "pr") {
+    return `${target.owner}/${target.repo}/pull/${target.prNumber}`;
+  }
+
+  if (target.kind === "run") {
+    return `${target.owner}/${target.repo}/run/${target.runId}`;
+  }
+
+  return `${target.owner}/${target.repo}/job/${target.jobId}`;
+}
