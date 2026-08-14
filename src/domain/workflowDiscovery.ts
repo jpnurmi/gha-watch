@@ -28,7 +28,7 @@ export function getWorkflowDiscoveryRepositoryKey(
 }
 
 export function getWorkflowDiscoverySubscriptionFingerprint(repo: WatchedRepo): string {
-  return JSON.stringify({
+  return buildSubscriptionFingerprint({
     pullRequestScope: repo.pullRequestScope ?? null,
     defaultBranchWorkflowNames: normalizeSubscriptionNames(repo.defaultBranchWorkflowNames),
     userWorkflowNames: normalizeSubscriptionNames(repo.userWorkflowNames),
@@ -143,6 +143,18 @@ function normalizeSubscriptionNames(value: string[] | undefined): string[] {
     .sort();
 }
 
+function buildSubscriptionFingerprint(fields: {
+  pullRequestScope: NonNullable<WatchedRepo["pullRequestScope"]> | null;
+  defaultBranchWorkflowNames: string[];
+  userWorkflowNames: string[];
+}): string {
+  return JSON.stringify({
+    pullRequestScope: fields.pullRequestScope,
+    defaultBranchWorkflowNames: fields.defaultBranchWorkflowNames,
+    userWorkflowNames: fields.userWorkflowNames,
+  });
+}
+
 function normalizeSubscriptionFingerprint(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0) {
     return undefined;
@@ -161,7 +173,7 @@ function normalizeSubscriptionFingerprint(value: unknown): string | undefined {
       return undefined;
     }
 
-    return JSON.stringify({
+    return buildSubscriptionFingerprint({
       pullRequestScope,
       defaultBranchWorkflowNames: normalizeUnknownSubscriptionNames(parsed.defaultBranchWorkflowNames),
       userWorkflowNames: normalizeUnknownSubscriptionNames(parsed.userWorkflowNames),
