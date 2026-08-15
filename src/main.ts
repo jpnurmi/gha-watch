@@ -432,8 +432,6 @@ function renderFreshnessIndicator(): string {
     ? `Last updated at ${lastSuccessfulRefreshAt.toLocaleTimeString()}${lastRefreshFailed ? ". Latest refresh failed." : lastRefreshDegraded ? ". Latest refresh partially failed." : ""}`
     : lastRefreshFailed
       ? "No successful update. Latest refresh failed."
-      : lastRefreshDegraded
-        ? "No complete update. Latest refresh partially failed."
       : "Waiting for the first update.";
 
   return `<span class="freshness-indicator${freshness.stale ? " is-stale" : ""}" title="${escapeHtml(refreshTitle)}">
