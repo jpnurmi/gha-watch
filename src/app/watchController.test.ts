@@ -1130,7 +1130,11 @@ describe("watchController", () => {
 
     expect(result).toMatchObject({
       status: "failed",
-      failures: [{ message: "first baseline unavailable" }],
+      failures: [{
+        repository: "getsentry/sentry",
+        kind: "transient",
+        message: "first baseline unavailable",
+      }],
     });
     expect(controller.getWatches()).toMatchObject([
       {
@@ -1155,10 +1159,6 @@ describe("watchController", () => {
       defaultBranchWorkflowNames: ["CI"],
     };
     const { deps, workflowRunFetches } = createDeps([]);
-    deps.fetchWorkflowRunsSince = async (target, createdAfter, createdBefore) => {
-      workflowRunFetches.push({ target, createdAfter, createdBefore });
-      return [];
-    };
     const controller = createWatchController(
       { ...deps, now: () => now },
       [],
