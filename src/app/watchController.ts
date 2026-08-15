@@ -231,6 +231,13 @@ class WorkflowSubscriptionSyncError extends Error {
   }
 }
 
+class WatchPollFailureError extends Error {
+  constructor(readonly failure: WatchPollFailure) {
+    super(failure.message);
+    this.name = "WatchPollFailureError";
+  }
+}
+
 export function createWatchController(
   deps: WatchControllerDeps,
   initialWatches: WatchRecord[] = [],
@@ -685,11 +692,24 @@ export function createWatchController(
     let userLogin = "";
     let defaultBranch = "";
     let anyGithubRequestSucceeded = false;
+    const baselineFailures: WatchPollFailureError[] = [];
 
     async function trackRequest<T>(request: Promise<T>): Promise<T> {
       const result = await request;
       anyGithubRequestSucceeded = true;
       return result;
+    }
+
+    async function captureBaselineFailure(request: Promise<void>): Promise<void> {
+      try {
+        await request;
+      } catch (error) {
+        if (!(error instanceof WatchPollFailureError)) {
+          throw error;
+        }
+
+        baselineFailures.push(error);
+      }
     }
 
     try {
@@ -729,7 +749,9 @@ export function createWatchController(
             watchedRepo.pullRequestScope === "all" ||
             pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()
           ) {
-            await syncSubscribedPullRequest(watchedRepo, pullRequest, establishBaseline);
+            await captureBaselineFailure(
+              syncSubscribedPullRequest(watchedRepo, pullRequest, establishBaseline),
+            );
           }
         }
       }
@@ -741,7 +763,9 @@ export function createWatchController(
           scanStartedAt,
           { defaultBranch, openPullRequests, userLogin },
           trackRequest,
+          baselineFailures.length === 0,
         );
+        throwBaselineFailures(baselineFailures);
         return anyGithubRequestSucceeded;
       }
 
@@ -762,7 +786,9 @@ export function createWatchController(
           });
 
           if (match?.kind === "pull-request") {
-            await syncSubscribedPullRequest(watchedRepo, match.pullRequest, true);
+            await captureBaselineFailure(
+              syncSubscribedPullRequest(watchedRepo, match.pullRequest, true),
+            );
           } else if (match) {
             targets.set(run.runId, run);
           }
@@ -785,7 +811,9 @@ export function createWatchController(
           });
 
           if (match?.kind === "pull-request") {
-            await syncSubscribedPullRequest(watchedRepo, match.pullRequest, true);
+            await captureBaselineFailure(
+              syncSubscribedPullRequest(watchedRepo, match.pullRequest, true),
+            );
           } else if (match) {
             targets.set(userRun.runId, userRun);
           }
@@ -793,8 +821,10 @@ export function createWatchController(
       }
 
       for (const run of targets.values()) {
-        await addSubscribedWorkflowRun(watchedRepo, run);
+        await captureBaselineFailure(addSubscribedWorkflowRun(watchedRepo, run));
       }
+
+      throwBaselineFailures(baselineFailures);
 
       await updateDiscoveryState((state) => setWorkflowDiscoveryCursor(
         state,
@@ -820,6 +850,7 @@ export function createWatchController(
       userLogin: string;
     },
     trackRequest: <T>(request: Promise<T>) => Promise<T>,
+    advanceDiscoveryCursor = true,
   ): Promise<void> {
     if (!deps.fetchWorkflowRunsSince) {
       throw new Error("Workflow run catch-up needs GitHub run discovery support.");
@@ -893,12 +924,14 @@ export function createWatchController(
       );
     }
 
-    await updateDiscoveryState((state) => setWorkflowDiscoveryCursor(
-      state,
-      watchedRepo,
-      scanStartedAt,
-      runs.map((run) => run.runId).reverse(),
-    ));
+    if (advanceDiscoveryCursor) {
+      await updateDiscoveryState((state) => setWorkflowDiscoveryCursor(
+        state,
+        watchedRepo,
+        scanStartedAt,
+        runs.map((run) => run.runId).reverse(),
+      ));
+    }
   }
 
   async function resolveCatchUpPullRequests(
@@ -1239,7 +1272,17 @@ export function createWatchController(
 
   function throwBaselineFailure(outcome: BaselineWatchOutcome | undefined): void {
     if (outcome?.failure) {
-      throw new Error(outcome.failure.message);
+      throw new WatchPollFailureError(outcome.failure);
+    }
+  }
+
+  function throwBaselineFailures(failures: WatchPollFailureError[]): void {
+    if (failures.length === 1) {
+      throw failures[0];
+    }
+
+    if (failures.length > 1) {
+      throw new AggregateError(failures, `Could not load ${failures.length} watch baselines.`);
     }
   }
 
@@ -1502,13 +1545,16 @@ export function createWatchController(
             };
           } catch (error) {
             const cause = getSubscriptionFailureCause(error);
+            const baselineFailures = getWatchPollFailures(cause);
             return {
               repository,
               successful: false,
               failure: {
                 repository,
-                kind: classifyWatchFailure(),
-                message: normalizeFailureMessage(cause),
+                kind: baselineFailures[0]?.kind ?? classifyWatchFailure(),
+                message: baselineFailures.length === 1
+                  ? baselineFailures[0].message
+                  : normalizeFailureMessage(cause),
               },
               anyGithubRequestSucceeded: getSubscriptionRequestSucceeded(error),
             };
@@ -1978,6 +2024,18 @@ function getSubscriptionRequestSucceeded(error: unknown): boolean {
 
 function getSubscriptionFailureCause(error: unknown): unknown {
   return error instanceof WorkflowSubscriptionSyncError ? error.failureCause : error;
+}
+
+function getWatchPollFailures(error: unknown): WatchPollFailure[] {
+  if (error instanceof WatchPollFailureError) {
+    return [error.failure];
+  }
+
+  if (error instanceof AggregateError) {
+    return error.errors.flatMap(getWatchPollFailures);
+  }
+
+  return [];
 }
 
 function normalizeFailureMessage(error: unknown): string {

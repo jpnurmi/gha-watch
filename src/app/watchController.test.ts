@@ -3109,13 +3109,49 @@ describe("watchController", () => {
     );
   });
 
-  it("reports a subscription pull request baseline failure", async () => {
+  it("finishes subscription targets after a pull request baseline failure", async () => {
     const watchedRepo: WatchedRepo = {
       owner: "getsentry",
       repo: "sentry",
       pullRequestScope: "all",
+      defaultBranchWorkflowNames: ["CI"],
     };
-    const { deps } = createDeps([]);
+    const { deps, discoverySaves } = createDeps([]);
+    deps.fetchOpenPullRequests = async () => [
+      {
+        number: "52",
+        title: "Unavailable pull request",
+        isDraft: false,
+        url: "https://github.com/getsentry/sentry/pull/52",
+      },
+      {
+        number: "53",
+        title: "Available pull request",
+        isDraft: false,
+        url: "https://github.com/getsentry/sentry/pull/53",
+      },
+    ];
+    deps.fetchActiveWorkflowRuns = async () => [{
+      runId: "123",
+      title: "CI: Build",
+      workflowName: "CI",
+      status: "in_progress",
+      branchName: "main",
+      updatedAt: "2026-05-17T12:00:00Z",
+      url: runTarget.url,
+    }];
+    deps.fetchState = async (target) => {
+      if (target.kind === "pr" && target.prNumber === "52") {
+        throw new Error("baseline unavailable");
+      }
+
+      return {
+        status: "in_progress",
+        conclusion: null,
+        title: target.kind === "pr" ? "Available pull request" : "CI: Build",
+        url: target.url,
+      };
+    };
     const controller = createWatchController(deps);
 
     const result = await controller.syncWorkflowSubscriptions([watchedRepo]);
@@ -3126,16 +3162,29 @@ describe("watchController", () => {
       failures: [{
         repository: "getsentry/sentry",
         kind: "transient",
-        message: "No fake state queued.",
+        message: "baseline unavailable",
       }],
       anyGithubRequestSucceeded: true,
     });
-    expect(controller.getWatches()).toMatchObject([{
-      id: "getsentry/sentry/pull/52",
-      label: "Improve the tray popup",
-      error: "No fake state queued.",
-      errorKind: "transient",
-    }]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/pull/52",
+        label: "Unavailable pull request",
+        error: "baseline unavailable",
+        errorKind: "transient",
+      },
+      {
+        id: "getsentry/sentry/pull/53",
+        label: "Available pull request",
+        error: undefined,
+      },
+      {
+        id: "getsentry/sentry/run/123",
+        label: "CI: Build",
+        error: undefined,
+      },
+    ]);
+    expect(discoverySaves).toEqual([]);
   });
 
   it("attempts later notifications and does not repeat a failed transition alert", async () => {
