@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createWatchController,
   getWorkflowRunSubscriptionMatch,
+  workflowDiscoveryMaxLookbackMs,
   workflowDiscoveryOverlapMs,
   type WatchControllerDeps,
 } from "./watchController";
@@ -1084,6 +1085,93 @@ describe("watchController", () => {
 
     expect(discoverySaves).toEqual([]);
     expect(workflowRunFetches[0].createdAfter).toBe("2026-08-12T09:55:00.000Z");
+  });
+
+  it("continues catch-up after a watch baseline failure", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, discoverySaves } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async () => [
+      completedWorkflowRun({
+        runId: "900",
+        status: "in_progress",
+        conclusion: null,
+      }),
+      completedWorkflowRun({
+        runId: "901",
+        status: "in_progress",
+        conclusion: null,
+        url: "https://github.com/getsentry/sentry/actions/runs/901",
+      }),
+    ];
+    deps.fetchState = async (target) => {
+      if (target.kind === "run" && target.runId === "900") {
+        throw new Error("first baseline unavailable");
+      }
+
+      return {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Later run",
+        url: target.url,
+      };
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    const result = await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failures: [{ message: "first baseline unavailable" }],
+    });
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/900",
+        error: "first baseline unavailable",
+        errorKind: "transient",
+      },
+      {
+        id: "getsentry/sentry/run/901",
+        label: "CI: Later run",
+        error: undefined,
+      },
+    ]);
+    expect(discoverySaves).toEqual([]);
+  });
+
+  it("limits catch-up requests for stalled discovery cursors", async () => {
+    const now = new Date("2026-08-12T10:02:00Z");
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, workflowRunFetches } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async (target, createdAfter, createdBefore) => {
+      workflowRunFetches.push({ target, createdAfter, createdBefore });
+      return [];
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => now },
+      [],
+      [],
+      discoveryState("2026-08-01T10:00:00Z", [], watchedRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(workflowRunFetches[0]).toMatchObject({
+      createdAfter: new Date(now.getTime() - workflowDiscoveryMaxLookbackMs).toISOString(),
+      createdBefore: now.toISOString(),
+    });
   });
 
   it("continues syncing repositories after a catch-up failure", async () => {

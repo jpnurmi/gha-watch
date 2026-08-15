@@ -142,6 +142,7 @@ export type WatchPollOptions = {
 };
 
 export const workflowDiscoveryOverlapMs = 5 * 60 * 1_000;
+export const workflowDiscoveryMaxLookbackMs = 24 * 60 * 60 * 1_000;
 
 export type WorkflowRunSubscriptionMatch =
   | { kind: "workflow" }
@@ -707,18 +708,6 @@ export function createWatchController(
       return result;
     }
 
-    async function captureBaselineFailure(request: Promise<void>): Promise<void> {
-      try {
-        await request;
-      } catch (error) {
-        if (!(error instanceof WatchPollFailureError)) {
-          throw error;
-        }
-
-        baselineFailures.push(error);
-      }
-    }
-
     try {
       if (needsPullRequestList && !deps.fetchOpenPullRequests) {
         throw new Error("Pull request watches need GitHub PR listing support.");
@@ -756,7 +745,8 @@ export function createWatchController(
             watchedRepo.pullRequestScope === "all" ||
             pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()
           ) {
-            await captureBaselineFailure(
+            await captureWatchPollFailure(
+              baselineFailures,
               syncSubscribedPullRequest(watchedRepo, pullRequest, establishBaseline),
             );
           }
@@ -793,7 +783,8 @@ export function createWatchController(
           });
 
           if (match?.kind === "pull-request") {
-            await captureBaselineFailure(
+            await captureWatchPollFailure(
+              baselineFailures,
               syncSubscribedPullRequest(watchedRepo, match.pullRequest, true),
             );
           } else if (match) {
@@ -818,7 +809,8 @@ export function createWatchController(
           });
 
           if (match?.kind === "pull-request") {
-            await captureBaselineFailure(
+            await captureWatchPollFailure(
+              baselineFailures,
               syncSubscribedPullRequest(watchedRepo, match.pullRequest, true),
             );
           } else if (match) {
@@ -828,7 +820,10 @@ export function createWatchController(
       }
 
       for (const run of targets.values()) {
-        await captureBaselineFailure(addSubscribedWorkflowRun(watchedRepo, run));
+        await captureWatchPollFailure(
+          baselineFailures,
+          addSubscribedWorkflowRun(watchedRepo, run),
+        );
       }
 
       throwBaselineFailures(baselineFailures);
@@ -863,7 +858,10 @@ export function createWatchController(
       throw new Error("Workflow run catch-up needs GitHub run discovery support.");
     }
 
-    const scanFrom = new Date(Date.parse(lastScannedAt) - workflowDiscoveryOverlapMs);
+    const scanFrom = new Date(Math.max(
+      Date.parse(lastScannedAt) - workflowDiscoveryOverlapMs,
+      scanStartedAt.getTime() - workflowDiscoveryMaxLookbackMs,
+    ));
     const fetchedRuns = await trackRequest(deps.fetchWorkflowRunsSince(
       watchedRepo,
       scanFrom.toISOString(),
@@ -897,6 +895,7 @@ export function createWatchController(
       pullRequest: OpenPullRequest;
       runs: WorkflowRunSummary[];
     }>();
+    const baselineFailures: WatchPollFailureError[] = [];
 
     for (const run of unprocessedRuns) {
       const match = getWorkflowRunSubscriptionMatch(watchedRepo, run, {
@@ -916,22 +915,31 @@ export function createWatchController(
           });
         }
       } else if (match && run.status === "completed") {
-        await addCompletedSubscribedWorkflowRun(watchedRepo, run, scanStartedAt);
+        await captureWatchPollFailure(
+          baselineFailures,
+          addCompletedSubscribedWorkflowRun(watchedRepo, run, scanStartedAt),
+        );
       } else if (match) {
-        await addSubscribedWorkflowRun(watchedRepo, run);
+        await captureWatchPollFailure(
+          baselineFailures,
+          addSubscribedWorkflowRun(watchedRepo, run),
+        );
       }
     }
 
     for (const { pullRequest, runs: matchedRuns } of pullRequestRuns.values()) {
-      await addCatchUpSubscribedPullRequest(
-        watchedRepo,
-        pullRequest,
-        matchedRuns,
-        scanStartedAt,
+      await captureWatchPollFailure(
+        baselineFailures,
+        addCatchUpSubscribedPullRequest(
+          watchedRepo,
+          pullRequest,
+          matchedRuns,
+          scanStartedAt,
+        ),
       );
     }
 
-    if (advanceDiscoveryCursor) {
+    if (advanceDiscoveryCursor && baselineFailures.length === 0) {
       await updateDiscoveryState((state) => setWorkflowDiscoveryCursor(
         state,
         watchedRepo,
@@ -939,6 +947,8 @@ export function createWatchController(
         runs.map((run) => run.runId).reverse(),
       ));
     }
+
+    throwBaselineFailures(baselineFailures);
   }
 
   async function resolveCatchUpPullRequests(
@@ -1290,6 +1300,21 @@ export function createWatchController(
 
     if (failures.length > 1) {
       throw new AggregateError(failures, `Could not load ${failures.length} watch baselines.`);
+    }
+  }
+
+  async function captureWatchPollFailure(
+    failures: WatchPollFailureError[],
+    request: Promise<void>,
+  ): Promise<void> {
+    try {
+      await request;
+    } catch (error) {
+      if (!(error instanceof WatchPollFailureError)) {
+        throw error;
+      }
+
+      failures.push(error);
     }
   }
 
