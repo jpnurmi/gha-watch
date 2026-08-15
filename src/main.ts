@@ -5,6 +5,7 @@ import { createCollapsedGroups } from "./app/collapsedGroups";
 import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
+import { getRefreshHealth } from "./app/refreshHealth";
 import { createRepositoryIconProvider } from "./app/repositoryIcon";
 import {
   getRepoCiStatusAfterRefreshError,
@@ -22,7 +23,7 @@ import {
   repoReorderLongPressMs,
 } from "./app/repoReorderInteraction";
 import { getStatusIconSvg } from "./app/statusIcon";
-import { createWatchController } from "./app/watchController";
+import { createWatchController, type WatchPollResult } from "./app/watchController";
 import {
   getWatchRerunMode,
   shouldDismissPendingWatchActionOnRowLeave,
@@ -172,6 +173,7 @@ let watchDragState: WatchDragState | undefined;
 let rateLimit: RateLimit | undefined;
 let lastSuccessfulRefreshAt: Date | undefined;
 let lastRefreshFailed = false;
+let lastRefreshDegraded = false;
 let settings = loadSettings();
 let syncedStateRevision = 0;
 const settingsSync = createSettingsSync(createSettingsGistRemote());
@@ -421,13 +423,13 @@ function renderRateLimitIndicator(): string {
 function renderFreshnessIndicator(): string {
   const freshness = getFreshnessState({
     isRefreshing: isPolling,
-    lastRefreshFailed,
+    lastRefreshFailed: lastRefreshFailed || lastRefreshDegraded,
     lastUpdatedAt: lastSuccessfulRefreshAt?.getTime(),
     now: Date.now(),
     staleAfterMs: freshnessStaleAfterMs,
   });
   const refreshTitle = lastSuccessfulRefreshAt
-    ? `Last updated at ${lastSuccessfulRefreshAt.toLocaleTimeString()}${lastRefreshFailed ? ". Latest refresh failed." : ""}`
+    ? `Last updated at ${lastSuccessfulRefreshAt.toLocaleTimeString()}${lastRefreshFailed ? ". Latest refresh failed." : lastRefreshDegraded ? ". Latest refresh partially failed." : ""}`
     : lastRefreshFailed
       ? "No successful update. Latest refresh failed."
       : "Waiting for the first update.";
@@ -2853,6 +2855,34 @@ function dismissWatchActionOnRowLeave(rowId: string | undefined): void {
   render();
 }
 
+function handleTargetedPollResult(result: WatchPollResult): void {
+  if (result.status === "successful") {
+    return;
+  }
+
+  if (result.status === "degraded") {
+    lastSuccessfulRefreshAt = new Date();
+  }
+
+  lastRefreshFailed = result.status === "failed";
+  lastRefreshDegraded = result.status === "degraded";
+
+  for (const failure of result.watchFailures) {
+    console.warn(`Could not refresh ${failure.watchId}: ${failure.message}`);
+  }
+
+  for (const failure of result.metadataFailures) {
+    console.warn(`Could not refresh ${failure.scope}: ${failure.message}`);
+  }
+
+  for (const failure of result.notificationFailures) {
+    console.warn(`Could not notify for ${failure.watchId}: ${failure.message}`);
+  }
+
+  render();
+  void updateTrayIndicator();
+}
+
 async function confirmRerun(id: string, mode: RerunMode): Promise<void> {
   if (!id) {
     return;
@@ -2872,9 +2902,11 @@ async function confirmRerun(id: string, mode: RerunMode): Promise<void> {
 
     if (!isDemoMode) {
       window.setTimeout(() => {
-        void controller.pollNow({ watchIds: [id] }).catch((error) => {
-          console.warn("Could not refresh the re-run GitHub Actions state.", error);
-        });
+        void controller.pollNow({ watchIds: [id] })
+          .then(handleTargetedPollResult)
+          .catch((error) => {
+            console.warn("Could not refresh the re-run GitHub Actions state.", error);
+          });
       }, rerunRefreshDelayMs);
     }
   } catch (error) {
@@ -2983,12 +3015,14 @@ async function parseWatchInput(input: string): Promise<ParsedGitHubTarget> {
   return parseGitHubActionsUrl(input, { defaultOwner: await getAuthenticatedUserLogin() });
 }
 
-async function updateRateLimit(): Promise<void> {
+async function updateRateLimit(): Promise<boolean> {
   try {
     rateLimit = await fetchRateLimit();
     render();
+    return true;
   } catch (error) {
     console.warn("Could not fetch GitHub rate limit.", error);
+    return false;
   }
 }
 
@@ -3085,31 +3119,75 @@ async function poll(forceVisibleData = false): Promise<void> {
   render();
 
   try {
+    let successfulItems = 0;
+    let failedItems = 0;
+    let rateLimitSucceeded: boolean | undefined;
+
     if (isDemoMode) {
       await refreshListedRepositoryCiStatuses(forceVisibleData);
+      successfulItems += 1;
     } else {
-      try {
-        await controller.syncWorkflowSubscriptions(settings.watchedRepos);
-      } catch (error) {
-        console.warn("Could not sync workflow subscriptions.", error);
+      const subscriptionResult = await controller.syncWorkflowSubscriptions(settings.watchedRepos);
+      successfulItems +=
+        subscriptionResult.status !== "failed" &&
+          subscriptionResult.anyGithubRequestSucceeded
+          ? 1
+          : 0;
+      failedItems += subscriptionResult.failures.length;
+      failedItems += subscriptionResult.notificationFailures.length;
+
+      for (const failure of subscriptionResult.failures) {
+        console.warn(`Could not sync workflow subscriptions for ${failure.repository}: ${failure.message}`);
+      }
+
+      for (const failure of subscriptionResult.notificationFailures) {
+        console.warn(`Could not notify for ${failure.watchId}: ${failure.message}`);
       }
 
       const watchView = forceVisibleData ? currentWatchView : "inbox";
 
       if (watchView !== "done") {
-        await controller.pollNow({
+        const pollResult = await controller.pollNow({
           triageState: watchView,
           includeInactive: forceVisibleData,
         });
+        successfulItems += pollResult.successfulWatchIds.length;
+        failedItems +=
+          pollResult.watchFailures.length +
+          pollResult.metadataFailures.length +
+          pollResult.notificationFailures.length;
+
+        for (const failure of pollResult.watchFailures) {
+          console.warn(`Could not refresh ${failure.watchId}: ${failure.message}`);
+        }
+
+        for (const failure of pollResult.metadataFailures) {
+          console.warn(`Could not refresh ${failure.scope}: ${failure.message}`);
+        }
+
+        for (const failure of pollResult.notificationFailures) {
+          console.warn(`Could not notify for ${failure.watchId}: ${failure.message}`);
+        }
       }
       await refreshListedRepositoryCiStatuses(forceVisibleData);
-      await updateRateLimit();
+      rateLimitSucceeded = await updateRateLimit();
     }
 
-    lastSuccessfulRefreshAt = new Date();
-    lastRefreshFailed = false;
+    const refreshHealth = getRefreshHealth({
+      successfulItems,
+      failedItems,
+      rateLimitSucceeded,
+    });
+
+    if (refreshHealth.hasSuccessfulRequest) {
+      lastSuccessfulRefreshAt = new Date();
+    }
+
+    lastRefreshFailed = refreshHealth.status === "failed";
+    lastRefreshDegraded = refreshHealth.status === "degraded";
   } catch (error) {
     lastRefreshFailed = true;
+    lastRefreshDegraded = false;
     console.warn("Could not refresh GitHub status.", error);
   } finally {
     isPolling = false;

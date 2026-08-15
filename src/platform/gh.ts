@@ -1528,7 +1528,7 @@ function normalizeGhError(error: unknown): Error {
 
   if (
     lowerMessage.includes("program not found") ||
-    lowerMessage.includes("not found") ||
+    lowerMessage.includes("no such file") ||
     lowerMessage.includes("enoent")
   ) {
     return new Error("gh CLI was not found. Install GitHub CLI and try again.");
