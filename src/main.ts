@@ -3122,19 +3122,14 @@ async function poll(forceVisibleData = false): Promise<void> {
     let successfulItems = 0;
     let failedItems = 0;
     let rateLimitSucceeded: boolean | undefined;
-    let subscriptionNotificationDenied = false;
 
     if (isDemoMode) {
       await refreshListedRepositoryCiStatuses(forceVisibleData);
       successfulItems += 1;
     } else {
       const subscriptionResult = await controller.syncWorkflowSubscriptions(settings.watchedRepos);
-      subscriptionNotificationDenied = subscriptionResult.notificationFailures.some(
-        (failure) => failure.kind === "permission-denied",
-      );
       successfulItems +=
         subscriptionResult.status !== "failed" &&
-          !subscriptionNotificationDenied &&
           subscriptionResult.anyGithubRequestSucceeded
           ? 1
           : 0;
@@ -3184,10 +3179,7 @@ async function poll(forceVisibleData = false): Promise<void> {
       rateLimitSucceeded,
     });
 
-    if (
-      refreshHealth.hasSuccessfulRequest &&
-      (!subscriptionNotificationDenied || successfulItems > 0)
-    ) {
+    if (refreshHealth.hasSuccessfulRequest) {
       lastSuccessfulRefreshAt = new Date();
     }
 

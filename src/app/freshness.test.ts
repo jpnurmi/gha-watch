@@ -59,9 +59,7 @@ describe("getFreshnessState", () => {
     expect(mainSource).toContain('class="header-brand"');
     expect(mainSource).toContain("renderFreshnessIndicator()");
     expect(mainSource).toContain('class="header-freshness"');
-    expect(mainSource).toMatch(
-      /refreshHealth\.hasSuccessfulRequest\s*&&\s*\(!subscriptionNotificationDenied \|\| successfulItems > 0\)/,
-    );
+    expect(mainSource).toContain("if (refreshHealth.hasSuccessfulRequest)");
     expect(mainSource).toMatch(/class="header-freshness">[\s\S]*?data-action="refresh"[\s\S]*?renderFreshnessIndicator\(\)/);
     expect(styles).toMatch(/\.header-freshness\s*\{[^}]*position:\s*absolute;[^}]*top:\s*calc\(100% \+ 1px\);/s);
     expect(styles).toMatch(/\.header-freshness\s*\{[^}]*align-items:\s*center;/s);
