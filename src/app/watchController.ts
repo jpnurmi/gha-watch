@@ -132,6 +132,7 @@ export type WorkflowSubscriptionSyncResult = {
   status: PollSummaryStatus;
   successfulRepositories: string[];
   failures: WorkflowSubscriptionFailure[];
+  notificationFailures: NotificationDeliveryFailure[];
   anyGithubRequestSucceeded: boolean;
 };
 
@@ -210,14 +211,21 @@ type RepositorySyncOutcome =
   | {
       repository: string;
       successful: true;
+      notificationFailures: NotificationDeliveryFailure[];
       anyGithubRequestSucceeded: boolean;
     }
   | {
       repository: string;
       successful: false;
       failure: WorkflowSubscriptionFailure;
+      notificationFailures: NotificationDeliveryFailure[];
       anyGithubRequestSucceeded: boolean;
     };
+
+type WatchedRepoSyncResult = {
+  notificationFailures: NotificationDeliveryFailure[];
+  anyGithubRequestSucceeded: boolean;
+};
 
 const pollConcurrency = 4;
 const subscriptionSyncConcurrency = 4;
@@ -226,6 +234,7 @@ class WorkflowSubscriptionSyncError extends Error {
   constructor(
     readonly failureCause: unknown,
     readonly anyGithubRequestSucceeded: boolean,
+    readonly notificationFailures: NotificationDeliveryFailure[],
   ) {
     super(normalizeFailureMessage(failureCause));
     this.name = "WorkflowSubscriptionSyncError";
@@ -236,6 +245,13 @@ class WatchPollFailureError extends Error {
   constructor(readonly failure: WatchPollFailure) {
     super(failure.message);
     this.name = "WatchPollFailureError";
+  }
+}
+
+class WatchPollFailuresError extends Error {
+  constructor(readonly errors: WatchPollFailureError[]) {
+    super(`Could not load ${errors.length} watch baselines.`);
+    this.name = "WatchPollFailuresError";
   }
 }
 
@@ -280,13 +296,22 @@ export function createWatchController(
     return deps.now?.() ?? new Date();
   }
 
-  async function notifyWorkflowSubscription(notification: WatchNotification): Promise<void> {
+  async function notifyWorkflowSubscription(
+    notification: WatchNotification,
+    failures: NotificationDeliveryFailure[],
+  ): Promise<void> {
     try {
       await deps.notify(notification);
     } catch (error) {
       if (!(error instanceof NotificationPermissionDeniedError)) {
         throw error;
       }
+
+      failures.push({
+        watchId: notification.watchId,
+        kind: "permission-denied",
+        message: normalizeFailureMessage(error),
+      });
     }
   }
 
@@ -690,7 +715,7 @@ export function createWatchController(
     }
   }
 
-  async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<boolean> {
+  async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<WatchedRepoSyncResult> {
     const defaultBranchWorkflowNames = watchedRepo.defaultBranchWorkflowNames ?? [];
     const userWorkflowNames = watchedRepo.userWorkflowNames ?? [];
     const needsPullRequestList = Boolean(watchedRepo.pullRequestScope) || userWorkflowNames.length > 0;
@@ -701,6 +726,7 @@ export function createWatchController(
     let defaultBranch = "";
     let anyGithubRequestSucceeded = false;
     const baselineFailures: WatchPollFailureError[] = [];
+    const notificationFailures: NotificationDeliveryFailure[] = [];
 
     async function trackRequest<T>(request: Promise<T>): Promise<T> {
       const result = await request;
@@ -760,10 +786,11 @@ export function createWatchController(
           scanStartedAt,
           { defaultBranch, openPullRequests, userLogin },
           trackRequest,
+          notificationFailures,
           baselineFailures.length === 0,
         );
         throwBaselineFailures(baselineFailures);
-        return anyGithubRequestSucceeded;
+        return { notificationFailures, anyGithubRequestSucceeded };
       }
 
       const targets = new Map<string, ActiveWorkflowRun>();
@@ -836,9 +863,13 @@ export function createWatchController(
         true,
       ));
 
-      return anyGithubRequestSucceeded;
+      return { notificationFailures, anyGithubRequestSucceeded };
     } catch (error) {
-      throw new WorkflowSubscriptionSyncError(error, anyGithubRequestSucceeded);
+      throw new WorkflowSubscriptionSyncError(
+        error,
+        anyGithubRequestSucceeded,
+        notificationFailures,
+      );
     }
   }
 
@@ -852,16 +883,18 @@ export function createWatchController(
       userLogin: string;
     },
     trackRequest: <T>(request: Promise<T>) => Promise<T>,
+    notificationFailures: NotificationDeliveryFailure[],
     advanceDiscoveryCursor = true,
   ): Promise<void> {
     if (!deps.fetchWorkflowRunsSince) {
       throw new Error("Workflow run catch-up needs GitHub run discovery support.");
     }
 
-    const scanFrom = new Date(Math.max(
-      Date.parse(lastScannedAt) - workflowDiscoveryOverlapMs,
-      scanStartedAt.getTime() - workflowDiscoveryMaxLookbackMs,
-    ));
+    const parsedLastScannedAt = Date.parse(lastScannedAt);
+    const maximumLookbackAt = scanStartedAt.getTime() - workflowDiscoveryMaxLookbackMs;
+    const scanFrom = new Date(Number.isFinite(parsedLastScannedAt)
+      ? Math.max(parsedLastScannedAt - workflowDiscoveryOverlapMs, maximumLookbackAt)
+      : maximumLookbackAt);
     const fetchedRuns = await trackRequest(deps.fetchWorkflowRunsSince(
       watchedRepo,
       scanFrom.toISOString(),
@@ -917,7 +950,12 @@ export function createWatchController(
       } else if (match && run.status === "completed") {
         await captureWatchPollFailure(
           baselineFailures,
-          addCompletedSubscribedWorkflowRun(watchedRepo, run, scanStartedAt),
+          addCompletedSubscribedWorkflowRun(
+            watchedRepo,
+            run,
+            scanStartedAt,
+            notificationFailures,
+          ),
         );
       } else if (match) {
         await captureWatchPollFailure(
@@ -935,6 +973,7 @@ export function createWatchController(
           pullRequest,
           matchedRuns,
           scanStartedAt,
+          notificationFailures,
         ),
       );
     }
@@ -1024,6 +1063,7 @@ export function createWatchController(
     pullRequest: OpenPullRequest,
     runs: WorkflowRunSummary[],
     notificationTime: Date,
+    notificationFailures: NotificationDeliveryFailure[],
   ): Promise<void> {
     const target = {
       kind: "pr",
@@ -1093,7 +1133,10 @@ export function createWatchController(
     );
 
     if (shouldNotify && transition.notify && !deps.notificationsPaused?.()) {
-      await notifyWorkflowSubscription(createWatchNotification(nextWatch, notificationTime));
+      await notifyWorkflowSubscription(
+        createWatchNotification(nextWatch, notificationTime),
+        notificationFailures,
+      );
     }
   }
 
@@ -1101,6 +1144,7 @@ export function createWatchController(
     repo: Pick<WatchedRepo, "owner" | "repo">,
     run: WorkflowRunSummary,
     notificationTime: Date,
+    notificationFailures: NotificationDeliveryFailure[],
   ): Promise<void> {
     const target = toWorkflowRunTarget(repo, run);
     const id = getWatchId(target);
@@ -1145,7 +1189,10 @@ export function createWatchController(
       );
 
       if (reusedPullRequest.updated && transition.notify && !deps.notificationsPaused?.()) {
-        await notifyWorkflowSubscription(createWatchNotification(reusedPullRequest.watch, notificationTime));
+        await notifyWorkflowSubscription(
+          createWatchNotification(reusedPullRequest.watch, notificationTime),
+          notificationFailures,
+        );
       }
 
       return;
@@ -1164,7 +1211,10 @@ export function createWatchController(
     );
 
     if (transition.notify && !deps.notificationsPaused?.()) {
-      await notifyWorkflowSubscription(createWatchNotification(subscribedWatch, notificationTime));
+      await notifyWorkflowSubscription(
+        createWatchNotification(subscribedWatch, notificationTime),
+        notificationFailures,
+      );
     }
   }
 
@@ -1299,7 +1349,7 @@ export function createWatchController(
     }
 
     if (failures.length > 1) {
-      throw new AggregateError(failures, `Could not load ${failures.length} watch baselines.`);
+      throw new WatchPollFailuresError(failures);
     }
   }
 
@@ -1569,11 +1619,12 @@ export function createWatchController(
           const repository = getRepositoryKey(watchedRepo);
 
           try {
-            const repositoryRequestSucceeded = await syncWatchedWorkflowSubscriptions(watchedRepo);
+            const result = await syncWatchedWorkflowSubscriptions(watchedRepo);
             return {
               repository,
               successful: true,
-              anyGithubRequestSucceeded: repositoryRequestSucceeded,
+              notificationFailures: result.notificationFailures,
+              anyGithubRequestSucceeded: result.anyGithubRequestSucceeded,
             };
           } catch (error) {
             const cause = getSubscriptionFailureCause(error);
@@ -1588,25 +1639,31 @@ export function createWatchController(
                   ? baselineFailures[0].message
                   : normalizeFailureMessage(cause),
               },
+              notificationFailures: getSubscriptionNotificationFailures(error),
               anyGithubRequestSucceeded: getSubscriptionRequestSucceeded(error),
             };
           }
         },
       );
       const successfulRepositories = outcomes
-        .filter((outcome) => outcome.successful)
+        .filter((outcome) => outcome.successful && outcome.notificationFailures.length === 0)
         .map((outcome) => outcome.repository);
       const failures = outcomes
         .filter((outcome) => !outcome.successful)
         .map((outcome) => outcome.failure);
+      const notificationFailures = outcomes.flatMap((outcome) => outcome.notificationFailures);
       const anyGithubRequestSucceeded = outcomes.some(
         (outcome) => outcome.anyGithubRequestSucceeded,
       );
 
       return {
-        status: getPollSummaryStatus(successfulRepositories.length, failures.length),
+        status: getPollSummaryStatus(
+          successfulRepositories.length,
+          failures.length + notificationFailures.length,
+        ),
         successfulRepositories,
         failures,
+        notificationFailures,
         anyGithubRequestSucceeded,
       };
     },
@@ -2059,12 +2116,16 @@ function getSubscriptionFailureCause(error: unknown): unknown {
   return error instanceof WorkflowSubscriptionSyncError ? error.failureCause : error;
 }
 
+function getSubscriptionNotificationFailures(error: unknown): NotificationDeliveryFailure[] {
+  return error instanceof WorkflowSubscriptionSyncError ? error.notificationFailures : [];
+}
+
 function getWatchPollFailures(error: unknown): WatchPollFailure[] {
   if (error instanceof WatchPollFailureError) {
     return [error.failure];
   }
 
-  if (error instanceof AggregateError) {
+  if (error instanceof WatchPollFailuresError) {
     return error.errors.flatMap(getWatchPollFailures);
   }
 

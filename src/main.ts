@@ -3092,6 +3092,7 @@ async function poll(forceVisibleData = false): Promise<void> {
     let successfulItems = 0;
     let failedItems = 0;
     let rateLimitSucceeded: boolean | undefined;
+    let subscriptionNotificationDenied = false;
 
     if (isDemoMode) {
       await refreshListedRepositoryCiStatuses(forceVisibleData);
@@ -3103,9 +3104,17 @@ async function poll(forceVisibleData = false): Promise<void> {
           ? 1
           : 0;
       failedItems += subscriptionResult.failures.length;
+      failedItems += subscriptionResult.notificationFailures.length;
+      subscriptionNotificationDenied = subscriptionResult.notificationFailures.some(
+        (failure) => failure.kind === "permission-denied",
+      );
 
       for (const failure of subscriptionResult.failures) {
         console.warn(`Could not sync workflow subscriptions for ${failure.repository}: ${failure.message}`);
+      }
+
+      for (const failure of subscriptionResult.notificationFailures) {
+        console.warn(`Could not notify for ${failure.watchId}: ${failure.message}`);
       }
 
       const watchView = forceVisibleData ? currentWatchView : "inbox";
@@ -3143,7 +3152,10 @@ async function poll(forceVisibleData = false): Promise<void> {
       rateLimitSucceeded,
     });
 
-    if (refreshHealth.hasSuccessfulRequest) {
+    if (
+      refreshHealth.hasSuccessfulRequest &&
+      (!subscriptionNotificationDenied || successfulItems > 0)
+    ) {
       lastSuccessfulRefreshAt = new Date();
     }
 
