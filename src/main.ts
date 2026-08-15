@@ -23,7 +23,7 @@ import {
   repoReorderLongPressMs,
 } from "./app/repoReorderInteraction";
 import { getStatusIconSvg } from "./app/statusIcon";
-import { createWatchController } from "./app/watchController";
+import { createWatchController, type WatchPollResult } from "./app/watchController";
 import {
   getWatchRerunMode,
   shouldDismissPendingWatchActionOnRowLeave,
@@ -2855,6 +2855,34 @@ function dismissWatchActionOnRowLeave(rowId: string | undefined): void {
   render();
 }
 
+function handleTargetedPollResult(result: WatchPollResult): void {
+  if (result.status === "successful") {
+    return;
+  }
+
+  if (result.status === "degraded") {
+    lastSuccessfulRefreshAt = new Date();
+  }
+
+  lastRefreshFailed = result.status === "failed";
+  lastRefreshDegraded = result.status === "degraded";
+
+  for (const failure of result.watchFailures) {
+    console.warn(`Could not refresh ${failure.watchId}: ${failure.message}`);
+  }
+
+  for (const failure of result.metadataFailures) {
+    console.warn(`Could not refresh ${failure.scope}: ${failure.message}`);
+  }
+
+  for (const failure of result.notificationFailures) {
+    console.warn(`Could not notify for ${failure.watchId}: ${failure.message}`);
+  }
+
+  render();
+  void updateTrayIndicator();
+}
+
 async function confirmRerun(id: string, mode: RerunMode): Promise<void> {
   if (!id) {
     return;
@@ -2874,9 +2902,11 @@ async function confirmRerun(id: string, mode: RerunMode): Promise<void> {
 
     if (!isDemoMode) {
       window.setTimeout(() => {
-        void controller.pollNow({ watchIds: [id] }).catch((error) => {
-          console.warn("Could not refresh the re-run GitHub Actions state.", error);
-        });
+        void controller.pollNow({ watchIds: [id] })
+          .then(handleTargetedPollResult)
+          .catch((error) => {
+            console.warn("Could not refresh the re-run GitHub Actions state.", error);
+          });
       }, rerunRefreshDelayMs);
     }
   } catch (error) {
@@ -3099,15 +3129,17 @@ async function poll(forceVisibleData = false): Promise<void> {
       successfulItems += 1;
     } else {
       const subscriptionResult = await controller.syncWorkflowSubscriptions(settings.watchedRepos);
+      subscriptionNotificationDenied = subscriptionResult.notificationFailures.some(
+        (failure) => failure.kind === "permission-denied",
+      );
       successfulItems +=
-        subscriptionResult.status !== "failed" && subscriptionResult.anyGithubRequestSucceeded
+        subscriptionResult.status !== "failed" &&
+          !subscriptionNotificationDenied &&
+          subscriptionResult.anyGithubRequestSucceeded
           ? 1
           : 0;
       failedItems += subscriptionResult.failures.length;
       failedItems += subscriptionResult.notificationFailures.length;
-      subscriptionNotificationDenied = subscriptionResult.notificationFailures.some(
-        (failure) => failure.kind === "permission-denied",
-      );
 
       for (const failure of subscriptionResult.failures) {
         console.warn(`Could not sync workflow subscriptions for ${failure.repository}: ${failure.message}`);

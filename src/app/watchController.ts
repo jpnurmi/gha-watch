@@ -606,10 +606,12 @@ export function createWatchController(
       },
     );
     const snapshots = new Map<string, WatchSnapshot>();
+    const watchFailures = new Map<string, WatchPollFailure>();
     const failures: WatchMetadataFailure[] = [];
 
     for (const result of results) {
       if ("failure" in result) {
+        watchFailures.set(result.watch.id, result.failure);
         failures.push({
           scope: "legacy-watch-metadata",
           watchIds: [result.watch.id],
@@ -622,7 +624,19 @@ export function createWatchController(
       snapshots.set(result.watch.id, result.snapshot);
     }
 
+    const failureAt = watchFailures.size > 0 ? getNow().toISOString() : undefined;
     const nextWatches = watches.map((current) => {
+      const failure = watchFailures.get(current.id);
+
+      if (failure) {
+        return {
+          ...current,
+          error: failure.message,
+          errorKind: failure.kind,
+          errorAt: failureAt,
+        };
+      }
+
       const snapshot = snapshots.get(current.id);
 
       if (!snapshot) {
@@ -787,6 +801,7 @@ export function createWatchController(
           { defaultBranch, openPullRequests, userLogin },
           trackRequest,
           notificationFailures,
+          baselineFailures,
           baselineFailures.length === 0,
         );
         throwBaselineFailures(baselineFailures);
@@ -884,6 +899,7 @@ export function createWatchController(
     },
     trackRequest: <T>(request: Promise<T>) => Promise<T>,
     notificationFailures: NotificationDeliveryFailure[],
+    baselineFailures: WatchPollFailureError[],
     advanceDiscoveryCursor = true,
   ): Promise<void> {
     if (!deps.fetchWorkflowRunsSince) {
@@ -930,7 +946,6 @@ export function createWatchController(
       pullRequest: OpenPullRequest;
       runs: WorkflowRunSummary[];
     }>();
-    const baselineFailures: WatchPollFailureError[] = [];
 
     for (const run of unprocessedRuns) {
       const match = getWorkflowRunSubscriptionMatch(watchedRepo, run, {
@@ -988,8 +1003,6 @@ export function createWatchController(
         runs.map((run) => run.runId).reverse(),
       ));
     }
-
-    throwBaselineFailures(baselineFailures);
   }
 
   async function resolveCatchUpPullRequests(
@@ -1647,6 +1660,9 @@ export function createWatchController(
           }
         },
       );
+      const synchronizedRepositoryCount = outcomes
+        .filter((outcome) => outcome.successful)
+        .length;
       const successfulRepositories = outcomes
         .filter((outcome) => outcome.successful && outcome.notificationFailures.length === 0)
         .map((outcome) => outcome.repository);
@@ -1660,7 +1676,7 @@ export function createWatchController(
 
       return {
         status: getPollSummaryStatus(
-          successfulRepositories.length,
+          synchronizedRepositoryCount,
           failures.length + notificationFailures.length,
         ),
         successfulRepositories,

@@ -992,7 +992,7 @@ describe("watchController", () => {
     const result = await controller.syncWorkflowSubscriptions([watchedRepo]);
 
     expect(result).toMatchObject({
-      status: "failed",
+      status: "degraded",
       successfulRepositories: [],
       failures: [],
       notificationFailures: [{
@@ -2254,6 +2254,30 @@ describe("watchController", () => {
     expect(fetches).toEqual([runTarget]);
   });
 
+  it("records failed legacy metadata hydration on the watch", async () => {
+    const { deps } = createDeps([]);
+    deps.fetchState = async () => {
+      throw new Error("metadata unavailable");
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [existingWatch()],
+    );
+
+    const result = await controller.pollNow();
+
+    expect(result.metadataFailures).toEqual([{
+      scope: "legacy-watch-metadata",
+      watchIds: [getWatchId(runTarget)],
+      message: "metadata unavailable",
+    }]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      error: "metadata unavailable",
+      errorKind: "transient",
+      errorAt: "2026-08-12T10:02:00.000Z",
+    });
+  });
+
   it("does not repoll a legacy watch reactivated by hydration", async () => {
     const { deps, fetches } = createDeps([
       {
@@ -3250,6 +3274,61 @@ describe("watchController", () => {
     expect(Object.keys(discoverySaves.at(-1)?.repositories ?? {}).sort()).toEqual(
       watchedRepos.map((repo) => `getsentry/${repo.repo}`).sort(),
     );
+  });
+
+  it("merges pull request and catch-up baseline failures", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "all",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, discoverySaves } = createDeps([]);
+    deps.fetchOpenPullRequests = async () => [{
+      number: "52",
+      title: "Unavailable pull request",
+      isDraft: false,
+      url: "https://github.com/getsentry/sentry/pull/52",
+    }];
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun({
+      status: "in_progress",
+      conclusion: null,
+    })];
+    deps.fetchState = async (target) => {
+      throw new Error(target.kind === "pr"
+        ? "pull request baseline unavailable"
+        : "workflow baseline unavailable");
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    const result = await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failures: [{
+        repository: "getsentry/sentry",
+        kind: "transient",
+        message: "Could not load 2 watch baselines.",
+      }],
+    });
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/pull/52",
+        error: "pull request baseline unavailable",
+        errorKind: "transient",
+      },
+      {
+        id: "getsentry/sentry/run/900",
+        error: "workflow baseline unavailable",
+        errorKind: "transient",
+      },
+    ]);
+    expect(discoverySaves).toEqual([]);
   });
 
   it("finishes subscription targets after a pull request baseline failure", async () => {
