@@ -484,6 +484,30 @@ describe("watchController", () => {
     ]);
   });
 
+  it("surfaces pull request metadata failures after adding the watch", async () => {
+    const { deps } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "Pull request #51",
+        prNumber: "51",
+        url: prTarget.url,
+      },
+    ]);
+    deps.fetchPullRequestDetails = async () => {
+      throw new Error("Pull request metadata unavailable");
+    };
+    const controller = createWatchController(deps);
+
+    await expect(controller.add(prTarget)).rejects.toThrow("Pull request metadata unavailable");
+
+    expect(controller.getWatches()).toMatchObject([{
+      id: "getsentry/sentry/pull/51",
+      target: prTarget,
+      status: "queued",
+    }]);
+  });
+
   it("keeps PR metadata when baseline PR state is loaded", async () => {
     const { deps } = createDeps([
       {

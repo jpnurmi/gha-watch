@@ -617,7 +617,11 @@ export function createWatchController(
 
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
     await addWatchTarget(source, true);
-    await refreshPullRequestDetails([source]);
+    const metadataResult = await refreshPullRequestDetails([source]);
+
+    if (metadataResult.failures[0]) {
+      throw new Error(metadataResult.failures[0].message);
+    }
   }
 
   async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<boolean> {
