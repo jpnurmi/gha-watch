@@ -1206,6 +1206,28 @@ describe("watchController", () => {
     );
   });
 
+  it("uses the bounded lookback for a future discovery cursor", async () => {
+    const now = new Date("2026-08-12T10:02:00Z");
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, workflowRunFetches } = createDeps([]);
+    const controller = createWatchController(
+      { ...deps, now: () => now },
+      [],
+      [],
+      discoveryState("2026-08-12T11:00:00Z", [], watchedRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(workflowRunFetches[0].createdAfter).toBe(
+      new Date(now.getTime() - workflowDiscoveryMaxLookbackMs).toISOString(),
+    );
+  });
+
   it("continues syncing repositories after a catch-up failure", async () => {
     const firstRepo: WatchedRepo = {
       owner: "getsentry",

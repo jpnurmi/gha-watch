@@ -892,7 +892,9 @@ export function createWatchController(
 
     const parsedLastScannedAt = Date.parse(lastScannedAt);
     const maximumLookbackAt = scanStartedAt.getTime() - workflowDiscoveryMaxLookbackMs;
-    const scanFrom = new Date(Number.isFinite(parsedLastScannedAt)
+    const validLastScannedAt = Number.isFinite(parsedLastScannedAt)
+      && parsedLastScannedAt <= scanStartedAt.getTime();
+    const scanFrom = new Date(validLastScannedAt
       ? Math.max(parsedLastScannedAt - workflowDiscoveryOverlapMs, maximumLookbackAt)
       : maximumLookbackAt);
     const fetchedRuns = await trackRequest(deps.fetchWorkflowRunsSince(
