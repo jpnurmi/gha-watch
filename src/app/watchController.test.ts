@@ -1323,6 +1323,52 @@ describe("watchController", () => {
     }]);
   });
 
+  it("clears stale errors when catch-up refreshes an inactive pull request", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "all",
+    };
+    const target: PrWatchTarget = {
+      kind: "pr",
+      owner: "getsentry",
+      repo: "sentry",
+      prNumber: "52",
+      url: "https://github.com/getsentry/sentry/pull/52",
+    };
+    const { deps } = createDeps([]);
+    deps.fetchOpenPullRequests = async () => [];
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun({
+      pullRequests: [{ number: "52" }],
+    })];
+    deps.fetchPullRequestDetails = async () => [{
+      state: "closed",
+      title: "Recovered pull request",
+    }];
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [{
+        ...existingWatch(),
+        id: "getsentry/sentry/pull/52",
+        target,
+        active: false,
+        error: "temporary failure",
+        errorKind: "transient",
+        errorAt: "2026-08-12T09:59:00.000Z",
+      }],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      error: undefined,
+      errorKind: undefined,
+      errorAt: undefined,
+    });
+  });
+
   it("keeps active PR watches when catch-up details are unavailable", async () => {
     const watchedRepo: WatchedRepo = {
       owner: "getsentry",

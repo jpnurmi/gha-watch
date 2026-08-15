@@ -967,6 +967,8 @@ export function createWatchController(
       timing: snapshot.timing,
       active: !snapshot.terminal,
       error: undefined,
+      errorKind: undefined,
+      errorAt: undefined,
     };
 
     const shouldNotify = snapshot.terminal && (
@@ -1029,6 +1031,8 @@ export function createWatchController(
       timing,
       active: false,
       error: undefined,
+      errorKind: undefined,
+      errorAt: undefined,
     };
 
     const reusedPullRequest = reuseTrackedPullRequestForSubscribedRun(subscribedWatch, target, run);
