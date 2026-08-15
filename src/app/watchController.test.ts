@@ -3064,6 +3064,80 @@ describe("watchController", () => {
     ]);
   });
 
+  it("syncs repositories with bounded concurrency and preserves result order", async () => {
+    const watchedRepos = ["one", "two", "three", "four", "five"].map((repo) => ({
+      owner: "getsentry",
+      repo,
+      defaultBranchWorkflowNames: ["CI"],
+    }));
+    const { deps, discoverySaves } = createDeps([]);
+    const startedRepositories: string[] = [];
+    let releaseRequests!: () => void;
+    let reportFourStarted!: () => void;
+    const requestGate = new Promise<void>((resolve) => {
+      releaseRequests = resolve;
+    });
+    const fourStarted = new Promise<void>((resolve) => {
+      reportFourStarted = resolve;
+    });
+    deps.fetchActiveWorkflowRuns = async (target) => {
+      startedRepositories.push(target.repo);
+
+      if (startedRepositories.length === 4) {
+        reportFourStarted();
+      }
+
+      await requestGate;
+      return [];
+    };
+    const controller = createWatchController(deps);
+
+    const syncing = controller.syncWorkflowSubscriptions(watchedRepos);
+    await fourStarted;
+
+    expect(startedRepositories).toEqual(["one", "two", "three", "four"]);
+    releaseRequests();
+
+    const result = await syncing;
+
+    expect(result.successfulRepositories).toEqual(
+      watchedRepos.map((repo) => `getsentry/${repo.repo}`),
+    );
+    expect(startedRepositories).toEqual(["one", "two", "three", "four", "five"]);
+    expect(Object.keys(discoverySaves.at(-1)?.repositories ?? {}).sort()).toEqual(
+      watchedRepos.map((repo) => `getsentry/${repo.repo}`).sort(),
+    );
+  });
+
+  it("reports a subscription pull request baseline failure", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "all",
+    };
+    const { deps } = createDeps([]);
+    const controller = createWatchController(deps);
+
+    const result = await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(result).toEqual({
+      status: "failed",
+      successfulRepositories: [],
+      failures: [{
+        repository: "getsentry/sentry",
+        kind: "transient",
+        message: "No fake state queued.",
+      }],
+      anyGithubRequestSucceeded: true,
+    });
+    expect(controller.getWatches()).toMatchObject([{
+      id: "getsentry/sentry/pull/52",
+      label: "Improve the tray popup",
+      error: "No fake state queued.",
+      errorKind: "transient",
+    }]);
+  });
+
   it("attempts later notifications and does not repeat a failed transition alert", async () => {
     const { deps } = createDeps([]);
     const attempts: string[] = [];

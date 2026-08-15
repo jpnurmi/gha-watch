@@ -200,7 +200,26 @@ type SettledWatchSnapshot =
   | { watch: WatchRecord; snapshot: WatchSnapshot }
   | { watch: WatchRecord; failure: WatchPollFailure };
 
+type BaselineWatchOutcome = {
+  watch: WatchRecord;
+  failure?: WatchPollFailure;
+};
+
+type RepositorySyncOutcome =
+  | {
+      repository: string;
+      successful: true;
+      anyGithubRequestSucceeded: boolean;
+    }
+  | {
+      repository: string;
+      successful: false;
+      failure: WorkflowSubscriptionFailure;
+      anyGithubRequestSucceeded: boolean;
+    };
+
 const pollConcurrency = 4;
+const subscriptionSyncConcurrency = 4;
 
 class WorkflowSubscriptionSyncError extends Error {
   constructor(
@@ -228,6 +247,7 @@ export function createWatchController(
   let watches = clearExpiredDoneWatches(normalizedWatches, initialNow);
   let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
   let workflowDiscoveryState = initialWorkflowDiscoveryState;
+  let discoveryStateUpdate = Promise.resolve();
   const metadataHydratedWatchIds = new Set<string>();
   const repositoryIconRefreshes = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
@@ -297,13 +317,21 @@ export function createWatchController(
     void deps.saveSuppressions(suppressions);
   }
 
-  async function setDiscoveryState(nextState: WorkflowDiscoveryState): Promise<void> {
-    if (nextState === workflowDiscoveryState) {
-      return;
-    }
+  async function updateDiscoveryState(
+    update: (state: WorkflowDiscoveryState) => WorkflowDiscoveryState,
+  ): Promise<void> {
+    const pendingUpdate = discoveryStateUpdate.then(async () => {
+      const nextState = update(workflowDiscoveryState);
 
-    await deps.saveWorkflowDiscoveryState?.(nextState);
-    workflowDiscoveryState = nextState;
+      if (nextState === workflowDiscoveryState) {
+        return;
+      }
+
+      await deps.saveWorkflowDiscoveryState?.(nextState);
+      workflowDiscoveryState = nextState;
+    });
+    discoveryStateUpdate = pendingUpdate.catch(() => undefined);
+    await pendingUpdate;
   }
 
   function updateWatch(id: string, update: (watch: WatchRecord) => WatchRecord): void {
@@ -381,35 +409,57 @@ export function createWatchController(
     }
   }
 
-  async function loadBaselineState(id: string, target: WatchTarget): Promise<void> {
+  async function loadBaselineState(
+    id: string,
+    target: WatchTarget,
+  ): Promise<BaselineWatchOutcome | undefined> {
+    const existingWatch = watches.find((watch) => watch.id === id);
+
+    if (!existingWatch) {
+      return undefined;
+    }
+
     try {
       const snapshot = await deps.fetchState(target);
-      updateWatch(id, (watch) => withBaselineSnapshot(watch, snapshot));
+      let watch = existingWatch;
+      updateWatch(id, (current) => {
+        watch = withBaselineSnapshot(current, snapshot);
+        return watch;
+      });
+      return { watch };
     } catch (error) {
       const failure = createWatchPollFailure(id, error);
-      updateWatch(id, (watch) => ({
-        ...watch,
-        error: failure.message,
-        errorKind: failure.kind,
-        errorAt: getNow().toISOString(),
-      }));
+      let watch = existingWatch;
+      updateWatch(id, (current) => {
+        watch = {
+          ...current,
+          error: failure.message,
+          errorKind: failure.kind,
+          errorAt: getNow().toISOString(),
+        };
+        return watch;
+      });
+      return { watch, failure };
     }
   }
 
-  async function createBaselineWatch(target: WatchTarget): Promise<WatchRecord> {
+  async function createBaselineWatch(target: WatchTarget): Promise<BaselineWatchOutcome> {
     const [watch] = addWatch([], target);
 
     try {
       const snapshot = await deps.fetchState(target);
       metadataHydratedWatchIds.add(watch.id);
-      return withBaselineSnapshot(watch, snapshot);
+      return { watch: withBaselineSnapshot(watch, snapshot) };
     } catch (error) {
       const failure = createWatchPollFailure(watch.id, error);
       return {
-        ...watch,
-        error: failure.message,
-        errorKind: failure.kind,
-        errorAt: getNow().toISOString(),
+        watch: {
+          ...watch,
+          error: failure.message,
+          errorKind: failure.kind,
+          errorAt: getNow().toISOString(),
+        },
+        failure,
       };
     }
   }
@@ -576,7 +626,7 @@ export function createWatchController(
   async function addWatchTarget(
     target: WatchTarget,
     reactivateExisting = false,
-  ): Promise<void> {
+  ): Promise<BaselineWatchOutcome | undefined> {
     const id = getWatchId(target);
 
     if (!reactivateExisting && isWatchSuppressed(suppressions, id)) {
@@ -595,13 +645,13 @@ export function createWatchController(
 
         if (reactivated !== watches) {
           setWatches(reactivated);
-          await loadBaselineState(id, target);
+          return loadBaselineState(id, target);
         }
       }
       return;
     }
 
-    const baselineWatch = await createBaselineWatch(target);
+    const baselineOutcome = await createBaselineWatch(target);
 
     if (
       watches.some((watch) => watch.id === id) ||
@@ -610,9 +660,10 @@ export function createWatchController(
       return;
     }
 
-    setWatches([...watches, baselineWatch]);
+    setWatches([...watches, baselineOutcome.watch]);
 
     void refreshRepositoryIcon(target);
+    return baselineOutcome;
   }
 
   async function addPrWatch(source: PrWatchTarget): Promise<void> {
@@ -745,8 +796,8 @@ export function createWatchController(
         await addSubscribedWorkflowRun(watchedRepo, run);
       }
 
-      await setDiscoveryState(setWorkflowDiscoveryCursor(
-        workflowDiscoveryState,
+      await updateDiscoveryState((state) => setWorkflowDiscoveryCursor(
+        state,
         watchedRepo,
         scanStartedAt,
         [...targets.keys()],
@@ -842,8 +893,8 @@ export function createWatchController(
       );
     }
 
-    await setDiscoveryState(setWorkflowDiscoveryCursor(
-      workflowDiscoveryState,
+    await updateDiscoveryState((state) => setWorkflowDiscoveryCursor(
+      state,
       watchedRepo,
       scanStartedAt,
       runs.map((run) => run.runId).reverse(),
@@ -1086,13 +1137,15 @@ export function createWatchController(
       return;
     }
 
+    let baselineOutcome: BaselineWatchOutcome | undefined;
+
     if (!existingWatch) {
-      await addWatchTarget(target);
+      baselineOutcome = await addWatchTarget(target);
     } else if (
       (refreshInactive && !existingWatch.active) ||
       (pullRequest.updatedAt && pullRequest.updatedAt !== existingWatch.metadata?.prUpdatedAt)
     ) {
-      await loadBaselineState(id, target);
+      baselineOutcome = await loadBaselineState(id, target);
     }
 
     const currentWatch = watches.find((watch) => watch.id === id);
@@ -1108,22 +1161,22 @@ export function createWatchController(
     });
     const sourceState = pullRequest.state ?? (pullRequest.isDraft ? "draft" : "ready");
 
-    if (
+    if (!(
       currentWatch.label === pullRequest.title &&
       currentWatch.metadata?.prTitle === metadata?.prTitle &&
       currentWatch.metadata?.prUpdatedAt === metadata?.prUpdatedAt &&
       currentWatch.metadata?.branchName === metadata?.branchName &&
       currentWatch.sourceState === sourceState
-    ) {
-      return;
+    )) {
+      updateWatch(id, (watch) => ({
+        ...watch,
+        label: pullRequest.title,
+        metadata,
+        sourceState,
+      }));
     }
 
-    updateWatch(id, (watch) => ({
-      ...watch,
-      label: pullRequest.title,
-      metadata,
-      sourceState,
-    }));
+    throwBaselineFailure(baselineOutcome);
   }
 
   async function addSubscribedWorkflowRun(
@@ -1160,7 +1213,8 @@ export function createWatchController(
       return;
     }
 
-    const subscribedWatch = await createBaselineWatch(target);
+    const baselineOutcome = await createBaselineWatch(target);
+    const subscribedWatch = baselineOutcome.watch;
 
     const concurrentlyAddedWatch = watches.find((watch) => watch.id === id);
 
@@ -1174,11 +1228,19 @@ export function createWatchController(
     }
 
     if (reuseTrackedPullRequestForSubscribedRun(subscribedWatch, target, run)) {
+      throwBaselineFailure(baselineOutcome);
       return;
     }
 
     setWatches([...watches, subscribedWatch]);
     void refreshRepositoryIcon(target);
+    throwBaselineFailure(baselineOutcome);
+  }
+
+  function throwBaselineFailure(outcome: BaselineWatchOutcome | undefined): void {
+    if (outcome?.failure) {
+      throw new Error(outcome.failure.message);
+    }
   }
 
   function reuseTrackedPullRequestForSubscribedRun(
@@ -1423,29 +1485,45 @@ export function createWatchController(
 
     async syncWorkflowSubscriptions(watchedRepos) {
       pruneExpiredSuppressions();
-      await setDiscoveryState(pruneWorkflowDiscoveryState(workflowDiscoveryState, watchedRepos));
+      await updateDiscoveryState((state) => pruneWorkflowDiscoveryState(state, watchedRepos));
 
-      const successfulRepositories: string[] = [];
-      const failures: WorkflowSubscriptionFailure[] = [];
-      let anyGithubRequestSucceeded = false;
+      const outcomes = await mapWithConcurrency(
+        watchedRepos,
+        subscriptionSyncConcurrency,
+        async (watchedRepo): Promise<RepositorySyncOutcome> => {
+          const repository = getRepositoryKey(watchedRepo);
 
-      for (const watchedRepo of watchedRepos) {
-        const repository = getRepositoryKey(watchedRepo);
-
-        try {
-          const repositoryRequestSucceeded = await syncWatchedWorkflowSubscriptions(watchedRepo);
-          anyGithubRequestSucceeded = repositoryRequestSucceeded || anyGithubRequestSucceeded;
-          successfulRepositories.push(repository);
-        } catch (error) {
-          anyGithubRequestSucceeded ||= getSubscriptionRequestSucceeded(error);
-          const cause = getSubscriptionFailureCause(error);
-          failures.push({
-            repository,
-            kind: classifyWatchFailure(),
-            message: normalizeFailureMessage(cause),
-          });
-        }
-      }
+          try {
+            const repositoryRequestSucceeded = await syncWatchedWorkflowSubscriptions(watchedRepo);
+            return {
+              repository,
+              successful: true,
+              anyGithubRequestSucceeded: repositoryRequestSucceeded,
+            };
+          } catch (error) {
+            const cause = getSubscriptionFailureCause(error);
+            return {
+              repository,
+              successful: false,
+              failure: {
+                repository,
+                kind: classifyWatchFailure(),
+                message: normalizeFailureMessage(cause),
+              },
+              anyGithubRequestSucceeded: getSubscriptionRequestSucceeded(error),
+            };
+          }
+        },
+      );
+      const successfulRepositories = outcomes
+        .filter((outcome) => outcome.successful)
+        .map((outcome) => outcome.repository);
+      const failures = outcomes
+        .filter((outcome) => !outcome.successful)
+        .map((outcome) => outcome.failure);
+      const anyGithubRequestSucceeded = outcomes.some(
+        (outcome) => outcome.anyGithubRequestSucceeded,
+      );
 
       return {
         status: getPollSummaryStatus(successfulRepositories.length, failures.length),
