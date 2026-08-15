@@ -946,6 +946,58 @@ describe("watchController", () => {
     ]);
   });
 
+  it("advances discovery when catch-up notification permission is denied", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, discoverySaves } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun()];
+    deps.notify = async () => {
+      throw new NotificationPermissionDeniedError();
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    const result = await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(result.status).toBe("successful");
+    expect(discoverySaves.at(-1)?.repositories["getsentry/sentry"].lastScannedAt)
+      .toBe("2026-08-12T10:02:00.000Z");
+  });
+
+  it("does not advance discovery after other catch-up notification failures", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, discoverySaves } = createDeps([]);
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun()];
+    deps.notify = async () => {
+      throw new Error("notification delivery failed");
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    const result = await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failures: [{ message: "notification delivery failed" }],
+    });
+    expect(discoverySaves).toEqual([]);
+  });
+
   it("catches runs after an offline gap without duplicating overlap notifications", async () => {
     let now = new Date("2026-08-12T18:00:00Z");
     const { deps, notificationRecords, discoverySaves } = createDeps([]);

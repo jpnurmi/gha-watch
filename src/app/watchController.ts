@@ -43,6 +43,7 @@ import type {
   WorkflowRunSummary,
   WorkflowDefinition,
 } from "../platform/gh";
+import { NotificationPermissionDeniedError } from "../platform/notifications";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 
 export type WatchControllerDeps = {
@@ -249,6 +250,16 @@ export function createWatchController(
 
   function getNow(): Date {
     return deps.now?.() ?? new Date();
+  }
+
+  async function notifyWorkflowSubscription(notification: WatchNotification): Promise<void> {
+    try {
+      await deps.notify(notification);
+    } catch (error) {
+      if (!(error instanceof NotificationPermissionDeniedError)) {
+        throw error;
+      }
+    }
   }
 
   function emitChange(): void {
@@ -975,7 +986,7 @@ export function createWatchController(
     );
 
     if (shouldNotify && transition.notify && !deps.notificationsPaused?.()) {
-      await deps.notify(createWatchNotification(nextWatch, notificationTime));
+      await notifyWorkflowSubscription(createWatchNotification(nextWatch, notificationTime));
     }
   }
 
@@ -1025,7 +1036,7 @@ export function createWatchController(
       );
 
       if (reusedPullRequest.updated && transition.notify && !deps.notificationsPaused?.()) {
-        await deps.notify(createWatchNotification(reusedPullRequest.watch, notificationTime));
+        await notifyWorkflowSubscription(createWatchNotification(reusedPullRequest.watch, notificationTime));
       }
 
       return;
@@ -1044,7 +1055,7 @@ export function createWatchController(
     );
 
     if (transition.notify && !deps.notificationsPaused?.()) {
-      await deps.notify(createWatchNotification(subscribedWatch, notificationTime));
+      await notifyWorkflowSubscription(createWatchNotification(subscribedWatch, notificationTime));
     }
   }
 
