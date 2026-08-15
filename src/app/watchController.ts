@@ -518,6 +518,7 @@ export function createWatchController(
       };
     }
 
+    const successfulWatchIds: string[] = [];
     const nextWatches = watches.map((watch) => {
       if (getWatchTriageState(watch) === "done") {
         return watch;
@@ -525,7 +526,13 @@ export function createWatchController(
 
       const target = getWatchPullRequestTarget(watch);
       const details = target ? detailsByKey.get(getPullRequestKey(target)) : undefined;
-      return target && details ? withPullRequestDetails(watch, target, details) : watch;
+
+      if (!target || !details) {
+        return watch;
+      }
+
+      successfulWatchIds.push(watch.id);
+      return withPullRequestDetails(watch, target, details);
     });
 
     if (nextWatches.some((watch, index) => watch !== watches[index])) {
@@ -533,7 +540,7 @@ export function createWatchController(
     }
 
     return {
-      successfulWatchIds: [],
+      successfulWatchIds,
       failures: [],
       anyGithubRequestSucceeded: true,
     };
@@ -1676,6 +1683,7 @@ export function createWatchController(
           ),
         ),
       );
+      successfulWatchIds.push(...pullRequestRefresh.successfulWatchIds);
       metadataFailures.push(...pullRequestRefresh.failures);
 
       if (!deps.notificationsPaused?.()) {

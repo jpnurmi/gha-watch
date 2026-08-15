@@ -3327,4 +3327,46 @@ describe("watchController", () => {
       error: undefined,
     });
   });
+
+  it("counts metadata-only PR refreshes as successful watch updates", async () => {
+    const { deps } = createDeps([]);
+    deps.fetchState = async () => {
+      throw new Error("run state unavailable");
+    };
+    deps.fetchPullRequestDetails = async () => [{
+      state: "ready",
+      title: "Updated pull request",
+    }];
+    const controller = createWatchController(deps, [
+      {
+        ...existingWatch(),
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+      {
+        ...existingWatch(),
+        id: "getsentry/sentry/pull/51",
+        target: prTarget,
+        label: "Old pull request title",
+        status: "completed:success",
+        active: false,
+      },
+    ]);
+
+    const result = await controller.pollNow();
+
+    expect(result).toMatchObject({
+      status: "degraded",
+      successfulWatchIds: ["getsentry/sentry/pull/51"],
+      watchFailures: [{
+        watchId: "getsentry/sentry/run/123",
+        message: "run state unavailable",
+      }],
+    });
+    expect(controller.getWatches()[1]).toMatchObject({
+      label: "Updated pull request",
+      metadata: { prTitle: "Updated pull request" },
+    });
+  });
 });
