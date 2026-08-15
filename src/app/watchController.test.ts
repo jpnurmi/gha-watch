@@ -2839,6 +2839,31 @@ describe("watchController", () => {
     expect(saves).toHaveLength(1);
   });
 
+  it("redacts GitHub and URL credentials from watch failures", async () => {
+    const { deps } = createDeps([]);
+    deps.fetchState = async () => {
+      throw new Error(
+        "gho_oauth ghu_user ghs_installation ghr_refresh " +
+        "https://x-access-token:secret@github.com/repo " +
+        "https://user:password@example.com/repo",
+      );
+    };
+    const controller = createWatchController(deps, [{
+      ...existingWatch(),
+      status: "in_progress",
+      lastState: { status: "in_progress", conclusion: null },
+      active: true,
+    }]);
+
+    const result = await controller.pollNow();
+
+    expect(result.watchFailures[0].message).toBe(
+      "[redacted] [redacted] [redacted] [redacted] " +
+      "https://[redacted]@github.com/repo " +
+      "https://[redacted]@example.com/repo",
+    );
+  });
+
   it("clears a transient row error after a later successful poll", async () => {
     let shouldFail = true;
     const { deps } = createDeps([]);

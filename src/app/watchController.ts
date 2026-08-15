@@ -1890,7 +1890,9 @@ function normalizeFailureMessage(error: unknown): string {
     .map((line) => line.trim())
     .find(Boolean) ?? "The request failed.";
   const redacted = firstLine
-    .replace(/\b(?:ghp|github_pat)_[A-Za-z0-9_]+\b/g, "[redacted]")
+    .replace(/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]+\b/g, "[redacted]")
+    .replace(/\bx-access-token:[^@\s]+/gi, "x-access-token:[redacted]")
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, "$1[redacted]@")
     .replace(/\bBearer\s+\S+/gi, "Bearer [redacted]")
     .replace(/\b(token|authorization)=\S+/gi, "$1=[redacted]");
 
