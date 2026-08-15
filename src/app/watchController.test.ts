@@ -9,7 +9,7 @@ import { getWatchViewCounts } from "./watchViewCounts";
 import type { CheckWatchTarget, PrWatchTarget, RunWatchTarget, WatchTarget } from "../domain/githubUrl";
 import type { WatchedRepo } from "../domain/watchedRepos";
 import type { WatchSuppression } from "../domain/watchSuppressions";
-import { type WatchRecord } from "../domain/watches";
+import { getWatchId, type WatchRecord } from "../domain/watches";
 import {
   emptyWorkflowDiscoveryState,
   getWorkflowDiscoverySubscriptionFingerprint,
@@ -3082,7 +3082,7 @@ describe("watchController", () => {
     };
     const controller = createWatchController(deps, [runTarget, jobTarget].map((target) => ({
       ...existingWatch(),
-      id: getWatchIdForTest(target),
+      id: getWatchId(target),
       target,
       status: "in_progress",
       lastSeenStatus: "in_progress",
@@ -3205,15 +3205,3 @@ describe("watchController", () => {
     });
   });
 });
-
-function getWatchIdForTest(target: WatchTarget): string {
-  if (target.kind === "pr") {
-    return `${target.owner}/${target.repo}/pull/${target.prNumber}`;
-  }
-
-  if (target.kind === "run") {
-    return `${target.owner}/${target.repo}/run/${target.runId}`;
-  }
-
-  return `${target.owner}/${target.repo}/job/${target.jobId}`;
-}
