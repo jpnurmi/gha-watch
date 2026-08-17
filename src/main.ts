@@ -3240,19 +3240,6 @@ async function refreshRepositoryCiStatus(repo: Pick<WatchedRepo, "owner" | "repo
 
   repoCiStatusRefreshes.add(repoKey);
 
-  if (!previousStatus) {
-    repoCiStatuses = {
-      ...repoCiStatuses,
-      [repoKey]: {
-        tone: "pending",
-        label: "Loading",
-        description: "Loading default branch CI status",
-        workflows: [],
-      },
-    };
-    render();
-  }
-
   try {
     const status = isDemoMode
       ? await fetchDemoRepositoryDefaultBranchCiStatus(repo)
@@ -3267,10 +3254,14 @@ async function refreshRepositoryCiStatus(repo: Pick<WatchedRepo, "owner" | "repo
     };
   } catch (error) {
     console.warn(`Could not refresh default branch CI status for ${repoKey}.`, error);
-    repoCiStatuses = {
-      ...repoCiStatuses,
-      [repoKey]: getRepoCiStatusAfterRefreshError(previousStatus, error),
-    };
+    const status = getRepoCiStatusAfterRefreshError(previousStatus);
+
+    if (status) {
+      repoCiStatuses = {
+        ...repoCiStatuses,
+        [repoKey]: status,
+      };
+    }
   } finally {
     repoCiStatusUpdatedAt.set(repoKey, Date.now());
     repoCiStatusRefreshes.delete(repoKey);

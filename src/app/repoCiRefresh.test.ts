@@ -87,15 +87,15 @@ describe("getRepoCiStatusAfterRefreshError", () => {
       ],
     };
 
-    expect(getRepoCiStatusAfterRefreshError(previousStatus, new Error("offline"))).toBe(previousStatus);
+    expect(getRepoCiStatusAfterRefreshError(previousStatus)).toBe(previousStatus);
   });
 
-  it("reports an unknown status when the initial refresh fails", () => {
-    expect(getRepoCiStatusAfterRefreshError(undefined, new Error("offline"))).toEqual({
-      tone: "pending",
-      label: "Unknown",
-      description: "offline",
-      workflows: [],
-    });
+  it("keeps the status hidden when the initial refresh fails", () => {
+    expect(getRepoCiStatusAfterRefreshError(undefined)).toBeUndefined();
+  });
+
+  it("does not publish a placeholder while the initial status is loading", () => {
+    expect(mainSource).not.toContain('label: "Loading"');
+    expect(mainSource).not.toContain('description: "Loading default branch CI status"');
   });
 });

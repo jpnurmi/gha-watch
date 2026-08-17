@@ -4,14 +4,8 @@ export const repoCiRefreshIntervalMs = 120_000;
 
 export function getRepoCiStatusAfterRefreshError(
   previousStatus: RepoCiStatusViewModel | undefined,
-  error: unknown,
-): RepoCiStatusViewModel {
-  return previousStatus ?? {
-    tone: "pending",
-    label: "Unknown",
-    description: error instanceof Error ? error.message : String(error),
-    workflows: [],
-  };
+): RepoCiStatusViewModel | undefined {
+  return previousStatus;
 }
 
 export function shouldRefreshRepoCiStatus(options: {
