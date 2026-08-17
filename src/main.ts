@@ -23,6 +23,7 @@ import {
   repoReorderLongPressMs,
 } from "./app/repoReorderInteraction";
 import { getStatusIconSvg } from "./app/statusIcon";
+import { renderTitleMarkup } from "./app/titleMarkup";
 import { createWatchController, type WatchPollResult } from "./app/watchController";
 import {
   getWatchRerunMode,
@@ -1173,7 +1174,7 @@ function renderPullRequestItem(group: WatchGroupViewModel, pullRequest: OpenPull
       title="#${escapeHtml(pullRequest.number)} ${escapeHtml(pullRequest.title)}"
     >
       <span class="repo-action-number">#${escapeHtml(pullRequest.number)}</span>
-      <span class="repo-action-title">${escapeHtml(pullRequest.title)}</span>
+      <span class="repo-action-title">${renderTitleMarkup(pullRequest.title)}</span>
       ${pullRequest.isDraft ? `<span class="repo-action-badge">Draft</span>` : ""}
     </button>
   `;
@@ -1466,7 +1467,7 @@ function renderWatchTitleLink(
   rowIds: string[],
 ): string {
   const content = `
-    <span class="watch-title-text" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
+    <span class="watch-title-text" title="${escapeHtml(label)}">${renderTitleMarkup(label)}</span>
     ${referenceLabel ? `<span class="watch-title-reference">${escapeHtml(referenceLabel)}</span>` : ""}
   `;
 

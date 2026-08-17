@@ -71,7 +71,7 @@ describe("watch tree group actions", () => {
 
   it("keeps branch context compact without wrapping and exposes full labels", () => {
     expect(mainSource).toContain(
-      '<span class="watch-title-text" title="${escapeHtml(label)}">${escapeHtml(label)}</span>',
+      '<span class="watch-title-text" title="${escapeHtml(label)}">${renderTitleMarkup(label)}</span>',
     );
     expect(mainSource).toContain("renderWatchTitleLink(row.label, row.prReference, row.url, [row.id])");
     expect(mainSource).toContain("renderWatchTitleLink(node.label, node.referenceLabel, node.url, node.rowIds)");

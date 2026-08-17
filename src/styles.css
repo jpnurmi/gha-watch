@@ -731,6 +731,15 @@ input {
   white-space: nowrap;
 }
 
+:is(.repo-action-title, .watch-title-text) code {
+  border-radius: 6px;
+  padding: 2px 4px;
+  background: rgb(101 108 118 / 20%);
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+}
+
 .repo-action-badge {
   border: 1px solid rgb(139 148 158 / 45%);
   border-radius: 5px;
