@@ -45,6 +45,7 @@ import type {
 } from "../platform/gh";
 import { NotificationPermissionDeniedError } from "../platform/notifications";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
+import { isDeemphasizedPullRequest } from "./viewModel";
 
 export type WatchControllerDeps = {
   fetchState(target: WatchTarget): Promise<WatchSnapshot>;
@@ -1147,7 +1148,12 @@ export function createWatchController(
       snapshot.state,
     );
 
-    if (shouldNotify && transition.notify && !deps.notificationsPaused?.()) {
+    if (
+      shouldNotify &&
+      transition.notify &&
+      shouldSendWatchNotification(nextWatch) &&
+      !deps.notificationsPaused?.()
+    ) {
       await notifyWorkflowSubscription(
         createWatchNotification(nextWatch, notificationTime),
         notificationFailures,
@@ -1203,7 +1209,12 @@ export function createWatchController(
         state,
       );
 
-      if (reusedPullRequest.updated && transition.notify && !deps.notificationsPaused?.()) {
+      if (
+        reusedPullRequest.updated &&
+        transition.notify &&
+        shouldSendWatchNotification(reusedPullRequest.watch) &&
+        !deps.notificationsPaused?.()
+      ) {
         await notifyWorkflowSubscription(
           createWatchNotification(reusedPullRequest.watch, notificationTime),
           notificationFailures,
@@ -1225,7 +1236,11 @@ export function createWatchController(
       state,
     );
 
-    if (transition.notify && !deps.notificationsPaused?.()) {
+    if (
+      transition.notify &&
+      shouldSendWatchNotification(subscribedWatch) &&
+      !deps.notificationsPaused?.()
+    ) {
       await notifyWorkflowSubscription(
         createWatchNotification(subscribedWatch, notificationTime),
         notificationFailures,
@@ -1695,7 +1710,11 @@ export function createWatchController(
       const polledWatches = watches.filter(
         (watch) =>
           getWatchTriageState(watch) === triageState &&
-          (watch.active || pollOptions.includeInactive) &&
+          (
+            watch.active ||
+            pollOptions.includeInactive ||
+            (watch.target.kind === "pr" && isDeemphasizedPullRequest(watch))
+          ) &&
           (!watchIdSet || watchIdSet.has(watch.id)),
       );
 
@@ -1763,7 +1782,7 @@ export function createWatchController(
           errorAt: undefined,
         };
 
-        if (transition.notify && getWatchTriageState(nextWatch) === "inbox") {
+        if (transition.notify && shouldSendWatchNotification(nextWatch)) {
           rowNotifications.push(createWatchNotification(nextWatch, notificationTime));
         }
 
@@ -2088,6 +2107,10 @@ function emptyMetadataRefreshResult(): MetadataRefreshResult {
     failures: [],
     anyGithubRequestSucceeded: false,
   };
+}
+
+function shouldSendWatchNotification(watch: WatchRecord): boolean {
+  return getWatchTriageState(watch) === "inbox" && !isDeemphasizedPullRequest(watch);
 }
 
 function getPollSummaryStatus(successCount: number, failureCount: number): PollSummaryStatus {

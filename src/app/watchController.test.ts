@@ -2403,6 +2403,54 @@ describe("watchController", () => {
     ]);
   });
 
+  it("refreshes inactive draft PRs without notifying", async () => {
+    const { deps, fetches, notificationRecords } = createDeps([
+      {
+        status: "completed",
+        conclusion: "success",
+        title: "Pull request #51",
+        timing: {
+          startedAt: "2026-08-17T17:25:23Z",
+          completedAt: "2026-08-17T17:27:32Z",
+        },
+        url: prTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [
+      {
+        id: getWatchId(prTarget),
+        target: prTarget,
+        sourceState: "draft",
+        label: "ref(attachments): port to value-based API",
+        metadata: { prTitle: "ref(attachments): port to value-based API" },
+        status: "completed:failure",
+        lastSeenStatus: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+        timing: {
+          startedAt: "2026-08-17T14:26:59Z",
+          completedAt: "2026-08-17T14:27:00Z",
+        },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    await controller.pollNow();
+
+    expect(fetches).toEqual([prTarget]);
+    expect(notificationRecords).toEqual([]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        status: "completed:success",
+        timing: {
+          startedAt: "2026-08-17T17:25:23Z",
+          completedAt: "2026-08-17T17:27:32Z",
+        },
+        active: false,
+      },
+    ]);
+  });
+
   it("does not automatically refresh saved watches", async () => {
     const { deps, fetches, notificationRecords } = createDeps([
       {
