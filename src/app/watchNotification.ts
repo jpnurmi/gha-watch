@@ -2,6 +2,19 @@ import type { PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
 import { getWatchId, type WatchRecord } from "../domain/watches";
 import { createPopupViewModel } from "./viewModel";
 
+export type DesktopNotificationActionId =
+  | "open"
+  | "rerun-all"
+  | "rerun-failed"
+  | "save"
+  | "done"
+  | "dismiss";
+
+export type WatchNotificationAction = {
+  id: Exclude<DesktopNotificationActionId, "open">;
+  label: string;
+};
+
 export type WatchNotification = {
   watchId: string;
   title: string;
@@ -12,6 +25,7 @@ export type WatchNotification = {
   timeoutMs?: number;
   summary?: string;
   group?: string;
+  actions: WatchNotificationAction[];
 };
 
 const transientNotificationTimeoutMs = 15_000;
@@ -40,6 +54,7 @@ export function createWatchNotification(
     ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary: repoLabel,
     group: repoLabel,
+    actions: getNotificationActions(row.canRerunFailed, row.doneCandidate),
   };
 }
 
@@ -70,6 +85,10 @@ export function createPullRequestNotification(
     ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary,
     group: summary,
+    actions: getNotificationActions(
+      node.tone === "failure" || node.hasFailedChildren,
+      node.doneCandidate,
+    ),
   };
 }
 
@@ -99,7 +118,28 @@ export function createWorkflowNotification(
     ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary: repoLabel,
     group: repoLabel,
+    actions: getNotificationActions(
+      node.tone === "failure" || node.hasFailedChildren,
+      node.doneCandidate,
+    ),
   };
+}
+
+function getNotificationActions(
+  canRerunFailed: boolean,
+  doneCandidate: boolean,
+): WatchNotificationAction[] {
+  return [
+    ...(canRerunFailed
+      ? [
+          { id: "rerun-all" as const, label: "Re-run all" },
+          { id: "rerun-failed" as const, label: "Re-run failed" },
+        ]
+      : doneCandidate
+        ? [{ id: "done" as const, label: "Done" }]
+        : []),
+    { id: "dismiss", label: "Dismiss" },
+  ];
 }
 
 export function getPullRequestNotificationStatus(

@@ -2,6 +2,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createCollapsedGroups } from "./app/collapsedGroups";
+import {
+  createDesktopNotificationActionHandler,
+  createDesktopNotificationActionQueue,
+} from "./app/desktopNotificationActions";
 import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
@@ -103,7 +107,7 @@ import {
   type WorkflowDefinition,
   rerunWatch,
 } from "./platform/gh";
-import { clearDesktopNotifications, listenForDesktopNotificationClicks, sendDesktopNotification } from "./platform/notifications";
+import { clearDesktopNotifications, listenForDesktopNotificationActions, sendDesktopNotification } from "./platform/notifications";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
 import {
   loadSettings,
@@ -269,6 +273,11 @@ type RepoCiStatusMenuState = {
   repoKey: string;
 };
 
+const desktopNotificationActionQueue = createDesktopNotificationActionQueue((error) => {
+  console.error("Could not process a desktop notification action.", error);
+});
+void listenForDesktopNotificationActions(desktopNotificationActionQueue.receive);
+
 const controller = createWatchController(
   {
     fetchState: isDemoMode
@@ -305,6 +314,31 @@ function notifyStatusChange(notification: WatchNotification): Promise<void> {
   return sendDesktopNotification(notification);
 }
 
+const handleDesktopNotificationAction = createDesktopNotificationActionHandler({
+  controller,
+  clearNotifications: clearDesktopNotifications,
+  openUrl: openExternalUrl,
+  queueSync: queueSyncedStateUpload,
+  refreshAfterRerun: queueRerunRefresh,
+  async refreshStaleWatch(watch) {
+    const triageState = getWatchTriageState(watch);
+
+    if (triageState === "done") {
+      return;
+    }
+
+    await controller.pollNow({
+      watchIds: [watch.id],
+      includeInactive: true,
+      triageState,
+    });
+  },
+  reportError(message, error) {
+    console.error(message, error);
+  },
+});
+void desktopNotificationActionQueue.start(handleDesktopNotificationAction);
+
 controller.subscribe(() => {
   render();
   void updateTrayIndicator();
@@ -316,10 +350,6 @@ void updateTrayIndicator();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void refreshListedRepositoryCiStatuses();
-void listenForDesktopNotificationClicks((click) => {
-  controller.markSeen(click.watchId);
-  void openExternalUrl(click.url);
-});
 window.setInterval(() => {
   void poll();
 }, pollIntervalMs);
@@ -2901,21 +2931,27 @@ async function confirmRerun(id: string, mode: RerunMode): Promise<void> {
       queueSyncedStateUpload();
     }
 
-    if (!isDemoMode) {
-      window.setTimeout(() => {
-        void controller.pollNow({ watchIds: [id] })
-          .then(handleTargetedPollResult)
-          .catch((error) => {
-            console.warn("Could not refresh the re-run GitHub Actions state.", error);
-          });
-      }, rerunRefreshDelayMs);
-    }
+    queueRerunRefresh(id);
   } catch (error) {
     console.error(`Could not re-run ${mode === "all" ? "all" : "failed"} GitHub Actions jobs.`, error);
   }
 
   render();
   void updateTrayIndicator();
+}
+
+function queueRerunRefresh(id: string): void {
+  if (isDemoMode) {
+    return;
+  }
+
+  window.setTimeout(() => {
+    void controller.pollNow({ watchIds: [id] })
+      .then(handleTargetedPollResult)
+      .catch((error) => {
+        console.warn("Could not refresh the re-run GitHub Actions state.", error);
+      });
+  }, rerunRefreshDelayMs);
 }
 
 async function refreshAutoStartState(): Promise<void> {

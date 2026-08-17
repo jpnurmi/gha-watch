@@ -75,6 +75,7 @@ export type WatchController = {
   add(target: ParsedWatchTarget): Promise<void>;
   replaceSyncedWatches(watches: WatchRecord[]): void;
   setTriageState(ids: string[], state: WatchTriageState): void;
+  setWatchError(id: string, error: string): void;
   reorderGroupWithinRepo(draggedIds: string[], targetIds: string[], position: WatchDropPosition): void;
   reorderWithinRepo(draggedId: string, targetId: string, position: WatchDropPosition): void;
   markSeen(id: string): void;
@@ -1497,6 +1498,16 @@ export function createWatchController(
       if (next !== watches) {
         state === "done" ? setWatchesWithDonePruning(next, now) : setWatches(next);
       }
+    },
+
+    setWatchError(id, error) {
+      const watch = watches.find((item) => item.id === id);
+
+      if (!watch || watch.error === error) {
+        return;
+      }
+
+      updateWatch(id, (current) => ({ ...current, error }));
     },
 
     reorderGroupWithinRepo(draggedIds, targetIds, position) {
