@@ -1348,6 +1348,11 @@ button.watch-tree-leading {
   opacity: 0.55;
 }
 
+.watch.has-done-candidate :is(.watch-workflow-status.status-icon-success, .watch-workflow-status.status-icon-failure),
+.watch.is-deemphasized :is(.watch-workflow-status.status-icon-success, .watch-workflow-status.status-icon-failure) {
+  color: #8b949e;
+}
+
 .watch-label {
   display: flex;
   min-width: 0;

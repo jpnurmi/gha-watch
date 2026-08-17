@@ -326,6 +326,9 @@ describe("watch tree group actions", () => {
     expect(styles).toMatch(
       /\.watch\.has-done-candidate \.watch-label,\s*\.watch\.is-deemphasized \.watch-label\s*\{[^}]*opacity:\s*0\.55;/s,
     );
+    expect(styles).toMatch(
+      /\.watch\.has-done-candidate :is\(\.watch-workflow-status\.status-icon-success, \.watch-workflow-status\.status-icon-failure\),\s*\.watch\.is-deemphasized :is\(\.watch-workflow-status\.status-icon-success, \.watch-workflow-status\.status-icon-failure\)\s*\{[^}]*color:\s*#8b949e;/s,
+    );
     expect(styles).toMatch(/\.watch\.has-done-candidate \.watch-actions::before/);
   });
 

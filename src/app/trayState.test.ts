@@ -80,6 +80,67 @@ describe("createTrayState", () => {
     });
   });
 
+  it("ignores dimmed draft and WIP pull requests", () => {
+    expect(
+      createTrayState([
+        watch({
+          id: "getsentry/sentry/pull/123",
+          target: {
+            kind: "pr",
+            owner: "getsentry",
+            repo: "sentry",
+            prNumber: "123",
+            url: "https://github.com/getsentry/sentry/pull/123",
+          },
+          sourceState: "draft",
+          active: true,
+          lastSeenStatus: "queued",
+        }),
+        watch({
+          id: "getsentry/sentry/run/456",
+          target: {
+            kind: "run",
+            owner: "getsentry",
+            repo: "sentry",
+            runId: "456",
+            prNumber: "456",
+            url: "https://github.com/getsentry/sentry/actions/runs/456",
+          },
+          sourceState: "ready",
+          metadata: { prTitle: "Fix flaky tests [WIP]" },
+          active: false,
+          status: "completed:failure",
+          lastSeenStatus: "in_progress",
+          lastState: { status: "completed", conclusion: "failure" },
+        }),
+        watch({
+          id: "getsentry/sentry/run/789",
+          active: false,
+          status: "completed:success",
+          lastState: { status: "completed", conclusion: "success" },
+        }),
+      ]),
+    ).toEqual({
+      status: "success",
+      hasUnseenChanges: false,
+      label: "All watches complete",
+      tooltip: "GHA Watch: all watches complete",
+    });
+  });
+
+  it("keeps standalone WIP-named workflows in the aggregate", () => {
+    expect(
+      createTrayState([
+        watch({
+          label: "WIP: standalone workflow",
+          active: false,
+          status: "completed:failure",
+          lastState: { status: "completed", conclusion: "failure" },
+        }),
+      ]),
+    ).toMatchObject({ status: "error" });
+  });
+
   it("uses an active tray icon when any watch is still running", () => {
     expect(createTrayState([watch({ active: true })])).toEqual({
       status: "active",

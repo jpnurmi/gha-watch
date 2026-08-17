@@ -283,7 +283,7 @@ function isDoneCandidate(
   );
 }
 
-function isDeemphasizedPullRequest(watch: WatchRecord): boolean {
+export function isDeemphasizedPullRequest(watch: WatchRecord): boolean {
   if (!isPullRequestWatch(watch)) {
     return false;
   }

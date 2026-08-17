@@ -1,5 +1,6 @@
 import type { WatchRecord } from "../domain/watches";
 import { getWatchState, getWatchTriageState, hasUnseenStatusChange } from "../domain/watches";
+import { isDeemphasizedPullRequest } from "./viewModel";
 
 export type TrayStatus = "idle" | "active" | "mixed" | "cancelled" | "error" | "success";
 
@@ -11,7 +12,9 @@ export type TrayState = {
 };
 
 export function createTrayState(watches: WatchRecord[]): TrayState {
-  const inbox = watches.filter((watch) => getWatchTriageState(watch) === "inbox");
+  const inbox = watches.filter(
+    (watch) => getWatchTriageState(watch) === "inbox" && !isDeemphasizedPullRequest(watch),
+  );
   const hasUnseenChanges = inbox.some(hasUnseenStatusChange);
   const active = inbox.filter((watch) => watch.active);
   const errors = inbox.filter((watch) => Boolean(watch.error));
