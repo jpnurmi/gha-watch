@@ -312,6 +312,7 @@ describe("watch tree group actions", () => {
     );
     expect(mainSource).toContain("node.label, node.doneCandidate");
     expect(mainSource).toContain('row.triageState !== "done" && row.doneCandidate');
+    expect(mainSource).toContain('row.deemphasized ? " is-deemphasized" : ""');
     expect(mainSource).toContain('action.state === "done" && doneCandidate ? " is-done-candidate" : ""');
     expect(styles).toMatch(
       /:is\(\.watch-group-triage-button, \.watch-tree-action-button, \.watch-action-button\)\.is-done-candidate\s*\{[^}]*background:\s*transparent;[^}]*color:\s*rgb\(238 241 245 \/ 60%\);[^}]*visibility:\s*visible;/s,
@@ -323,7 +324,7 @@ describe("watch tree group actions", () => {
       /\.watch:hover \.watch-action-button\.is-done-candidate,[^{]*\.watch:focus-within \.watch-action-button\.is-done-candidate\s*\{[^}]*opacity:\s*0\.72;/s,
     );
     expect(styles).toMatch(
-      /\.watch\.has-done-candidate \.watch-label\s*\{[^}]*opacity:\s*0\.55;/s,
+      /\.watch\.has-done-candidate \.watch-label,\s*\.watch\.is-deemphasized \.watch-label\s*\{[^}]*opacity:\s*0\.55;/s,
     );
     expect(styles).toMatch(/\.watch\.has-done-candidate \.watch-actions::before/);
   });

@@ -1343,7 +1343,8 @@ button.watch-tree-leading {
   text-align: left;
 }
 
-.watch.has-done-candidate .watch-label {
+.watch.has-done-candidate .watch-label,
+.watch.is-deemphasized .watch-label {
   opacity: 0.55;
 }
 

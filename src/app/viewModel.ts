@@ -44,6 +44,7 @@ export type WatchRowViewModel = {
   canRerun: boolean;
   canRerunFailed: boolean;
   doneCandidate: boolean;
+  deemphasized: boolean;
   triageState: WatchTriageState;
   url: string;
 };
@@ -174,6 +175,7 @@ function createWatchRowViewModel(
       canRerun: canRerun(watch),
       canRerunFailed: canRerunFailed(watch),
       doneCandidate: isDoneCandidate(watch, "error", repoCiStatus),
+      deemphasized: isDeemphasizedPullRequest(watch),
       triageState: getWatchTriageState(watch),
       url: watch.target.url,
     };
@@ -243,6 +245,7 @@ function createRow(
     canRerun: canRerun(watch),
     canRerunFailed: canRerunFailed(watch),
     doneCandidate: isDoneCandidate(watch, tone, repoCiStatus),
+    deemphasized: isDeemphasizedPullRequest(watch),
     triageState: getWatchTriageState(watch),
     url: watch.target.url,
   };
@@ -253,9 +256,7 @@ function isDoneCandidate(
   tone: RowTone,
   repoCiStatus?: RepoCiStatusViewModel,
 ): boolean {
-  const isPullRequest = watch.target.kind === "pr" || Boolean(watch.target.prNumber || watch.source || watch.sourceState);
-
-  if (isPullRequest) {
+  if (isPullRequestWatch(watch)) {
     return watch.sourceState === "merged" || watch.sourceState === "closed";
   }
 
@@ -280,6 +281,20 @@ function isDoneCandidate(
       branchName === defaultBranch &&
       runCommitSha.toLowerCase() !== defaultBranchCommitSha.toLowerCase(),
   );
+}
+
+function isDeemphasizedPullRequest(watch: WatchRecord): boolean {
+  if (!isPullRequestWatch(watch)) {
+    return false;
+  }
+
+  const title = watch.metadata?.prTitle?.trim() ||
+    (watch.target.kind === "pr" ? getWatchDisplayLabel(watch) : "");
+  return watch.sourceState === "draft" || /\bWIP\b/i.test(title);
+}
+
+function isPullRequestWatch(watch: WatchRecord): boolean {
+  return watch.target.kind === "pr" || Boolean(watch.target.prNumber || watch.source || watch.sourceState);
 }
 
 function getPullRequestReference(watch: WatchRecord): string | undefined {

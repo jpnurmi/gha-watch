@@ -695,6 +695,65 @@ describe("createPopupViewModel", () => {
     expect(model.rows.map((row) => row.doneCandidate)).toEqual([true, true, true, false, false]);
   });
 
+  it("deemphasizes draft and standalone-WIP pull request titles", () => {
+    const pullRequest = (
+      id: string,
+      title: string,
+      sourceState: WatchRecord["sourceState"] = "ready",
+    ) =>
+      watch({
+        id: `getsentry/sentry/pull/${id}`,
+        target: {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry",
+          prNumber: id,
+          url: `https://github.com/getsentry/sentry/pull/${id}`,
+        },
+        sourceState,
+        label: title,
+        metadata: { prTitle: title },
+      });
+    const model = createPopupViewModel([
+      pullRequest("1", "Draft without a marker", "draft"),
+      pullRequest("2", "WIP: Prefix"),
+      pullRequest("3", "Suffix [WIP]"),
+      pullRequest("4", "Wrapped (wip) marker"),
+      pullRequest("5", "A WIP in the middle"),
+      pullRequest("6", "WIPped into shape"),
+      pullRequest("7", "SWIP the prefix"),
+      pullRequest("8", "Ready for review"),
+      watch({ label: "WIP: standalone workflow" }),
+      watch({
+        id: "getsentry/sentry/run/456",
+        target: {
+          kind: "run",
+          owner: "getsentry",
+          repo: "sentry",
+          runId: "456",
+          prNumber: "9",
+          url: "https://github.com/getsentry/sentry/actions/runs/456",
+        },
+        sourceState: "ready",
+        label: "CI: Build app",
+        metadata: { prTitle: "Build app - WIP" },
+      }),
+    ]);
+
+    expect(model.rows.map((row) => row.deemphasized)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+  });
+
   it("suggests Done for cancelled runs on an older default-branch commit", () => {
     const cancelledRun = (id: string, branchName: string, commitSha: string) =>
       watch({
