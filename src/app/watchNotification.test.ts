@@ -44,7 +44,10 @@ describe("createWatchNotification", () => {
       group: "getsentry/sentry",
       persistent: false,
       timeoutMs: 15_000,
-      actions: [{ id: "save", label: "Save" }],
+      actions: [
+        { id: "done", label: "Done" },
+        { id: "dismiss", label: "Dismiss" },
+      ],
     });
   });
 
@@ -70,18 +73,19 @@ describe("createWatchNotification", () => {
   });
 
   it("marks non-failure status changes as transient", () => {
-    expect(
-      createWatchNotification(
-        watch({
-          status: "in_progress",
-          active: true,
-          lastState: { status: "in_progress", conclusion: null },
-          timing: {
-            startedAt: "2026-05-16T12:02:00Z",
-          },
-        }),
-      ).persistent,
-    ).toBe(false);
+    const notification = createWatchNotification(
+      watch({
+        status: "in_progress",
+        active: true,
+        lastState: { status: "in_progress", conclusion: null },
+        timing: {
+          startedAt: "2026-05-16T12:02:00Z",
+        },
+      }),
+    );
+
+    expect(notification.persistent).toBe(false);
+    expect(notification.actions).toEqual([{ id: "dismiss", label: "Dismiss" }]);
   });
 
   it("keeps failures persistent until they are confirmed", () => {
@@ -95,18 +99,22 @@ describe("createWatchNotification", () => {
     expect(notification).toMatchObject({
       persistent: true,
       actions: [
+        { id: "rerun-all", label: "Re-run all" },
         { id: "rerun-failed", label: "Re-run failed" },
-        { id: "save", label: "Save" },
+        { id: "dismiss", label: "Dismiss" },
       ],
     });
     expect(notification).not.toHaveProperty("timeoutMs");
   });
 
-  it("offers Done instead of Save for an already saved watch", () => {
+  it("offers Done for a done candidate", () => {
     expect(
-      createWatchNotification(watch({ triageState: "saved" })),
+      createWatchNotification(watch()),
     ).toMatchObject({
-      actions: [{ id: "done", label: "Done" }],
+      actions: [
+        { id: "done", label: "Done" },
+        { id: "dismiss", label: "Dismiss" },
+      ],
     });
   });
 

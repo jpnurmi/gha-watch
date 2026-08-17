@@ -350,7 +350,7 @@ function getPullRequestStateLabel(sourceState: PrSourceState): string {
   return labels[sourceState];
 }
 
-function canRerun(watch: WatchRecord): boolean {
+export function canRerun(watch: WatchRecord): boolean {
   const state = getWatchState(watch);
 
   return state?.status === "completed" &&

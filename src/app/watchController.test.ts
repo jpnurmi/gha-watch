@@ -2539,7 +2539,10 @@ describe("watchController", () => {
         timeoutMs: 15_000,
         summary: "getsentry/sentry",
         group: "getsentry/sentry",
-        actions: [{ id: "save", label: "Save" }],
+        actions: [
+          { id: "done", label: "Done" },
+          { id: "dismiss", label: "Dismiss" },
+        ],
       },
     ]);
   });

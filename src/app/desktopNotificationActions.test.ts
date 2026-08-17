@@ -130,6 +130,20 @@ describe("desktop notification actions", () => {
     expect(clearNotifications).toHaveBeenCalledTimes(1);
   });
 
+  it("dismisses by acknowledging the watch", async () => {
+    const { deps, controller, clearNotifications, openUrl, queueSync } = createDeps();
+    const handle = createDesktopNotificationActionHandler(deps);
+
+    await handle(action("dismiss"));
+
+    expect(controller.markSeen).toHaveBeenCalledWith("getsentry/sentry/run/123");
+    expect(controller.setTriageState).not.toHaveBeenCalled();
+    expect(controller.rerun).not.toHaveBeenCalled();
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(queueSync).not.toHaveBeenCalled();
+    expect(clearNotifications).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["save", "saved"],
     ["done", "done"],
@@ -159,6 +173,46 @@ describe("desktop notification actions", () => {
     expect(queueSync).toHaveBeenCalledTimes(1);
   });
 
+  it("opens once for duplicate deliveries inside the suppression window", async () => {
+    const { deps, openUrl, watches } = createDeps();
+    let now = 1_000;
+    deps.now = () => now;
+    const handle = createDesktopNotificationActionHandler(deps);
+
+    await handle(action("open"));
+    now += 29_999;
+    await handle(action("open"));
+
+    expect(watches).toHaveLength(1);
+    expect(watches[0].target.url).toBe("https://github.com/getsentry/sentry/actions/runs/123");
+    expect(openUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a failed action delivery to be retried", async () => {
+    const { deps, openUrl } = createDeps();
+    openUrl.mockRejectedValueOnce(new Error("open failed"));
+    const handle = createDesktopNotificationActionHandler(deps);
+
+    await expect(handle(action("open"))).rejects.toThrow("open failed");
+    await handle(action("open"));
+
+    expect(openUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows a failed rerun delivery to be retried", async () => {
+    const { deps, controller, reportError } = createDeps();
+    vi.mocked(controller.rerun).mockRejectedValueOnce(new Error("rerun failed"));
+    reportError.mockImplementationOnce(() => {
+      throw new Error("report failed");
+    });
+    const handle = createDesktopNotificationActionHandler(deps);
+
+    await expect(handle(action("rerun-failed"))).rejects.toThrow("report failed");
+    await handle(action("rerun-failed"));
+
+    expect(controller.rerun).toHaveBeenCalledTimes(2);
+  });
+
   it("allows a later notification for the same watch and action", async () => {
     const { deps, openUrl } = createDeps();
     let now = 1_000;
@@ -184,6 +238,16 @@ describe("desktop notification actions", () => {
     expect(controller.rerun).toHaveBeenCalledTimes(1);
     expect(controller.rerun).toHaveBeenCalledWith("getsentry/sentry/run/123", "failed");
     expect(queueSync).toHaveBeenCalledTimes(1);
+    expect(refreshAfterRerun).toHaveBeenCalledWith("getsentry/sentry/run/123");
+  });
+
+  it("re-runs all jobs through the controller", async () => {
+    const { deps, controller, refreshAfterRerun } = createDeps();
+    const handle = createDesktopNotificationActionHandler(deps);
+
+    await handle(action("rerun-all"));
+
+    expect(controller.rerun).toHaveBeenCalledWith("getsentry/sentry/run/123", "all");
     expect(refreshAfterRerun).toHaveBeenCalledWith("getsentry/sentry/run/123");
   });
 

@@ -1,8 +1,14 @@
 import type { PrWatchTarget, RunWatchTarget } from "../domain/githubUrl";
-import { getWatchId, getWatchTriageState, type WatchRecord, type WatchTriageState } from "../domain/watches";
+import { getWatchId, type WatchRecord } from "../domain/watches";
 import { createPopupViewModel } from "./viewModel";
 
-export type DesktopNotificationActionId = "open" | "rerun-failed" | "save" | "done";
+export type DesktopNotificationActionId =
+  | "open"
+  | "rerun-all"
+  | "rerun-failed"
+  | "save"
+  | "done"
+  | "dismiss";
 
 export type WatchNotificationAction = {
   id: Exclude<DesktopNotificationActionId, "open">;
@@ -48,7 +54,7 @@ export function createWatchNotification(
     ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary: repoLabel,
     group: repoLabel,
-    actions: getNotificationActions(row.canRerunFailed, row.triageState),
+    actions: getNotificationActions(row.canRerunFailed, row.doneCandidate),
   };
 }
 
@@ -81,7 +87,7 @@ export function createPullRequestNotification(
     group: summary,
     actions: getNotificationActions(
       node.tone === "failure" || node.hasFailedChildren,
-      getNotificationTriageState(sourceWatches, getPullRequestNotificationId(source)),
+      node.doneCandidate,
     ),
   };
 }
@@ -114,31 +120,26 @@ export function createWorkflowNotification(
     group: repoLabel,
     actions: getNotificationActions(
       node.tone === "failure" || node.hasFailedChildren,
-      getNotificationTriageState(sourceWatches, getWatchId(source)),
+      node.doneCandidate,
     ),
   };
 }
 
 function getNotificationActions(
   canRerunFailed: boolean,
-  triageState: WatchTriageState,
+  doneCandidate: boolean,
 ): WatchNotificationAction[] {
   return [
     ...(canRerunFailed
-      ? [{ id: "rerun-failed" as const, label: "Re-run failed" }]
-      : []),
-    triageState === "saved"
-      ? { id: "done", label: "Done" }
-      : { id: "save", label: "Save" },
+      ? [
+          { id: "rerun-all" as const, label: "Re-run all" },
+          { id: "rerun-failed" as const, label: "Re-run failed" },
+        ]
+      : doneCandidate
+        ? [{ id: "done" as const, label: "Done" }]
+        : []),
+    { id: "dismiss", label: "Dismiss" },
   ];
-}
-
-function getNotificationTriageState(
-  watches: WatchRecord[],
-  watchId: string,
-): WatchTriageState {
-  const watch = watches.find((item) => item.id === watchId);
-  return watch ? getWatchTriageState(watch) : "inbox";
 }
 
 export function getPullRequestNotificationStatus(

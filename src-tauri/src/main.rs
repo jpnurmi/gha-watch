@@ -3,6 +3,9 @@
 use std::{collections::HashSet, sync::Mutex};
 
 #[cfg(target_os = "linux")]
+use std::sync::OnceLock;
+
+#[cfg(target_os = "linux")]
 use notify_rust::{Notification as NativeNotification, Timeout, Urgency};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSView;
@@ -22,6 +25,8 @@ use tauri::{LogicalPosition, Monitor, PhysicalRect, PhysicalSize};
 use tauri_winrt_notification::{Duration as ToastDuration, Scenario as ToastScenario, Toast};
 
 const DESKTOP_NOTIFICATION_ACTION_EVENT: &str = "desktop-notification-action";
+#[cfg(target_os = "linux")]
+static SUPPORTS_CUSTOM_NOTIFICATION_ACTIONS: OnceLock<bool> = OnceLock::new();
 #[cfg(target_os = "macos")]
 const MACOS_POPUP_CORNER_RADIUS: f64 = 12.0;
 #[cfg(target_os = "linux")]
@@ -77,9 +82,11 @@ struct DesktopNotificationActionDefinition {
 #[serde(rename_all = "kebab-case")]
 enum DesktopNotificationActionId {
     Open,
+    RerunAll,
     RerunFailed,
     Save,
     Done,
+    Dismiss,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -157,8 +164,8 @@ fn validate_desktop_notification(notification: &DesktopNotification) -> Result<(
         return Err("The desktop notification URL is invalid.".to_string());
     }
 
-    if notification.actions.len() > 2 {
-        return Err("Desktop notifications support at most two custom actions.".to_string());
+    if notification.actions.len() > 3 {
+        return Err("Desktop notifications support at most three custom actions.".to_string());
     }
 
     let mut action_ids = HashSet::new();
@@ -193,9 +200,11 @@ impl DesktopNotificationActionId {
     fn expected_label(self) -> &'static str {
         match self {
             Self::Open => "Open",
+            Self::RerunAll => "Re-run all",
             Self::RerunFailed => "Re-run failed",
             Self::Save => "Save",
             Self::Done => "Done",
+            Self::Dismiss => "Dismiss",
         }
     }
 
@@ -203,9 +212,11 @@ impl DesktopNotificationActionId {
     fn from_native_id(action: &str) -> Option<Self> {
         match action {
             "open" | "default" => Some(Self::Open),
+            "rerun-all" => Some(Self::RerunAll),
             "rerun-failed" => Some(Self::RerunFailed),
             "save" => Some(Self::Save),
             "done" => Some(Self::Done),
+            "dismiss" => Some(Self::Dismiss),
             _ => None,
         }
     }
@@ -214,9 +225,11 @@ impl DesktopNotificationActionId {
     fn native_id(self) -> &'static str {
         match self {
             Self::Open => "open",
+            Self::RerunAll => "rerun-all",
             Self::RerunFailed => "rerun-failed",
             Self::Save => "save",
             Self::Done => "done",
+            Self::Dismiss => "dismiss",
         }
     }
 }
@@ -341,10 +354,12 @@ fn show_clickable_notification(
     native.summary(&notification.title).body(&notification.body);
     native.action("default", "Open");
 
-    let supports_custom_actions = notify_rust::get_capabilities().is_ok_and(|capabilities| {
-        capabilities
-            .iter()
-            .any(|capability| capability == "actions")
+    let supports_custom_actions = *SUPPORTS_CUSTOM_NOTIFICATION_ACTIONS.get_or_init(|| {
+        notify_rust::get_capabilities().is_ok_and(|capabilities| {
+            capabilities
+                .iter()
+                .any(|capability| capability == "actions")
+        })
     });
 
     if supports_custom_actions {
@@ -1298,8 +1313,9 @@ mod tests {
     #[test]
     fn validates_desktop_notification_actions() {
         let notification = desktop_notification(vec![
+            action(DesktopNotificationActionId::RerunAll, "Re-run all"),
             action(DesktopNotificationActionId::RerunFailed, "Re-run failed"),
-            action(DesktopNotificationActionId::Save, "Save"),
+            action(DesktopNotificationActionId::Dismiss, "Dismiss"),
         ]);
 
         assert!(validate_desktop_notification(&notification).is_ok());
@@ -1317,11 +1333,22 @@ mod tests {
             action(DesktopNotificationActionId::Done, "Done"),
             action(DesktopNotificationActionId::Done, "Done"),
         ]);
+        let too_many = desktop_notification(vec![
+            action(DesktopNotificationActionId::RerunAll, "Re-run all"),
+            action(DesktopNotificationActionId::RerunFailed, "Re-run failed"),
+            action(DesktopNotificationActionId::Done, "Done"),
+            action(DesktopNotificationActionId::Dismiss, "Dismiss"),
+        ]);
 
         assert!(validate_desktop_notification(&wrong_label).is_err());
         assert!(validate_desktop_notification(&open_button).is_err());
         assert!(validate_desktop_notification(&duplicate).is_err());
+        assert!(validate_desktop_notification(&too_many).is_err());
         assert_eq!(DesktopNotificationActionId::from_native_id("archive"), None);
+        assert_eq!(
+            DesktopNotificationActionId::from_native_id("dismiss"),
+            Some(DesktopNotificationActionId::Dismiss)
+        );
     }
 
     #[test]

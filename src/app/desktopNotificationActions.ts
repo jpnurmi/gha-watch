@@ -3,15 +3,16 @@ import {
   isVerifiedGitHubNotificationUrl,
   type DesktopNotificationAction,
 } from "../platform/notifications";
-import { canRerunFailed } from "./viewModel";
+import { canRerun, canRerunFailed } from "./viewModel";
 
 const duplicateActionWindowMs = 30_000;
+const staleRerunAllMessage = "Re-run is no longer available for this watch.";
 const staleRerunMessage = "Re-run failed is no longer available for this watch.";
 
 export type DesktopNotificationActionController = {
   getWatches(): WatchRecord[];
   markSeen(id: string): void;
-  rerun(id: string, mode: "failed"): Promise<void>;
+  rerun(id: string, mode: "all" | "failed"): Promise<void>;
   setTriageState(ids: string[], state: WatchTriageState): void;
   setWatchError(id: string, error: string): void;
 };
@@ -73,6 +74,10 @@ export function createDesktopNotificationActionHandler(
         return;
       }
 
+      if (action.action === "dismiss") {
+        return;
+      }
+
       if (action.action === "save" || action.action === "done") {
         const nextState = action.action === "save" ? "saved" : "done";
 
@@ -84,9 +89,12 @@ export function createDesktopNotificationActionHandler(
         return;
       }
 
-      if (!canRerunFailed(watch)) {
-        deps.controller.setWatchError(watch.id, staleRerunMessage);
-        deps.reportError(staleRerunMessage);
+      const rerunMode = action.action === "rerun-all" ? "all" : "failed";
+      const staleMessage = rerunMode === "all" ? staleRerunAllMessage : staleRerunMessage;
+
+      if (rerunMode === "all" ? !canRerun(watch) : !canRerunFailed(watch)) {
+        deps.controller.setWatchError(watch.id, staleMessage);
+        deps.reportError(staleMessage);
         await refreshStaleWatch(deps, watch);
         return;
       }
@@ -94,7 +102,7 @@ export function createDesktopNotificationActionHandler(
       const wasSynced = getWatchTriageState(watch) !== "inbox";
 
       try {
-        await deps.controller.rerun(watch.id, "failed");
+        await deps.controller.rerun(watch.id, rerunMode);
 
         if (wasSynced) {
           deps.queueSync();
@@ -102,13 +110,23 @@ export function createDesktopNotificationActionHandler(
 
         deps.refreshAfterRerun(watch.id);
       } catch (error) {
-        const message = "Could not re-run failed GitHub Actions jobs.";
+        const message = rerunMode === "all"
+          ? "Could not re-run GitHub Actions jobs."
+          : "Could not re-run failed GitHub Actions jobs.";
         deps.controller.setWatchError(watch.id, message);
         deps.reportError(message, error);
         await refreshStaleWatch(deps, watch);
       }
+    } catch (error) {
+      handledAt.delete(actionKey);
+      throw error;
     } finally {
-      await deps.clearNotifications();
+      try {
+        await deps.clearNotifications();
+      } catch (error) {
+        handledAt.delete(actionKey);
+        throw error;
+      }
     }
   };
 }

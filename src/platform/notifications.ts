@@ -123,7 +123,9 @@ export function isVerifiedGitHubNotificationUrl(url: string): boolean {
 
 function isDesktopNotificationActionId(action: unknown): action is DesktopNotificationActionId {
   return action === "open" ||
+    action === "rerun-all" ||
     action === "rerun-failed" ||
     action === "save" ||
-    action === "done";
+    action === "done" ||
+    action === "dismiss";
 }

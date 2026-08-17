@@ -20,7 +20,7 @@ function notification(overrides: Partial<WatchNotification> = {}): WatchNotifica
     group: "jpnurmi/gha",
     persistent: true,
     actions: [
-      { id: "save", label: "Save" },
+      { id: "dismiss", label: "Dismiss" },
     ],
     ...overrides,
   };
@@ -120,7 +120,11 @@ describe("sendDesktopNotification", () => {
   it("accepts only the typed action payload shape", () => {
     expect(isDesktopNotificationAction({
       watchId: "jpnurmi/gha/job/456",
-      action: "done",
+      action: "dismiss",
+    })).toBe(true);
+    expect(isDesktopNotificationAction({
+      watchId: "jpnurmi/gha/job/456",
+      action: "rerun-all",
     })).toBe(true);
     expect(isDesktopNotificationAction({
       watchId: " jpnurmi/gha/job/456",
