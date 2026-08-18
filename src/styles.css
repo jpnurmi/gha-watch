@@ -366,17 +366,152 @@ input {
 
 .add-form {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   border-top: 1px solid rgb(255 255 255 / 12%);
   padding: 10px 16px;
   background: rgb(255 255 255 / 5%);
+}
+
+.add-discovery-header {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.add-discovery-title {
+  color: rgb(238 241 245 / 58%);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.add-discovery-status {
+  min-height: 32px;
+  margin: 0;
+  padding: 7px 8px;
+  color: rgb(238 241 245 / 48%);
+  font-size: 12px;
+}
+
+.add-discovery-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.add-discovery-error button,
+.add-discovery-add,
+.add-discovery-dismiss {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.add-discovery-error button {
+  color: #58a6ff;
+}
+
+.add-discovery-list {
+  display: grid;
+  max-height: 192px;
+  overflow: auto;
+  margin: 0 -16px;
+  padding: 0 16px;
+  list-style: none;
+}
+
+.add-discovery-item {
+  display: grid;
+  min-height: 52px;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+  padding: 6px 4px 6px 6px;
+}
+
+.add-discovery-item:hover {
+  background: rgb(255 255 255 / 5%);
+}
+
+.add-discovery-details {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.add-discovery-leading {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+}
+
+.add-discovery-pr-icon {
+  margin-top: 0;
+}
+
+.add-discovery-label {
+  gap: 6px;
+}
+
+.add-discovery-pr-title {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.add-discovery-meta {
+  gap: 6px;
+}
+
+.add-discovery-add,
+.add-discovery-dismiss {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  color: rgb(238 241 245 / 42%);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.add-discovery-item:hover :is(.add-discovery-add, .add-discovery-dismiss),
+.add-discovery-item:focus-within :is(.add-discovery-add, .add-discovery-dismiss) {
+  opacity: 0.72;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.add-discovery-error button:hover,
+.add-discovery-add:hover,
+.add-discovery-dismiss:hover {
+  background: rgb(88 166 255 / 10%);
+  color: rgb(238 241 245 / 88%);
+  opacity: 1;
+}
+
+.add-manual-entry {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  padding-top: 10px;
 }
 
 .add-field {
   display: grid;
   min-width: 0;
   min-height: 36px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   border: 1px solid rgb(255 255 255 / 18%);
   border-radius: 6px;
@@ -413,7 +548,6 @@ input {
   display: inline-grid;
   width: 24px;
   height: 24px;
-  margin-left: 4px;
   place-items: center;
   border: 0;
   border-radius: 5px;
@@ -448,7 +582,7 @@ input {
 }
 
 .form-hint {
-  margin: -1px 0 0 37px;
+  margin: -1px 0 0;
   color: rgb(238 241 245 / 48%);
   font-size: 11px;
   line-height: 1.25;

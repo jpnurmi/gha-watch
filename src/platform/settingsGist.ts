@@ -128,6 +128,7 @@ export function serializeSettingsDocument(state: SyncedState): string {
     settings: {
       watchedRepos: normalized.watchedRepos.map(({ repoIconUrl: _repoIconUrl, ...repo }) => repo),
       repoOrder: normalized.repoOrder,
+      dismissedPullRequests: normalized.dismissedPullRequests,
     },
     watches: normalizeSyncedWatches(state.watches).map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch),
   };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fetchActiveWorkflowRuns,
+  fetchAuthoredOpenPullRequests,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
   fetchPullRequestDetails,
@@ -1094,6 +1095,81 @@ describe("fetchOpenPullRequests", () => {
         title: "Valid PR",
         isDraft: false,
         url: "https://github.com/getsentry/sentry/pull/51",
+      },
+    ]);
+  });
+});
+
+describe("fetchAuthoredOpenPullRequests", () => {
+  it("searches the authenticated user's open pull requests across repositories", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify([
+        {
+          number: 52,
+          title: "Newer PR",
+          isDraft: true,
+          updatedAt: "2026-08-18T12:00:00Z",
+          url: "https://github.com/getsentry/relay/pull/52",
+          repository: { nameWithOwner: "getsentry/relay" },
+        },
+        {
+          number: 51,
+          title: "Older PR",
+          isDraft: false,
+          updatedAt: "2026-08-17T12:00:00Z",
+          url: "https://github.com/getsentry/sentry/pull/51",
+          repository: { nameWithOwner: "getsentry/sentry" },
+        },
+        {
+          number: 50,
+          title: "Missing repository",
+          isDraft: false,
+          url: "https://github.com/getsentry/seer/pull/50",
+        },
+      ]),
+      stderr: "",
+    });
+
+    await expect(fetchAuthoredOpenPullRequests(executor)).resolves.toEqual([
+      {
+        owner: "getsentry",
+        repo: "relay",
+        number: "52",
+        title: "Newer PR",
+        isDraft: true,
+        updatedAt: "2026-08-18T12:00:00Z",
+        url: "https://github.com/getsentry/relay/pull/52",
+      },
+      {
+        owner: "getsentry",
+        repo: "sentry",
+        number: "51",
+        title: "Older PR",
+        isDraft: false,
+        updatedAt: "2026-08-17T12:00:00Z",
+        url: "https://github.com/getsentry/sentry/pull/51",
+      },
+    ]);
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "search",
+          "prs",
+          "--author",
+          "@me",
+          "--state",
+          "open",
+          "--sort",
+          "updated",
+          "--order",
+          "desc",
+          "--limit",
+          "100",
+          "--json",
+          "number,title,isDraft,updatedAt,url,repository",
+        ],
       },
     ]);
   });

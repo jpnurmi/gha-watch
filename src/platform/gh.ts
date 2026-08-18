@@ -115,6 +115,11 @@ export type OpenPullRequest = {
   url: string;
 };
 
+export type AuthoredOpenPullRequest = OpenPullRequest & {
+  owner: string;
+  repo: string;
+};
+
 export type PullRequestDetails = {
   authorLogin?: string;
   branchName?: string;
@@ -195,6 +200,12 @@ type PullRequestListResponse = {
   title?: string;
   updatedAt?: string;
   url?: string;
+};
+
+type PullRequestSearchResponse = PullRequestListResponse & {
+  repository?: {
+    nameWithOwner?: string;
+  };
 };
 
 type WorkflowRunListResponse = {
@@ -410,6 +421,38 @@ export async function fetchOpenPullRequests(
     return parseJson<PullRequestListResponse[]>(result.stdout)
       .map(normalizeOpenPullRequest)
       .filter((pullRequest): pullRequest is OpenPullRequest => Boolean(pullRequest))
+      .sort(comparePullRequestsByUpdatedAt);
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function fetchAuthoredOpenPullRequests(
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<AuthoredOpenPullRequest[]> {
+  try {
+    const result = await executor.execute("gh", [
+      "search",
+      "prs",
+      "--author",
+      "@me",
+      "--state",
+      "open",
+      "--sort",
+      "updated",
+      "--order",
+      "desc",
+      "--limit",
+      "100",
+      "--json",
+      "number,title,isDraft,updatedAt,url,repository",
+    ]);
+
+    assertSuccessfulGhResult(result);
+
+    return parseJson<PullRequestSearchResponse[]>(result.stdout)
+      .map(normalizeAuthoredOpenPullRequest)
+      .filter((pullRequest): pullRequest is AuthoredOpenPullRequest => Boolean(pullRequest))
       .sort(comparePullRequestsByUpdatedAt);
   } catch (error) {
     throw normalizeGhError(error);
@@ -719,6 +762,24 @@ function normalizeOpenPullRequest(response: PullRequestListResponse): OpenPullRe
     ...(response.headRefName?.trim() ? { headBranch: response.headRefName.trim() } : {}),
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
     url,
+  };
+}
+
+function normalizeAuthoredOpenPullRequest(
+  response: PullRequestSearchResponse,
+): AuthoredOpenPullRequest | undefined {
+  const pullRequest = normalizeOpenPullRequest(response);
+  const repository = response.repository?.nameWithOwner?.trim();
+  const match = repository?.match(/^([^/]+)\/(.+)$/);
+
+  if (!pullRequest || !match) {
+    return undefined;
+  }
+
+  return {
+    ...pullRequest,
+    owner: match[1],
+    repo: match[2],
   };
 }
 

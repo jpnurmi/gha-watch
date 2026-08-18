@@ -36,6 +36,7 @@ const localState: SyncedState = {
       },
     ],
     repoOrder: ["jpnurmi/gha-watch"],
+    dismissedPullRequests: ["getsentry/relay#123"],
   },
   watches: [
     watch("1", "inbox"),
@@ -50,6 +51,7 @@ const remoteState: SyncedState = {
       { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
     ],
     repoOrder: ["getsentry/sentry", "jpnurmi/gha-watch"],
+    dismissedPullRequests: ["getsentry/seer#456"],
   },
   watches: [watch("2", "done"), watch("3", "saved")],
 };
@@ -73,6 +75,7 @@ describe("settings sync", () => {
           { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
         ],
         repoOrder: ["getsentry/sentry", "jpnurmi/gha-watch"],
+        dismissedPullRequests: ["getsentry/seer#456"],
       },
       watches: [
         { ...watch("2", "done"), repoIconUrl: "https://avatars.example/watch.png" },
@@ -96,6 +99,7 @@ describe("settings sync", () => {
           { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "user" },
         ],
         repoOrder: ["jpnurmi/gha-watch"],
+        dismissedPullRequests: ["getsentry/relay#123"],
       },
       watches: [watch("2", "saved")],
     });

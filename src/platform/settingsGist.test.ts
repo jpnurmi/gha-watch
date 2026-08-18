@@ -33,6 +33,7 @@ const state: SyncedState = {
       { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "user" },
     ],
     repoOrder: ["jpnurmi/gha-watch"],
+    dismissedPullRequests: ["getsentry/relay#123"],
   },
   watches: [savedWatch],
 };

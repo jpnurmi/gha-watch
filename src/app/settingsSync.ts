@@ -72,6 +72,7 @@ export function toSyncedState(state: SyncedState): SyncedState {
     settings: {
       watchedRepos: settings.watchedRepos.map(({ repoIconUrl: _repoIconUrl, ...repo }) => repo),
       repoOrder: settings.repoOrder,
+      dismissedPullRequests: settings.dismissedPullRequests,
     },
     watches: clearExpiredDoneWatches(state.watches)
       .filter((watch) => {

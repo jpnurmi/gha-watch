@@ -7,6 +7,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 ## Features
 
 - Add a repository URL or slug to watch your open pull requests immediately.
+- Discover your open pull requests in unlisted repositories from the add panel.
 - Watch a workflow run URL, a specific job URL, or a pull request URL.
 - Live pull request watches follow the latest PR head and show the current workflow runs.
 - Track pull requests as draft, ready, merged, or closed using GitHub's lifecycle icons and colors.

@@ -4,6 +4,7 @@ export type PopupRenderRoot = {
 };
 
 type PopupScrollPosition = {
+  discoveryListTop?: number;
   watchListTop?: number;
 };
 
@@ -27,19 +28,29 @@ export function replacePopupHtmlPreservingScroll(root: PopupRenderRoot, html: st
 
 function capturePopupScrollPosition(root: PopupRenderRoot): PopupScrollPosition {
   const watchList = root.querySelector<HTMLElement>(".watch-list");
+  const discoveryList = root.querySelector<HTMLElement>(".add-discovery-list");
 
-  return watchList ? { watchListTop: watchList.scrollTop } : {};
+  return {
+    ...(watchList ? { watchListTop: watchList.scrollTop } : {}),
+    ...(discoveryList ? { discoveryListTop: discoveryList.scrollTop } : {}),
+  };
 }
 
 function restorePopupScrollPosition(root: PopupRenderRoot, scrollPosition: PopupScrollPosition): void {
-  if (scrollPosition.watchListTop === undefined) {
-    return;
+  if (scrollPosition.watchListTop !== undefined) {
+    const watchList = root.querySelector<HTMLElement>(".watch-list");
+
+    if (watchList) {
+      watchList.scrollTop = scrollPosition.watchListTop;
+    }
   }
 
-  const watchList = root.querySelector<HTMLElement>(".watch-list");
+  if (scrollPosition.discoveryListTop !== undefined) {
+    const discoveryList = root.querySelector<HTMLElement>(".add-discovery-list");
 
-  if (watchList) {
-    watchList.scrollTop = scrollPosition.watchListTop;
+    if (discoveryList) {
+      discoveryList.scrollTop = scrollPosition.discoveryListTop;
+    }
   }
 }
 

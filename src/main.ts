@@ -21,6 +21,10 @@ import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { replacePopupHtmlPreservingScroll } from "./app/popupScroll";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
 import { getPrStateIconSvg } from "./app/prStateIcon";
+import {
+  getPullRequestDiscoveryId,
+  getUnwatchedPullRequests,
+} from "./app/pullRequestDiscovery";
 import { getRepoHeaderActions, type RepoHeaderActions } from "./app/repoHeaderActions";
 import {
   didRepoReorderPressMove,
@@ -88,6 +92,7 @@ import {
 } from "./domain/watches";
 import {
   fetchActiveWorkflowRuns,
+  fetchAuthoredOpenPullRequests,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
   fetchPullRequestDetails,
@@ -99,13 +104,14 @@ import {
   fetchWatchState,
   fetchWorkflowDefinitions,
   fetchWorkflowRunsSince,
+  rerunWatch,
   type ActiveWorkflowRun,
+  type AuthoredOpenPullRequest,
   type OpenPullRequest,
   type RateLimit,
   type RerunMode,
   type RepositoryCiStatus,
   type WorkflowDefinition,
-  rerunWatch,
 } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationActions, sendDesktopNotification } from "./platform/notifications";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
@@ -158,6 +164,7 @@ const getRepositoryIconUrl = createRepositoryIconProvider(
 );
 let isAdding = false;
 let addError: string | undefined;
+let pullRequestDiscovery: PullRequestDiscoveryState = { status: "idle" };
 let isPolling = false;
 let isClearMenuOpen = false;
 let isPopupOpen = false;
@@ -272,6 +279,11 @@ type RepositoryWatchMenuState =
 type RepoCiStatusMenuState = {
   repoKey: string;
 };
+
+type PullRequestDiscoveryState =
+  | { status: "idle" | "loading" }
+  | { status: "loaded"; pullRequests: AuthoredOpenPullRequest[]; loadedAt: number }
+  | { status: "error"; error: string };
 
 const desktopNotificationActionQueue = createDesktopNotificationActionQueue((error) => {
   console.error("Could not process a desktop notification action.", error);
@@ -627,31 +639,122 @@ function renderWatchViewSwitcher(counts: WatchViewCounts): string {
 }
 
 function renderAddForm(): string {
+  const pullRequests = getDiscoveredUnwatchedPullRequests();
+
   return `
     <form class="add-form" data-role="add-form">
-      <div class="add-field">
+      <div class="add-discovery-header">
+        <span class="add-discovery-title">Unwatched PRs</span>
         <button class="add-form-dismiss" type="button" data-action="close-add" title="Cancel" aria-label="Cancel adding">
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
           </svg>
         </button>
-        <input
-          name="url"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="owner/repo#1234"
-          aria-label="GitHub repository, Actions URL, or pull request slug"
-          aria-describedby="add-form-hint"
-        />
-        <div class="add-field-actions">
-          <button class="add-form-submit" type="submit">Add</button>
-        </div>
       </div>
-      <p class="form-hint" id="add-form-hint">or https://github.com/OWNER/REPO/actions/runs/RUN_ID</p>
-      ${addError ? `<p class="form-error">${escapeHtml(addError)}</p>` : ""}
+      ${renderPullRequestDiscovery(pullRequests)}
+      <div class="add-manual-entry">
+        <div class="add-field">
+          <input
+            name="url"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="owner/repo#1234"
+            aria-label="GitHub repository, Actions URL, or pull request slug"
+            aria-describedby="add-form-hint"
+          />
+          <div class="add-field-actions">
+            <button class="add-form-submit" type="submit">Add</button>
+          </div>
+        </div>
+        <p class="form-hint" id="add-form-hint">or https://github.com/OWNER/REPO/actions/runs/RUN_ID</p>
+        ${addError ? `<p class="form-error">${escapeHtml(addError)}</p>` : ""}
+      </div>
     </form>
   `;
+}
+
+function renderPullRequestDiscovery(pullRequests: AuthoredOpenPullRequest[]): string {
+  if (pullRequestDiscovery.status === "idle" || pullRequestDiscovery.status === "loading") {
+    return `<p class="add-discovery-status">Finding PRs…</p>`;
+  }
+
+  if (pullRequestDiscovery.status === "error") {
+    return `
+      <div class="add-discovery-status add-discovery-error">
+        <span title="${escapeHtml(pullRequestDiscovery.error)}">Couldn’t find PRs</span>
+        <button type="button" data-action="retry-pr-discovery">Retry</button>
+      </div>
+    `;
+  }
+
+  if (pullRequests.length === 0) {
+    return `<p class="add-discovery-status">No unwatched PRs</p>`;
+  }
+
+  return `
+    <ul class="add-discovery-list">
+      ${pullRequests.map((pullRequest) => {
+        const id = getPullRequestDiscoveryId(pullRequest);
+        const updated = formatDiscoveredPullRequestDate(pullRequest.updatedAt);
+        const prState = pullRequest.isDraft
+          ? { label: "Draft", tone: "draft" as const }
+          : { label: "Ready", tone: "ready" as const };
+
+        return `
+        <li class="add-discovery-item">
+          <span class="add-discovery-leading" aria-hidden="true">
+            ${renderPrStateIcon(prState, "add-discovery-pr-icon")}
+          </span>
+          <span class="add-discovery-details">
+            <span class="watch-label add-discovery-label">
+              <button
+                class="watch-title-link add-discovery-pr-title"
+                type="button"
+                data-action="open-github-url"
+                data-url="${escapeHtml(pullRequest.url)}"
+                title="Open on GitHub"
+                aria-label="Open ${escapeHtml(pullRequest.title)} on GitHub"
+              ><span class="watch-title-text">${renderTitleMarkup(pullRequest.title)}</span></button>
+              <span class="watch-title-reference">#${escapeHtml(pullRequest.number)}</span>
+            </span>
+            <span class="watch-meta add-discovery-meta">
+              <span class="watch-meta-text">${escapeHtml(`${pullRequest.owner}/${pullRequest.repo}`)}${updated ? ` · Updated ${escapeHtml(updated)}` : ""}</span>
+            </span>
+          </span>
+          <button
+            class="add-discovery-add"
+            type="button"
+            data-action="add-discovered-pr"
+            data-pr-id="${escapeHtml(id)}"
+            title="Add pull request"
+            aria-label="Add ${escapeHtml(`${pullRequest.owner}/${pullRequest.repo} pull request ${pullRequest.number}`)}"
+          >+</button>
+          <button
+            class="add-discovery-dismiss"
+            type="button"
+            data-action="dismiss-discovered-pr"
+            data-pr-id="${escapeHtml(id)}"
+            title="Dismiss suggestion"
+            aria-label="Dismiss ${escapeHtml(`${pullRequest.owner}/${pullRequest.repo} pull request ${pullRequest.number}`)}"
+          >×</button>
+        </li>
+      `;
+      }).join("")}
+    </ul>
+  `;
+}
+
+function formatDiscoveredPullRequestDate(value: string | undefined): string | undefined {
+  if (!value || !Number.isFinite(Date.parse(value))) {
+    return undefined;
+  }
+
+  return new Date(value).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function renderWatchGroup(group: WatchGroupViewModel): string {
@@ -1677,7 +1780,10 @@ function bindEvents(): void {
       isClearMenuOpen = false;
       addError = undefined;
       render();
-      app.querySelector<HTMLInputElement>('input[name="url"]')?.focus();
+
+      if (isAdding) {
+        void discoverAuthoredPullRequests();
+      }
     });
   }
 
@@ -1720,6 +1826,33 @@ function bindEvents(): void {
       render();
     },
   );
+
+  app.querySelector<HTMLButtonElement>('[data-action="retry-pr-discovery"]')?.addEventListener(
+    "click",
+    () => {
+      void discoverAuthoredPullRequests(true);
+    },
+  );
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="add-discovered-pr"]')) {
+    button.addEventListener("click", () => {
+      const pullRequest = findDiscoveredPullRequest(button.dataset.prId);
+
+      if (pullRequest) {
+        void addDiscoveredPullRequest(pullRequest);
+      }
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="dismiss-discovered-pr"]')) {
+    button.addEventListener("click", () => {
+      const pullRequest = findDiscoveredPullRequest(button.dataset.prId);
+
+      if (pullRequest) {
+        void dismissDiscoveredPullRequest(pullRequest);
+      }
+    });
+  }
 
   app.querySelector<HTMLButtonElement>('[data-action="toggle-clear-menu"]')?.addEventListener(
     "click",
@@ -2594,6 +2727,106 @@ async function addWatchedRepository(repo: Pick<WatchedRepo, "owner" | "repo">): 
   void refreshWatchedRepoIcon(repo);
 }
 
+async function addDiscoveredPullRequest(pullRequest: AuthoredOpenPullRequest): Promise<void> {
+  try {
+    await controller.add({
+      kind: "pr",
+      owner: pullRequest.owner,
+      repo: pullRequest.repo,
+      prNumber: pullRequest.number,
+      url: pullRequest.url,
+    });
+    addError = undefined;
+    render();
+  } catch (error) {
+    addError = error instanceof Error ? error.message : String(error);
+    render();
+  }
+}
+
+async function dismissDiscoveredPullRequest(pullRequest: AuthoredOpenPullRequest): Promise<void> {
+  const id = getPullRequestDiscoveryId(pullRequest);
+
+  if (settings.dismissedPullRequests.includes(id)) {
+    return;
+  }
+
+  try {
+    await updateAppSettings({
+      ...settings,
+      dismissedPullRequests: [...settings.dismissedPullRequests, id],
+    }, true);
+    addError = undefined;
+  } catch (error) {
+    addError = error instanceof Error ? error.message : String(error);
+  }
+
+  render();
+}
+
+function findDiscoveredPullRequest(id: string | undefined): AuthoredOpenPullRequest | undefined {
+  return id
+    ? getDiscoveredUnwatchedPullRequests().find(
+      (pullRequest) => getPullRequestDiscoveryId(pullRequest) === id,
+    )
+    : undefined;
+}
+
+function getDiscoveredUnwatchedPullRequests(): AuthoredOpenPullRequest[] {
+  if (pullRequestDiscovery.status !== "loaded") {
+    return [];
+  }
+
+  const watchedPullRequestIds = controller.getWatches().flatMap((watch) =>
+    watch.target.kind === "pr"
+      ? [getPullRequestDiscoveryId({
+        owner: watch.target.owner,
+        repo: watch.target.repo,
+        number: watch.target.prNumber,
+      })]
+      : [],
+  );
+
+  return getUnwatchedPullRequests(
+    pullRequestDiscovery.pullRequests,
+    settings.watchedRepos,
+    watchedPullRequestIds,
+    settings.dismissedPullRequests,
+  );
+}
+
+async function discoverAuthoredPullRequests(force = false): Promise<void> {
+  if (pullRequestDiscovery.status === "loading") {
+    return;
+  }
+
+  if (
+    !force &&
+    pullRequestDiscovery.status === "loaded" &&
+    Date.now() - pullRequestDiscovery.loadedAt < 60_000
+  ) {
+    return;
+  }
+
+  pullRequestDiscovery = { status: "loading" };
+  render();
+
+  try {
+    const pullRequests = isDemoMode
+      ? await fetchDemoAuthoredOpenPullRequests()
+      : await fetchAuthoredOpenPullRequests();
+    pullRequestDiscovery = { status: "loaded", pullRequests, loadedAt: Date.now() };
+  } catch (error) {
+    console.warn("Could not discover open pull requests.", error);
+    pullRequestDiscovery = {
+      status: "error",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  render();
+}
+
 async function refreshWatchedRepoIcon(repo: Pick<WatchedRepo, "owner" | "repo">): Promise<void> {
   const repoKey = getWatchedRepoKey(repo);
   const current = settings.watchedRepos.find((watchedRepo) => getWatchedRepoKey(watchedRepo) === repoKey);
@@ -3440,6 +3673,29 @@ async function fetchDemoOpenPullRequests(): Promise<OpenPullRequest[]> {
       headBranch: "feat/popup-spacing",
       updatedAt: "2026-05-17T11:30:00Z",
       url: "https://github.com/getsentry/sentry/pull/13",
+    },
+  ];
+}
+
+async function fetchDemoAuthoredOpenPullRequests(): Promise<AuthoredOpenPullRequest[]> {
+  return [
+    {
+      owner: "getsentry",
+      repo: "relay",
+      number: "812",
+      title: "Keep discovery results compact",
+      isDraft: false,
+      updatedAt: "2026-08-18T12:45:00Z",
+      url: "https://github.com/getsentry/relay/pull/812",
+    },
+    {
+      owner: "getsentry",
+      repo: "seer",
+      number: "94",
+      title: "Improve workflow status handling",
+      isDraft: true,
+      updatedAt: "2026-08-18T11:30:00Z",
+      url: "https://github.com/getsentry/seer/pull/94",
     },
   ];
 }

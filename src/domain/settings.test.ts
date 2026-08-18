@@ -6,6 +6,7 @@ describe("normalizeAppSettings", () => {
     expect(defaultAppSettings).toEqual({
       watchedRepos: [],
       repoOrder: [],
+      dismissedPullRequests: [],
     });
   });
 
@@ -23,6 +24,11 @@ describe("normalizeAppSettings", () => {
           "getsentry/sentry",
           "missing-owner",
         ],
+        dismissedPullRequests: [
+          "GetSentry/Sentry#123",
+          "getsentry/sentry#123",
+          "invalid",
+        ],
       }),
     ).toEqual({
       watchedRepos: [
@@ -30,6 +36,7 @@ describe("normalizeAppSettings", () => {
         { owner: "jpnurmi", repo: "gha-watch", pullRequestScope: "all" },
       ],
       repoOrder: ["jpnurmi/gha-watch", "getsentry/sentry"],
+      dismissedPullRequests: ["getsentry/sentry#123"],
     });
   });
 });

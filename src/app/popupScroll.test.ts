@@ -19,6 +19,14 @@ describe("replacePopupHtmlPreservingScroll", () => {
     expect(root.watchListScrollTop).toBeUndefined();
   });
 
+  it("keeps the discovery list scroll offset when a suggestion is removed", () => {
+    const root = createPopupRoot(undefined, undefined, 132);
+
+    replacePopupHtmlPreservingScroll(root, '<ul class="add-discovery-list">updated</ul>');
+
+    expect(root.discoveryListScrollTop).toBe(132);
+  });
+
   it("keeps the add input value and focus when popup content is replaced", () => {
     const root = createPopupRoot(undefined, {
       focused: true,
@@ -53,11 +61,16 @@ type FakeAddInputState = FakeAddInputOptions & {
 function createPopupRoot(
   initialScrollTop: number | undefined,
   initialInput?: FakeAddInputOptions,
+  initialDiscoveryScrollTop?: number,
 ): PopupRenderRoot & {
   addInputState: FakeAddInputState | undefined;
+  discoveryListScrollTop: number | undefined;
   watchListScrollTop: number | undefined;
 } {
   let watchList = initialScrollTop === undefined ? undefined : { scrollTop: initialScrollTop };
+  let discoveryList = initialDiscoveryScrollTop === undefined
+    ? undefined
+    : { scrollTop: initialDiscoveryScrollTop };
   const ownerDocument: { activeElement: unknown } = { activeElement: undefined };
   let addInput = initialInput ? createAddInput(ownerDocument, initialInput) : undefined;
   let markup = "";
@@ -81,9 +94,15 @@ function createPopupRoot(
     get watchListScrollTop() {
       return watchList?.scrollTop;
     },
+    get discoveryListScrollTop() {
+      return discoveryList?.scrollTop;
+    },
     set innerHTML(value: string) {
       markup = value;
       watchList = initialScrollTop === undefined ? undefined : { scrollTop: 0 };
+      discoveryList = value.includes('class="add-discovery-list"')
+        ? { scrollTop: 0 }
+        : undefined;
       addInput = value.includes('name="url"') ? createAddInput(ownerDocument) : undefined;
     },
     get innerHTML() {
@@ -95,6 +114,10 @@ function createPopupRoot(
         return watchList;
       }
 
+      if (selector === ".add-discovery-list") {
+        return discoveryList;
+      }
+
       if (selector === 'input[name="url"]') {
         return addInput;
       }
@@ -103,6 +126,7 @@ function createPopupRoot(
     },
   } as unknown as PopupRenderRoot & {
     addInputState: FakeAddInputState | undefined;
+    discoveryListScrollTop: number | undefined;
     watchListScrollTop: number | undefined;
   };
 }
