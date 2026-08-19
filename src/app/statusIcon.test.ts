@@ -13,6 +13,11 @@ const activeUnseenTrayIcon = readFileSync(
   new URL("../../src-tauri/icons/tray-active-unseen.svg", import.meta.url),
   "utf8",
 );
+const errorTrayIcon = readFileSync(new URL("../../src-tauri/icons/tray-error.svg", import.meta.url), "utf8");
+const errorUnseenTrayIcon = readFileSync(
+  new URL("../../src-tauri/icons/tray-error-unseen.svg", import.meta.url),
+  "utf8",
+);
 
 describe("getStatusIconSvg", () => {
   it.each(["success", "failure", "error", "cancelled", "skipped"] as const)(
@@ -51,6 +56,13 @@ describe("getStatusIconSvg", () => {
     }
     for (const icon of [mixedTrayIcon, mixedUnseenTrayIcon]) {
       expect(icon).toContain('<circle cx="35" cy="34" r="9.5" fill="#f85149"');
+    }
+  });
+
+  it("uses an unbadged red glyph for errors", () => {
+    for (const icon of [errorTrayIcon, errorUnseenTrayIcon]) {
+      expect(icon).toContain('<path fill="#f85149"');
+      expect(icon).not.toContain("<circle");
     }
   });
 });

@@ -33,7 +33,16 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
     (watch, index) => watch.active && Boolean(watchStates[index]?.hasFailedChildren),
   );
 
-  if (hasActiveFailures || (active.length > 0 && (errors.length > 0 || failures.length > 0))) {
+  if (errors.length > 0) {
+    return {
+      status: "error",
+      hasUnseenChanges,
+      label: `${errors.length + failures.length} watch issue`,
+      tooltip: "GHA Watch has failed or errored watches",
+    };
+  }
+
+  if (hasActiveFailures || (active.length > 0 && failures.length > 0)) {
     return {
       status: "mixed",
       hasUnseenChanges,
@@ -42,7 +51,7 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
     };
   }
 
-  if (errors.length > 0 || failures.length > 0) {
+  if (failures.length > 0) {
     return {
       status: "error",
       hasUnseenChanges,

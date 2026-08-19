@@ -185,6 +185,22 @@ describe("createTrayState", () => {
     });
   });
 
+  it("uses an error tray icon when an active watch cannot refresh", () => {
+    expect(
+      createTrayState([
+        watch({
+          active: true,
+          error: "gh: API rate limit exceeded (HTTP 403)",
+        }),
+      ]),
+    ).toEqual({
+      status: "error",
+      hasUnseenChanges: false,
+      label: "1 watch issue",
+      tooltip: "GHA Watch has failed or errored watches",
+    });
+  });
+
   it("uses an error tray icon when any watch failed or errored", () => {
     expect(
       createTrayState([
