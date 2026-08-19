@@ -1724,7 +1724,11 @@ export function createWatchController(
           (
             watch.active ||
             pollOptions.includeInactive ||
-            (watch.target.kind === "pr" && isDeemphasizedPullRequest(watch))
+            (
+              watch.target.kind === "pr" &&
+              watch.sourceState !== "merged" &&
+              watch.sourceState !== "closed"
+            )
           ) &&
           (!watchIdSet || watchIdSet.has(watch.id)),
       );

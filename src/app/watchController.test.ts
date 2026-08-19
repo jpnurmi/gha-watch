@@ -2413,6 +2413,41 @@ describe("watchController", () => {
     ]);
   });
 
+  it("refreshes inactive open PRs when checks are rerun", async () => {
+    const { deps, fetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "Pull request #51",
+        url: prTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [
+      {
+        id: getWatchId(prTarget),
+        target: prTarget,
+        sourceState: "ready",
+        label: "Fix cancelled checks",
+        status: "completed:cancelled",
+        lastSeenStatus: "completed:cancelled",
+        lastState: { status: "completed", conclusion: "cancelled" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+
+    await controller.pollNow();
+
+    expect(fetches).toEqual([prTarget]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        status: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+      },
+    ]);
+  });
+
   it("refreshes inactive draft PRs without notifying", async () => {
     const { deps, fetches, notificationRecords } = createDeps([
       {
@@ -3653,7 +3688,7 @@ describe("watchController", () => {
       throw new Error("run state unavailable");
     };
     deps.fetchPullRequestDetails = async () => [{
-      state: "ready",
+      state: "closed",
       title: "Updated pull request",
     }];
     const controller = createWatchController(deps, [
@@ -3667,6 +3702,7 @@ describe("watchController", () => {
         ...existingWatch(),
         id: "getsentry/sentry/pull/51",
         target: prTarget,
+        sourceState: "closed",
         label: "Old pull request title",
         status: "completed:success",
         active: false,
