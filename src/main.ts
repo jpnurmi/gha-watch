@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
+import { createAdaptivePollingCoordinator } from "./app/adaptivePolling";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import {
   createDesktopNotificationActionHandler,
@@ -130,9 +131,7 @@ import { createSettingsGistRemote } from "./platform/settingsGist";
 import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
-const pollIntervalMs = 30_000;
 const rerunRefreshDelayMs = 1_000;
-const freshnessStaleAfterMs = pollIntervalMs * 2;
 const treeIndentStepPx = 26;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
 document.documentElement.dataset.platform = getUiPlatform(navigator.userAgent);
@@ -325,6 +324,16 @@ const controller = createWatchController(
   isDemoMode ? [] : loadWatchSuppressions(),
   isDemoMode ? undefined : loadWorkflowDiscoveryState(),
 );
+const polling = createAdaptivePollingCoordinator({
+  clearTimeout: window.clearTimeout.bind(window),
+  hasActiveWatches: () => controller.getWatches().some(
+    (watch) => getWatchTriageState(watch) === "inbox" && watch.active,
+  ),
+  poll: () => {
+    void poll();
+  },
+  setTimeout: window.setTimeout.bind(window),
+});
 
 function notifyStatusChange(notification: WatchNotification): Promise<void> {
   return sendDesktopNotification(notification);
@@ -359,6 +368,7 @@ controller.subscribe(() => {
   render();
   void updateTrayIndicator();
   void refreshListedRepositoryCiStatuses();
+  polling.scheduleNext();
 });
 
 render();
@@ -366,9 +376,7 @@ void updateTrayIndicator();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void refreshListedRepositoryCiStatuses();
-window.setInterval(() => {
-  void poll();
-}, pollIntervalMs);
+polling.scheduleNext();
 void refreshSettingsAndStatuses();
 document.addEventListener("click", (event) => {
   const target = event.target;
@@ -416,6 +424,7 @@ window.addEventListener("keydown", (event) => {
 });
 void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   isPopupOpen = focused;
+  polling.handleFocusChanged(focused);
 
   if (focused) {
     render();
@@ -473,7 +482,7 @@ function renderFreshnessIndicator(): string {
     lastRefreshFailed: lastRefreshFailed || lastRefreshDegraded,
     lastUpdatedAt: lastSuccessfulRefreshAt?.getTime(),
     now: Date.now(),
-    staleAfterMs: freshnessStaleAfterMs,
+    staleAfterMs: polling.getIntervalMs() * 2,
   });
   const refreshTitle = lastSuccessfulRefreshAt
     ? `Last updated at ${lastSuccessfulRefreshAt.toLocaleTimeString()}${lastRefreshFailed ? ". Latest refresh failed." : lastRefreshDegraded ? ". Latest refresh partially failed." : ""}`
@@ -3466,6 +3475,7 @@ async function poll(forceVisibleData = false): Promise<void> {
     console.warn("Could not refresh GitHub status.", error);
   } finally {
     isPolling = false;
+    polling.scheduleNext();
     render();
   }
 }
