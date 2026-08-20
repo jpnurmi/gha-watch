@@ -2,7 +2,7 @@ import type { WatchRecord } from "../domain/watches";
 import { getWatchState, getWatchTriageState, hasUnseenStatusChange } from "../domain/watches";
 import { isDeemphasizedPullRequest } from "./viewModel";
 
-export type TrayStatus = "idle" | "active" | "mixed" | "cancelled" | "error" | "success";
+export type TrayStatus = "idle" | "active" | "mixed" | "cancelled" | "error" | "app-error" | "success";
 
 export type TrayState = {
   status: TrayStatus;
@@ -35,7 +35,7 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
 
   if (errors.length > 0) {
     return {
-      status: "error",
+      status: "app-error",
       hasUnseenChanges,
       label: `${errors.length + failures.length} watch issue`,
       tooltip: "GHA Watch has failed or errored watches",

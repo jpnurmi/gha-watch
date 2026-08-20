@@ -185,7 +185,7 @@ describe("createTrayState", () => {
     });
   });
 
-  it("uses an error tray icon when an active watch cannot refresh", () => {
+  it("uses an app-error tray icon when an active watch cannot refresh", () => {
     expect(
       createTrayState([
         watch({
@@ -194,7 +194,7 @@ describe("createTrayState", () => {
         }),
       ]),
     ).toEqual({
-      status: "error",
+      status: "app-error",
       hasUnseenChanges: false,
       label: "1 watch issue",
       tooltip: "GHA Watch has failed or errored watches",

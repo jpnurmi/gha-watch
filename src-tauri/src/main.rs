@@ -456,12 +456,14 @@ fn show_clickable_notification(
 fn tray_icon_for_status(status: &str, has_unseen_changes: bool) -> Result<Image<'static>, String> {
     let bytes = match (status, has_unseen_changes) {
         ("active", true) => include_bytes!("../icons/tray-active-unseen.png").as_slice(),
+        ("app-error", true) => include_bytes!("../icons/tray-app-error-unseen.png").as_slice(),
         ("mixed", true) => include_bytes!("../icons/tray-mixed-unseen.png").as_slice(),
         ("cancelled", true) => include_bytes!("../icons/tray-cancelled-unseen.png").as_slice(),
         ("error", true) => include_bytes!("../icons/tray-error-unseen.png").as_slice(),
         ("success", true) => include_bytes!("../icons/tray-success-unseen.png").as_slice(),
         (_, true) => include_bytes!("../icons/tray-idle-unseen.png").as_slice(),
         ("active", false) => include_bytes!("../icons/tray-active.png").as_slice(),
+        ("app-error", false) => include_bytes!("../icons/tray-app-error.png").as_slice(),
         ("mixed", false) => include_bytes!("../icons/tray-mixed.png").as_slice(),
         ("cancelled", false) => include_bytes!("../icons/tray-cancelled.png").as_slice(),
         ("error", false) => include_bytes!("../icons/tray-error.png").as_slice(),
@@ -1268,6 +1270,12 @@ mod tests {
     fn loads_mixed_tray_icons() {
         assert!(tray_icon_for_status("mixed", false).is_ok());
         assert!(tray_icon_for_status("mixed", true).is_ok());
+    }
+
+    #[test]
+    fn loads_app_error_tray_icons() {
+        assert!(tray_icon_for_status("app-error", false).is_ok());
+        assert!(tray_icon_for_status("app-error", true).is_ok());
     }
 
     #[cfg(target_os = "linux")]

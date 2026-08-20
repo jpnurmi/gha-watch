@@ -18,6 +18,14 @@ const errorUnseenTrayIcon = readFileSync(
   new URL("../../src-tauri/icons/tray-error-unseen.svg", import.meta.url),
   "utf8",
 );
+const appErrorTrayIcon = readFileSync(
+  new URL("../../src-tauri/icons/tray-app-error.svg", import.meta.url),
+  "utf8",
+);
+const appErrorUnseenTrayIcon = readFileSync(
+  new URL("../../src-tauri/icons/tray-app-error-unseen.svg", import.meta.url),
+  "utf8",
+);
 
 describe("getStatusIconSvg", () => {
   it.each(["success", "failure", "error", "cancelled", "skipped"] as const)(
@@ -59,8 +67,14 @@ describe("getStatusIconSvg", () => {
     }
   });
 
-  it("uses an unbadged red glyph for errors", () => {
+  it("uses the red status badge for failed builds", () => {
     for (const icon of [errorTrayIcon, errorUnseenTrayIcon]) {
+      expect(icon).toContain('<circle cx="35" cy="34" r="9.5" fill="#f85149"');
+    }
+  });
+
+  it("uses an unbadged red glyph for app errors", () => {
+    for (const icon of [appErrorTrayIcon, appErrorUnseenTrayIcon]) {
       expect(icon).toContain('<path fill="#f85149"');
       expect(icon).not.toContain("<circle");
     }
