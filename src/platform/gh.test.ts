@@ -58,6 +58,18 @@ function createSequenceExecutor(results: Array<Awaited<ReturnType<ShellExecutor[
   };
 }
 
+function createIncludedResult(
+  status: 200 | 304,
+  body = "",
+  etag = '"test-etag"',
+): Awaited<ReturnType<ShellExecutor["execute"]>> {
+  return {
+    code: status === 304 ? 1 : 0,
+    stdout: `HTTP/2.0 ${status} ${status === 304 ? "Not Modified" : "OK"}\r\nEtag: ${etag}\r\n\r\n${body}`,
+    stderr: "",
+  };
+}
+
 describe("fetchWatchState", () => {
   it("fetches run state and pull request references via gh api", async () => {
     const { executor, calls } = createExecutor({
@@ -115,7 +127,7 @@ describe("fetchWatchState", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: ["api", "repos/getsentry/sentry/actions/runs/123"],
+        args: ["api", "--include", "repos/getsentry/sentry/actions/runs/123"],
       },
     ]);
   });
@@ -152,6 +164,48 @@ describe("fetchWatchState", () => {
         executor,
       ),
     ).resolves.not.toHaveProperty("prNumber");
+  });
+
+  it("reuses a cached run response after a conditional 304", async () => {
+    const target = {
+      kind: "run",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      url: "https://github.com/getsentry/sentry/actions/runs/123",
+    } as const;
+    const body = JSON.stringify({
+      status: "completed",
+      conclusion: "success",
+      display_title: "Run tests",
+      name: "CI",
+      html_url: target.url,
+    });
+    const { executor, calls } = createSequenceExecutor([
+      createIncludedResult(200, body, '"run-v1"'),
+      createIncludedResult(304, "", '"run-v1"'),
+    ]);
+
+    const first = await fetchWatchState(target, executor);
+    const second = await fetchWatchState(target, executor);
+
+    expect(second).toEqual(first);
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: ["api", "--include", "repos/getsentry/sentry/actions/runs/123"],
+      },
+      {
+        program: "gh",
+        args: [
+          "api",
+          "--include",
+          "-H",
+          'If-None-Match: "run-v1"',
+          "repos/getsentry/sentry/actions/runs/123",
+        ],
+      },
+    ]);
   });
 
   it("marks in-progress run state when a child job has already failed", async () => {
@@ -207,11 +261,11 @@ describe("fetchWatchState", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: ["api", "repos/getsentry/sentry/actions/runs/123"],
+        args: ["api", "--include", "repos/getsentry/sentry/actions/runs/123"],
       },
       {
         program: "gh",
-        args: ["api", "repos/getsentry/sentry/actions/runs/123/jobs?per_page=100"],
+        args: ["api", "--include", "repos/getsentry/sentry/actions/runs/123/jobs?per_page=100"],
       },
     ]);
   });
@@ -263,7 +317,7 @@ describe("fetchWatchState", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: ["api", "repos/getsentry/sentry/actions/jobs/456"],
+        args: ["api", "--include", "repos/getsentry/sentry/actions/jobs/456"],
       },
     ]);
   });
@@ -703,36 +757,35 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       },
       {
         code: 0,
-        stdout: JSON.stringify([
-          {
-            databaseId: 101,
-            displayTitle: "Build main",
+        stdout: JSON.stringify({
+          workflow_runs: [{
+            id: 101,
+            display_title: "Build main",
             event: "push",
-            workflowName: "CI",
-            headBranch: "main",
-            headSha: "abc123",
+            name: "CI",
+            head_branch: "main",
+            head_sha: "abc123",
             status: "completed",
             conclusion: "success",
-            createdAt: "2026-05-17T12:00:00Z",
-            updatedAt: "2026-05-17T12:05:00Z",
-            url: "https://github.com/getsentry/sentry/actions/runs/101",
-            workflowDatabaseId: 201,
-          },
-          {
-            databaseId: 102,
-            displayTitle: "Lint main",
+            created_at: "2026-05-17T12:00:00Z",
+            updated_at: "2026-05-17T12:05:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/101",
+            workflow_id: 201,
+          }, {
+            id: 102,
+            display_title: "Lint main",
             event: "push",
-            workflowName: "Lint",
-            headBranch: "main",
-            headSha: "abc123",
+            name: "Lint",
+            head_branch: "main",
+            head_sha: "abc123",
             status: "completed",
             conclusion: "skipped",
-            createdAt: "2026-05-17T12:01:00Z",
-            updatedAt: "2026-05-17T12:06:00Z",
-            url: "https://github.com/getsentry/sentry/actions/runs/102",
-            workflowDatabaseId: 202,
-          },
-        ]),
+            created_at: "2026-05-17T12:01:00Z",
+            updated_at: "2026-05-17T12:06:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/102",
+            workflow_id: 202,
+          }],
+        }),
         stderr: "",
       },
     ]);
@@ -774,28 +827,66 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
     expect(calls).toEqual([
       {
         program: "gh",
-        args: ["api", "repos/getsentry/sentry/commits/main"],
+        args: ["api", "--include", "repos/getsentry/sentry/commits/main"],
       },
       {
         program: "gh",
         args: [
-          "run",
-          "list",
-          "-R",
-          "getsentry/sentry",
-          "--branch",
-          "main",
-          "--commit",
-          "abc123",
-          "--event",
-          "push",
-          "--limit",
-          "100",
-          "--json",
-          "databaseId,displayTitle,event,workflowDatabaseId,workflowName,headBranch,headSha,status,conclusion,createdAt,updatedAt,url",
+          "api",
+          "--include",
+          "repos/getsentry/sentry/actions/runs",
+          "--method",
+          "GET",
+          "-f",
+          "branch=main",
+          "-f",
+          "head_sha=abc123",
+          "-f",
+          "event=push",
+          "-F",
+          "per_page=100",
         ],
       },
     ]);
+  });
+
+  it("reuses cached default branch CI responses after conditional 304s", async () => {
+    const commit = JSON.stringify({ sha: "abc123" });
+    const runs = JSON.stringify({
+      workflow_runs: [{
+        id: 101,
+        display_title: "Build main",
+        event: "push",
+        name: "CI",
+        head_branch: "main",
+        head_sha: "abc123",
+        status: "completed",
+        conclusion: "success",
+        updated_at: "2026-05-17T12:05:00Z",
+        html_url: "https://github.com/getsentry/sentry/actions/runs/101",
+        workflow_id: 201,
+      }],
+    });
+    const { executor, calls } = createSequenceExecutor([
+      createIncludedResult(200, commit, '"commit-v1"'),
+      createIncludedResult(200, runs, '"runs-v1"'),
+      createIncludedResult(304, "", '"commit-v1"'),
+      createIncludedResult(304, "", '"runs-v1"'),
+    ]);
+    const target = { owner: "getsentry", repo: "sentry" };
+
+    const first = await fetchRepositoryDefaultBranchCiStatus(target, { defaultBranch: "main" }, executor);
+    const second = await fetchRepositoryDefaultBranchCiStatus(target, { defaultBranch: "main" }, executor);
+
+    expect(second).toEqual(first);
+    expect(calls[2].args).toEqual([
+      "api",
+      "--include",
+      "-H",
+      'If-None-Match: "commit-v1"',
+      "repos/getsentry/sentry/commits/main",
+    ]);
+    expect(calls[3].args).toContain('If-None-Match: "runs-v1"');
   });
 
   it("ignores same-branch workflow runs that are not push builds for the latest commit", async () => {
@@ -816,41 +907,39 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       },
       {
         code: 0,
-        stdout: JSON.stringify([
-          {
-            displayTitle: "Build main",
+        stdout: JSON.stringify({
+          workflow_runs: [{
+            display_title: "Build main",
             event: "push",
-            workflowName: "CI",
-            headBranch: "main",
-            headSha: "abc123",
+            name: "CI",
+            head_branch: "main",
+            head_sha: "abc123",
             status: "completed",
             conclusion: "success",
-            updatedAt: "2026-05-17T12:05:00Z",
-            url: "https://github.com/getsentry/sentry/actions/runs/123",
-          },
-          {
-            displayTitle: "Deploy main",
+            updated_at: "2026-05-17T12:05:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/123",
+          }, {
+            display_title: "Deploy main",
             event: "push",
-            workflowName: "Deploy",
-            headBranch: "main",
-            headSha: "older456",
+            name: "Deploy",
+            head_branch: "main",
+            head_sha: "older456",
             status: "in_progress",
             conclusion: "",
-            updatedAt: "2026-05-17T12:06:00Z",
-            url: "https://github.com/getsentry/sentry/actions/runs/456",
-          },
-          {
-            displayTitle: "Manual release",
+            updated_at: "2026-05-17T12:06:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/456",
+          }, {
+            display_title: "Manual release",
             event: "workflow_dispatch",
-            workflowName: "Release",
-            headBranch: "main",
-            headSha: "abc123",
+            name: "Release",
+            head_branch: "main",
+            head_sha: "abc123",
             status: "in_progress",
             conclusion: "",
-            updatedAt: "2026-05-17T12:07:00Z",
-            url: "https://github.com/getsentry/sentry/actions/runs/789",
-          },
-        ]),
+            updated_at: "2026-05-17T12:07:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/789",
+          }],
+        }),
         stderr: "",
       },
     ]);
@@ -892,19 +981,19 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       },
       {
         code: 0,
-        stdout: JSON.stringify([
-          {
-            displayTitle: "Build main",
+        stdout: JSON.stringify({
+          workflow_runs: [{
+            display_title: "Build main",
             event: "push",
-            workflowName: "CI",
-            headBranch: "main",
-            headSha: "abc123",
+            name: "CI",
+            head_branch: "main",
+            head_sha: "abc123",
             status: "in_progress",
             conclusion: "",
-            updatedAt: "2026-05-17T12:05:00Z",
-            url: "https://github.com/getsentry/sentry/actions/runs/123",
-          },
-        ]),
+            updated_at: "2026-05-17T12:05:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/123",
+          }],
+        }),
         stderr: "",
       },
     ]);
@@ -946,19 +1035,19 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       },
       {
         code: 0,
-        stdout: JSON.stringify([
-          {
-            displayTitle: "Build main",
+        stdout: JSON.stringify({
+          workflow_runs: [{
+            display_title: "Build main",
             event: "push",
-            workflowName: "CI",
-            headBranch: "main",
-            headSha: "abc123",
+            name: "CI",
+            head_branch: "main",
+            head_sha: "abc123",
             status: "completed",
             conclusion: "failure",
-            updatedAt: "2026-05-17T12:05:00Z",
-            url: "https://github.com/getsentry/sentry/actions/runs/123",
-          },
-        ]),
+            updated_at: "2026-05-17T12:05:00Z",
+            html_url: "https://github.com/getsentry/sentry/actions/runs/123",
+          }],
+        }),
         stderr: "",
       },
     ]);
