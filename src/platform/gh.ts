@@ -16,6 +16,15 @@ export type ShellExecutor = {
   execute(program: string, args: string[]): Promise<ShellResult>;
 };
 
+type ConditionalApiCacheEntry = {
+  body: string;
+  etag: string;
+};
+
+const conditionalApiCaches = new WeakMap<ShellExecutor, Map<string, ConditionalApiCacheEntry>>();
+const conditionalApiCacheLimit = 1_000;
+let sharedTauriShellExecutor: ShellExecutor | undefined;
+
 export type RerunMode = "all" | "failed";
 
 export type WatchSnapshot = WatchState & {
@@ -263,6 +272,7 @@ type WorkflowRunApiResponse = {
   run_started_at?: string;
   status?: string;
   updated_at?: string;
+  workflow_id?: number | string;
 };
 
 type WorkflowRunPullRequestResponse = PullRequestReference & {
@@ -311,13 +321,9 @@ export async function fetchWatchState(
     }
 
     if (target.kind === "run") {
-      const result = await executor.execute("gh", [
-        "api",
+      const response = await fetchConditionalApiJson<RunViewResponse>(executor, [
         `repos/${target.owner}/${target.repo}/actions/runs/${target.runId}`,
       ]);
-
-      assertSuccessfulGhResult(result);
-      const response = parseJson<RunViewResponse>(result.stdout);
       const failedChildren = shouldFetchRunJobs(response)
         ? await fetchRunFailedChildren(target, executor)
         : undefined;
@@ -325,13 +331,10 @@ export async function fetchWatchState(
       return toRunSnapshot(target, response, failedChildren);
     }
 
-    const result = await executor.execute("gh", [
-      "api",
+    const response = await fetchConditionalApiJson<JobViewResponse>(executor, [
       `repos/${target.owner}/${target.repo}/actions/jobs/${target.jobId}`,
     ]);
-
-    assertSuccessfulGhResult(result);
-    return toJobSnapshot(target.url, parseJson<JobViewResponse>(result.stdout));
+    return toJobSnapshot(target.url, response);
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -372,32 +375,28 @@ export async function fetchRepositoryDefaultBranchCiStatus(
 ): Promise<RepositoryCiStatus> {
   try {
     const defaultBranch = options.defaultBranch ?? await fetchRepositoryDefaultBranch(target, executor);
-    const commitResult = await executor.execute("gh", [
-      "api",
+    const commit = await fetchConditionalApiJson<CommitViewResponse>(executor, [
       `repos/${target.owner}/${target.repo}/commits/${encodeURIComponent(defaultBranch)}`,
     ]);
-    assertSuccessfulGhResult(commitResult);
-    const commitSha = requiredString(parseJson<CommitViewResponse>(commitResult.stdout).sha, "default branch commit");
-    const result = await executor.execute("gh", [
-      "run",
-      "list",
-      "-R",
-      `${target.owner}/${target.repo}`,
-      "--branch",
-      defaultBranch,
-      "--commit",
-      commitSha,
-      "--event",
-      "push",
-      "--limit",
-      "100",
-      "--json",
-      "databaseId,displayTitle,event,workflowDatabaseId,workflowName,headBranch,headSha,status,conclusion,createdAt,updatedAt,url",
+    const commitSha = requiredString(commit.sha, "default branch commit");
+    const response = await fetchConditionalApiJson<WorkflowRunsApiResponse>(executor, [
+      `repos/${target.owner}/${target.repo}/actions/runs`,
+      "--method",
+      "GET",
+      "-f",
+      `branch=${defaultBranch}`,
+      "-f",
+      `head_sha=${commitSha}`,
+      "-f",
+      "event=push",
+      "-F",
+      "per_page=100",
     ]);
+    const runs = Array.isArray(response.workflow_runs)
+      ? response.workflow_runs.map(normalizeRepositoryCiWorkflowRun)
+      : [];
 
-    assertSuccessfulGhResult(result);
-
-    return summarizeRepositoryCiStatus(defaultBranch, commitSha, parseJson<WorkflowRunListResponse[]>(result.stdout));
+    return summarizeRepositoryCiStatus(defaultBranch, commitSha, runs);
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -1024,6 +1023,23 @@ function getRepositoryCiWorkflowStatuses(response: WorkflowRunListResponse[]): R
   return [...workflowsByKey.values()].sort(compareRepositoryCiWorkflowStatuses);
 }
 
+function normalizeRepositoryCiWorkflowRun(response: WorkflowRunApiResponse): WorkflowRunListResponse {
+  return {
+    conclusion: response.conclusion,
+    createdAt: response.created_at,
+    databaseId: response.id,
+    displayTitle: response.display_title,
+    event: response.event,
+    headBranch: response.head_branch,
+    headSha: response.head_sha,
+    status: response.status,
+    updatedAt: response.updated_at,
+    url: response.html_url,
+    workflowDatabaseId: response.workflow_id,
+    workflowName: response.name,
+  };
+}
+
 function parseRepositoryCiWorkflowRun(response: WorkflowRunListResponse | undefined): RepositoryCiWorkflowStatus | undefined {
   const status = response?.status?.trim();
   const url = response?.url?.trim();
@@ -1329,7 +1345,11 @@ function getActionsRunId(
 }
 
 export function createTauriShellExecutor(): ShellExecutor {
-  return {
+  if (sharedTauriShellExecutor) {
+    return sharedTauriShellExecutor;
+  }
+
+  sharedTauriShellExecutor = {
     async execute(program, args) {
       const { Command } = await import("@tauri-apps/plugin-shell");
       const commands =
@@ -1366,19 +1386,18 @@ export function createTauriShellExecutor(): ShellExecutor {
       throw lastError;
     },
   };
+
+  return sharedTauriShellExecutor;
 }
 
 async function fetchRunFailedChildren(
   target: Extract<WatchTarget, { kind: "run" }>,
   executor: ShellExecutor,
 ): Promise<boolean> {
-  const result = await executor.execute("gh", [
-    "api",
+  const response = await fetchConditionalApiJson<RunJobsResponse>(executor, [
     `repos/${target.owner}/${target.repo}/actions/runs/${target.runId}/jobs?per_page=100`,
   ]);
-
-  assertSuccessfulGhResult(result);
-  return runJobsHaveFailures(parseJson<RunJobsResponse>(result.stdout));
+  return runJobsHaveFailures(response);
 }
 
 function shouldFetchRunJobs(response: RunViewResponse): boolean {
@@ -1689,6 +1708,95 @@ function parseJson<T>(stdout: string): T {
   } catch {
     throw new Error("gh returned invalid JSON.");
   }
+}
+
+async function fetchConditionalApiJson<T>(executor: ShellExecutor, args: string[]): Promise<T> {
+  let cache = conditionalApiCaches.get(executor);
+
+  if (!cache) {
+    cache = new Map();
+    conditionalApiCaches.set(executor, cache);
+  }
+
+  const key = JSON.stringify(args);
+  const cached = cache.get(key);
+
+  if (cached) {
+    cache.delete(key);
+    cache.set(key, cached);
+  }
+
+  const result = await executor.execute("gh", [
+    "api",
+    "--include",
+    ...(cached ? ["-H", `If-None-Match: ${cached.etag}`] : []),
+    ...args,
+  ]);
+  const response = parseIncludedGhResponse(result.stdout);
+
+  if (response?.status === 304) {
+    if (!cached) {
+      throw new Error("gh returned 304 Not Modified without a cached response.");
+    }
+
+    return parseJson<T>(cached.body);
+  }
+
+  assertSuccessfulGhResult(result);
+
+  if (!response) {
+    return parseJson<T>(result.stdout);
+  }
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`GitHub returned HTTP ${response.status}.`);
+  }
+
+  if (response.etag) {
+    if (!cache.has(key) && cache.size >= conditionalApiCacheLimit) {
+      const oldestKey = cache.keys().next().value;
+
+      if (oldestKey !== undefined) {
+        cache.delete(oldestKey);
+      }
+    }
+
+    cache.set(key, { body: response.body, etag: response.etag });
+  } else {
+    cache.delete(key);
+  }
+
+  return parseJson<T>(response.body);
+}
+
+function parseIncludedGhResponse(stdout: string): {
+  body: string;
+  etag?: string;
+  status: number;
+} | undefined {
+  const statusMatch = stdout.match(/^HTTP\/\S+\s+(\d{3})\b/);
+
+  if (!statusMatch) {
+    return undefined;
+  }
+
+  const crlfEnd = stdout.indexOf("\r\n\r\n");
+  const lfEnd = stdout.indexOf("\n\n");
+  const headerEnd = crlfEnd >= 0 ? crlfEnd : lfEnd;
+
+  if (headerEnd < 0) {
+    throw new Error("gh returned HTTP headers without a response separator.");
+  }
+
+  const separatorLength = crlfEnd >= 0 ? 4 : 2;
+  const headers = stdout.slice(0, headerEnd);
+  const etag = headers.match(/^etag:\s*(.+)\r?$/im)?.[1]?.trim();
+
+  return {
+    body: stdout.slice(headerEnd + separatorLength),
+    ...(etag ? { etag } : {}),
+    status: Number(statusMatch[1]),
+  };
 }
 
 function assertSuccessfulGhResult(result: ShellResult, additionalSuccessCodes: number[] = []): void {
