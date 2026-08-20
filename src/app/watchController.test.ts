@@ -2205,6 +2205,71 @@ describe("watchController", () => {
     expect(controller.getWatches()[0]).toMatchObject({ sourceState: "merged" });
   });
 
+  it("applies prefetched pull request details when fallback lookup fails", async () => {
+    const otherTarget = {
+      ...prTarget,
+      prNumber: "52",
+      url: "https://github.com/getsentry/sentry/pull/52",
+    };
+    const { deps } = createDeps([]);
+    deps.fetchPullRequestDetails = async () => {
+      throw new Error("details unavailable");
+    };
+    const controller = createWatchController(deps, [
+      {
+        id: getWatchId(prTarget),
+        target: prTarget,
+        label: "Old prefetched title",
+        metadata: { prTitle: "Old prefetched title" },
+        sourceState: "ready",
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+      {
+        id: getWatchId(otherTarget),
+        target: otherTarget,
+        label: "Unresolved title",
+        metadata: { prTitle: "Unresolved title" },
+        sourceState: "ready",
+        status: "completed:success",
+        lastSeenStatus: "completed:success",
+        lastState: { status: "completed", conclusion: "success" },
+        active: false,
+        error: undefined,
+      },
+    ]);
+    const snapshot: WatchSnapshot = {
+      status: "completed",
+      conclusion: "success",
+      title: "Pull request",
+      url: prTarget.url,
+    };
+
+    const result = await controller.pollNow({
+      prefetchedPullRequestDetails: new Map([[
+        "getsentry/sentry#51",
+        { state: "draft", title: "Prefetched title" },
+      ]]),
+      prefetchedWatchSnapshots: new Map([
+        [getWatchId(prTarget), snapshot],
+        [getWatchId(otherTarget), { ...snapshot, url: otherTarget.url }],
+      ]),
+    });
+
+    expect(result.metadataFailures).toEqual([{
+      scope: "pull-request-details",
+      watchIds: [getWatchId(otherTarget)],
+      message: "details unavailable",
+    }]);
+    expect(controller.getWatches()).toMatchObject([
+      { label: "Prefetched title", sourceState: "draft" },
+      { label: "Unresolved title", sourceState: "ready" },
+    ]);
+  });
+
   it("rechecks inactive authored PRs when workflow reruns do not update the PR", async () => {
     const pullRequestTarget = {
       kind: "pr",

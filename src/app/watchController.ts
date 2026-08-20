@@ -529,6 +529,7 @@ export function createWatchController(
     const batch = [...uniqueTargets]
       .filter(([key]) => !detailsByKey.has(key))
       .map(([, target]) => target);
+    const failures: WatchMetadataFailure[] = [];
     let anyGithubRequestSucceeded = false;
 
     if (uniqueTargets.size === 0) {
@@ -548,24 +549,18 @@ export function createWatchController(
           }
         });
       } catch (error) {
-        return {
-          successfulWatchIds: [],
-          failures: [
-            {
-              scope: "pull-request-details",
-              watchIds: getWatchIdsForPullRequestTargets(watches, batch),
-              message: normalizeFailureMessage(error),
-            },
-          ],
-          anyGithubRequestSucceeded: false,
-        };
+        failures.push({
+          scope: "pull-request-details",
+          watchIds: getWatchIdsForPullRequestTargets(watches, batch),
+          message: normalizeFailureMessage(error),
+        });
       }
     }
 
     if (detailsByKey.size === 0) {
       return {
         successfulWatchIds: [],
-        failures: [],
+        failures,
         anyGithubRequestSucceeded,
       };
     }
@@ -593,7 +588,7 @@ export function createWatchController(
 
     return {
       successfulWatchIds,
-      failures: [],
+      failures,
       anyGithubRequestSucceeded,
     };
   }
