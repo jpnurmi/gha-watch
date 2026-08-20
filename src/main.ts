@@ -95,6 +95,7 @@ import {
   fetchAuthoredOpenPullRequests,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchOpenPullRequestsWithChecks,
   fetchPullRequestDetails,
   fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
@@ -299,6 +300,9 @@ const controller = createWatchController(
       : fetchWatchState,
     fetchActiveWorkflowRuns: isDemoMode ? fetchDemoActiveWorkflowRuns : fetchActiveWorkflowRuns,
     fetchOpenPullRequests: isDemoMode ? fetchDemoOpenPullRequests : fetchOpenPullRequests,
+    fetchOpenPullRequestsWithChecks: isDemoMode
+      ? fetchDemoOpenPullRequests
+      : fetchOpenPullRequestsWithChecks,
     fetchPullRequestDetails: isDemoMode
       ? async (targets) => targets.map(() => ({ state: "ready" as const, title: "Demo pull request" }))
       : fetchPullRequestDetails,
@@ -3420,6 +3424,7 @@ async function poll(forceVisibleData = false): Promise<void> {
         const pollResult = await controller.pollNow({
           triageState: watchView,
           includeInactive: forceVisibleData,
+          prefetchedWatchSnapshots: subscriptionResult.prefetchedWatchSnapshots,
         });
         successfulItems += pollResult.successfulWatchIds.length;
         failedItems +=

@@ -111,8 +111,13 @@ export type OpenPullRequest = {
   authorLogin?: string;
   headBranch?: string;
   state?: PrSourceState;
+  checkSnapshot?: WatchSnapshot;
   updatedAt?: string;
   url: string;
+};
+
+export type OpenPullRequestCheckOptions = {
+  author?: "@me";
 };
 
 export type AuthoredOpenPullRequest = OpenPullRequest & {
@@ -200,6 +205,19 @@ type PullRequestListResponse = {
   title?: string;
   updatedAt?: string;
   url?: string;
+  statusCheckRollup?: PullRequestCheckResponse[];
+};
+
+type PullRequestCheckResponse = {
+  __typename?: string;
+  completedAt?: string | null;
+  conclusion?: string | null;
+  context?: string;
+  name?: string;
+  startedAt?: string | null;
+  state?: string;
+  status?: string;
+  workflowName?: string;
 };
 
 type PullRequestSearchResponse = PullRequestListResponse & {
@@ -402,8 +420,25 @@ export async function fetchOpenPullRequests(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<OpenPullRequest[]> {
+  return fetchOpenPullRequestList(target, false, undefined, executor);
+}
+
+export async function fetchOpenPullRequestsWithChecks(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  options: OpenPullRequestCheckOptions = {},
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<OpenPullRequest[]> {
+  return fetchOpenPullRequestList(target, true, options.author, executor);
+}
+
+async function fetchOpenPullRequestList(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  includeChecks: boolean,
+  author: "@me" | undefined,
+  executor: ShellExecutor,
+): Promise<OpenPullRequest[]> {
   try {
-    const result = await executor.execute("gh", [
+    const args = [
       "pr",
       "list",
       "-R",
@@ -412,14 +447,16 @@ export async function fetchOpenPullRequests(
       "open",
       "--limit",
       "100",
+      ...(author ? ["--author", author] : []),
       "--json",
-      "number,title,isDraft,author,headRefName,updatedAt,url",
-    ]);
+      `number,title,isDraft,author,headRefName,updatedAt,url${includeChecks ? ",statusCheckRollup" : ""}`,
+    ];
+    const result = await executor.execute("gh", args);
 
     assertSuccessfulGhResult(result);
 
     return parseJson<PullRequestListResponse[]>(result.stdout)
-      .map(normalizeOpenPullRequest)
+      .map((response) => normalizeOpenPullRequest(response, includeChecks ? target : undefined))
       .filter((pullRequest): pullRequest is OpenPullRequest => Boolean(pullRequest))
       .sort(comparePullRequestsByUpdatedAt);
   } catch (error) {
@@ -745,7 +782,10 @@ function compareWorkflowRunsByUpdatedAt(left: ActiveWorkflowRun, right: ActiveWo
   return getSortTimestamp(right.updatedAt ?? right.createdAt) - getSortTimestamp(left.updatedAt ?? left.createdAt);
 }
 
-function normalizeOpenPullRequest(response: PullRequestListResponse): OpenPullRequest | undefined {
+function normalizeOpenPullRequest(
+  response: PullRequestListResponse,
+  repo?: Pick<ParsedWatchTarget, "owner" | "repo">,
+): OpenPullRequest | undefined {
   const number = getPullRequestListNumber(response.number);
   const title = response.title?.trim();
   const url = response.url?.trim();
@@ -754,15 +794,91 @@ function normalizeOpenPullRequest(response: PullRequestListResponse): OpenPullRe
     return undefined;
   }
 
+  const target = repo
+    ? { kind: "pr" as const, ...repo, prNumber: number, url }
+    : undefined;
+  const checks = response.statusCheckRollup
+    ? normalizePullRequestChecks(response.statusCheckRollup)
+    : undefined;
+
   return {
     number,
     title,
     isDraft: response.isDraft === true,
     ...(response.author?.login?.trim() ? { authorLogin: response.author.login.trim() } : {}),
     ...(response.headRefName?.trim() ? { headBranch: response.headRefName.trim() } : {}),
+    ...(target && checks ? { checkSnapshot: toPrSnapshot(target, checks) } : {}),
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
     url,
   };
+}
+
+function normalizePullRequestChecks(responses: PullRequestCheckResponse[]): PrCheckResponse[] {
+  const latest = new Map<string, PullRequestCheckResponse>();
+
+  for (const [index, response] of responses.entries()) {
+    const key = getPullRequestCheckKey(response) ?? `unknown:${String(index)}`;
+    const previous = latest.get(key);
+
+    if (
+      !previous ||
+      getSortTimestamp(response.startedAt ?? undefined) >=
+        getSortTimestamp(previous.startedAt ?? undefined)
+    ) {
+      latest.set(key, response);
+    }
+  }
+
+  return [...latest.values()].map((response) => ({
+    bucket: getPullRequestCheckBucket(response),
+    completedAt: response.completedAt,
+    startedAt: response.startedAt,
+  }));
+}
+
+function getPullRequestCheckKey(response: PullRequestCheckResponse): string | undefined {
+  const context = response.context?.trim();
+
+  if (context) {
+    return `context:${context}`;
+  }
+
+  const name = response.name?.trim();
+
+  if (!name) {
+    return undefined;
+  }
+
+  return `check:${response.workflowName?.trim() ?? ""}:${name}`;
+}
+
+function getPullRequestCheckBucket(response: PullRequestCheckResponse): string {
+  const status = response.status?.trim().toUpperCase();
+  const state = (
+    response.state?.trim() ||
+    (status === "COMPLETED" ? response.conclusion?.trim() : status)
+  )?.toUpperCase();
+
+  if (state === "SUCCESS") {
+    return "pass";
+  }
+
+  if (state === "SKIPPED" || state === "NEUTRAL") {
+    return "skipping";
+  }
+
+  if (
+    state === "ERROR" ||
+    state === "FAILURE" ||
+    state === "TIMED_OUT" ||
+    state === "ACTION_REQUIRED" ||
+    state === "STALE" ||
+    state === "STARTUP_FAILURE"
+  ) {
+    return "fail";
+  }
+
+  return state === "CANCELLED" ? "cancel" : "pending";
 }
 
 function normalizeAuthoredOpenPullRequest(
