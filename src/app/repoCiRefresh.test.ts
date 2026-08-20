@@ -4,7 +4,9 @@ import type { RepoCiStatusViewModel } from "./viewModel";
 import {
   getRepoCiStatusAfterRefreshError,
   repoCiRefreshIntervalMs,
+  repoCiTerminalWorkflowRefreshIntervalMs,
   shouldRefreshRepoCiStatus,
+  shouldRefreshRepoCiWorkflows,
 } from "./repoCiRefresh";
 
 const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
@@ -65,6 +67,69 @@ describe("shouldRefreshRepoCiStatus", () => {
     expect(mainSource).toContain("void refreshSettingsAndStatuses(true);");
     expect(mainSource).toContain("popupOpen: isPopupOpen");
     expect(mainSource).toContain("getCachedRepositoryDefaultBranch(repo, force)");
+    expect(mainSource).toContain("fetchRepositoryCommitSha(repo, defaultBranch)");
+    expect(mainSource).toContain("shouldRefreshRepoCiWorkflows({");
+  });
+});
+
+describe("shouldRefreshRepoCiWorkflows", () => {
+  const terminalStatus: RepoCiStatusViewModel = {
+    tone: "success",
+    label: "Passing",
+    description: "main: 1 workflow passed",
+    defaultBranch: "main",
+    commitSha: "abc123",
+    workflows: [],
+  };
+
+  it("skips recently validated terminal workflows when the head is unchanged", () => {
+    expect(shouldRefreshRepoCiWorkflows({
+      commitSha: "abc123",
+      force: false,
+      lastUpdatedAt: 1,
+      now: repoCiTerminalWorkflowRefreshIntervalMs,
+      previousStatus: terminalStatus,
+    })).toBe(false);
+  });
+
+  it("refreshes workflows after a head change", () => {
+    expect(shouldRefreshRepoCiWorkflows({
+      commitSha: "def456",
+      force: false,
+      lastUpdatedAt: repoCiTerminalWorkflowRefreshIntervalMs,
+      now: repoCiTerminalWorkflowRefreshIntervalMs,
+      previousStatus: terminalStatus,
+    })).toBe(true);
+  });
+
+  it("keeps pending workflows on the visible refresh cadence", () => {
+    expect(shouldRefreshRepoCiWorkflows({
+      commitSha: "abc123",
+      force: false,
+      lastUpdatedAt: repoCiTerminalWorkflowRefreshIntervalMs,
+      now: repoCiTerminalWorkflowRefreshIntervalMs,
+      previousStatus: { ...terminalStatus, tone: "pending" },
+    })).toBe(true);
+  });
+
+  it("periodically revalidates unchanged terminal workflows", () => {
+    expect(shouldRefreshRepoCiWorkflows({
+      commitSha: "abc123",
+      force: false,
+      lastUpdatedAt: 1,
+      now: repoCiTerminalWorkflowRefreshIntervalMs + 1,
+      previousStatus: terminalStatus,
+    })).toBe(true);
+  });
+
+  it("honors manual refreshes", () => {
+    expect(shouldRefreshRepoCiWorkflows({
+      commitSha: "abc123",
+      force: true,
+      lastUpdatedAt: repoCiTerminalWorkflowRefreshIntervalMs,
+      now: repoCiTerminalWorkflowRefreshIntervalMs,
+      previousStatus: terminalStatus,
+    })).toBe(true);
   });
 });
 

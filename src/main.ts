@@ -15,6 +15,7 @@ import { createRepositoryIconProvider } from "./app/repositoryIcon";
 import {
   getRepoCiStatusAfterRefreshError,
   shouldRefreshRepoCiStatus,
+  shouldRefreshRepoCiWorkflows,
 } from "./app/repoCiRefresh";
 import { getOverflowMenuItems, type OverflowMenuItem } from "./app/overflowMenu";
 import { dismissPopupUi } from "./app/popupDismissal";
@@ -99,6 +100,7 @@ import {
   fetchOpenPullRequestsWithChecks,
   fetchPullRequestDetails,
   fetchRateLimit,
+  fetchRepositoryCommitSha,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
   fetchRepositoryIconUrl,
@@ -192,6 +194,7 @@ const settingsSync = createSettingsSync(createSettingsGistRemote());
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
 const repoCiStatusUpdatedAt = new Map<string, number>();
+const repoCiWorkflowsUpdatedAt = new Map<string, number>();
 const repoDefaultBranches = new Map<string, string>();
 const repoDefaultBranchRefreshes = new Map<string, Promise<string>>();
 
@@ -3505,6 +3508,12 @@ async function refreshListedRepositoryCiStatuses(force = false): Promise<void> {
     }
   }
 
+  for (const repoKey of repoCiWorkflowsUpdatedAt.keys()) {
+    if (!listedKeys.has(repoKey)) {
+      repoCiWorkflowsUpdatedAt.delete(repoKey);
+    }
+  }
+
   await Promise.all(repos.map((repo) => refreshRepositoryCiStatus(repo, force)));
 }
 
@@ -3527,17 +3536,30 @@ async function refreshRepositoryCiStatus(repo: Pick<WatchedRepo, "owner" | "repo
   repoCiStatusRefreshes.add(repoKey);
 
   try {
+    const defaultBranch = await getCachedRepositoryDefaultBranch(repo, force);
+    const commitSha = isDemoMode
+      ? "demo-default-branch-commit"
+      : await fetchRepositoryCommitSha(repo, defaultBranch);
+
+    if (!shouldRefreshRepoCiWorkflows({
+      commitSha,
+      force,
+      lastUpdatedAt: repoCiWorkflowsUpdatedAt.get(repoKey),
+      now: Date.now(),
+      previousStatus,
+    })) {
+      return;
+    }
+
     const status = isDemoMode
       ? await fetchDemoRepositoryDefaultBranchCiStatus(repo)
-      : await fetchRepositoryDefaultBranchCiStatus(
-          repo,
-          { defaultBranch: await getCachedRepositoryDefaultBranch(repo, force) },
-        );
+      : await fetchRepositoryDefaultBranchCiStatus(repo, { commitSha, defaultBranch });
 
     repoCiStatuses = {
       ...repoCiStatuses,
       [repoKey]: toRepoCiStatusViewModel(status),
     };
+    repoCiWorkflowsUpdatedAt.set(repoKey, Date.now());
   } catch (error) {
     console.warn(`Could not refresh default branch CI status for ${repoKey}.`, error);
     const status = getRepoCiStatusAfterRefreshError(previousStatus);
