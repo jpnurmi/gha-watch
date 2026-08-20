@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
+import { getAdaptivePollIntervalMs } from "./app/adaptivePolling";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import {
   createDesktopNotificationActionHandler,
@@ -130,9 +131,7 @@ import { createSettingsGistRemote } from "./platform/settingsGist";
 import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
-const pollIntervalMs = 30_000;
 const rerunRefreshDelayMs = 1_000;
-const freshnessStaleAfterMs = pollIntervalMs * 2;
 const treeIndentStepPx = 26;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
 document.documentElement.dataset.platform = getUiPlatform(navigator.userAgent);
@@ -167,6 +166,7 @@ let isAdding = false;
 let addError: string | undefined;
 let pullRequestDiscovery: PullRequestDiscoveryState = { status: "idle" };
 let isPolling = false;
+let pollTimeoutId: number | undefined;
 let isClearMenuOpen = false;
 let isPopupOpen = false;
 let autoStartEnabled = false;
@@ -359,6 +359,7 @@ controller.subscribe(() => {
   render();
   void updateTrayIndicator();
   void refreshListedRepositoryCiStatuses();
+  scheduleNextPoll();
 });
 
 render();
@@ -366,9 +367,7 @@ void updateTrayIndicator();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void refreshListedRepositoryCiStatuses();
-window.setInterval(() => {
-  void poll();
-}, pollIntervalMs);
+scheduleNextPoll();
 void refreshSettingsAndStatuses();
 document.addEventListener("click", (event) => {
   const target = event.target;
@@ -419,6 +418,7 @@ void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
 
   if (focused) {
     render();
+    void poll();
     void refreshListedRepositoryCiStatuses();
   } else {
     void acknowledgePopupDismissal();
@@ -468,12 +468,13 @@ function renderRateLimitIndicator(): string {
 }
 
 function renderFreshnessIndicator(): string {
+  const pollIntervalMs = getCurrentPollIntervalMs();
   const freshness = getFreshnessState({
     isRefreshing: isPolling,
     lastRefreshFailed: lastRefreshFailed || lastRefreshDegraded,
     lastUpdatedAt: lastSuccessfulRefreshAt?.getTime(),
     now: Date.now(),
-    staleAfterMs: freshnessStaleAfterMs,
+    staleAfterMs: pollIntervalMs * 2,
   });
   const refreshTitle = lastSuccessfulRefreshAt
     ? `Last updated at ${lastSuccessfulRefreshAt.toLocaleTimeString()}${lastRefreshFailed ? ". Latest refresh failed." : lastRefreshDegraded ? ". Latest refresh partially failed." : ""}`
@@ -3466,8 +3467,28 @@ async function poll(forceVisibleData = false): Promise<void> {
     console.warn("Could not refresh GitHub status.", error);
   } finally {
     isPolling = false;
+    scheduleNextPoll();
     render();
   }
+}
+
+function scheduleNextPoll(): void {
+  if (pollTimeoutId !== undefined) {
+    window.clearTimeout(pollTimeoutId);
+  }
+
+  pollTimeoutId = window.setTimeout(() => {
+    pollTimeoutId = undefined;
+    void poll();
+  }, getCurrentPollIntervalMs());
+}
+
+function getCurrentPollIntervalMs(): number {
+  const hasActiveWatches = controller.getWatches().some(
+    (watch) => getWatchTriageState(watch) === "inbox" && watch.active,
+  );
+
+  return getAdaptivePollIntervalMs(hasActiveWatches);
 }
 
 async function refreshListedRepositoryCiStatuses(force = false): Promise<void> {
