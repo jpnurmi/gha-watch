@@ -2147,12 +2147,13 @@ describe("watchController", () => {
       pullRequestScope: "user",
     }]);
     const pollResult = await controller.pollNow({
+      prefetchedPullRequestDetails: syncResult.prefetchedPullRequestDetails,
       prefetchedWatchSnapshots: syncResult.prefetchedWatchSnapshots,
     });
 
     expect(fetches).toEqual([]);
     expect(checkOptions).toEqual({ author: "@me" });
-    expect(detailFetches).toBe(1);
+    expect(detailFetches).toBe(0);
     expect(pollResult.successfulWatchIds).toEqual([getWatchId(prTarget)]);
     expect(controller.getWatches()[0]).toMatchObject({
       status: "completed:failure",
@@ -2162,6 +2163,46 @@ describe("watchController", () => {
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toContain("Improve pull request polling:");
     expect(notifications[0]).toContain("Failed");
+  });
+
+  it("fetches details for subscribed pull requests missing from repository discovery", async () => {
+    const { deps } = createDeps([{
+      status: "completed",
+      conclusion: "success",
+      title: "Pull request #51",
+      prNumber: "51",
+      url: prTarget.url,
+    }]);
+    let detailFetches = 0;
+    deps.fetchOpenPullRequestsWithChecks = async () => [];
+    deps.fetchPullRequestDetails = async () => {
+      detailFetches += 1;
+      return [{ state: "merged", title: "Improve pull request polling" }];
+    };
+    const controller = createWatchController(deps, [{
+      id: getWatchId(prTarget),
+      target: prTarget,
+      label: "Improve pull request polling",
+      sourceState: "ready",
+      status: "completed:success",
+      lastSeenStatus: "completed:success",
+      lastState: { status: "completed", conclusion: "success" },
+      active: false,
+      error: undefined,
+    }]);
+
+    const syncResult = await controller.syncWorkflowSubscriptions([{
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "all",
+    }]);
+    await controller.pollNow({
+      prefetchedPullRequestDetails: syncResult.prefetchedPullRequestDetails,
+      prefetchedWatchSnapshots: syncResult.prefetchedWatchSnapshots,
+    });
+
+    expect(detailFetches).toBe(1);
+    expect(controller.getWatches()[0]).toMatchObject({ sourceState: "merged" });
   });
 
   it("rechecks inactive authored PRs when workflow reruns do not update the PR", async () => {
@@ -3393,6 +3434,7 @@ describe("watchController", () => {
       ],
       notificationFailures: [],
       anyGithubRequestSucceeded: true,
+      prefetchedPullRequestDetails: new Map(),
       prefetchedWatchSnapshots: new Map(),
     });
     expect(controller.getWatches().map((watch) => watch.id)).toEqual([
@@ -3557,6 +3599,7 @@ describe("watchController", () => {
       }],
       notificationFailures: [],
       anyGithubRequestSucceeded: true,
+      prefetchedPullRequestDetails: new Map(),
       prefetchedWatchSnapshots: new Map(),
     });
     expect(controller.getWatches()).toMatchObject([

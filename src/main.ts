@@ -3433,6 +3433,7 @@ async function poll(forceVisibleData = false): Promise<void> {
         const pollResult = await controller.pollNow({
           triageState: watchView,
           includeInactive: forceVisibleData,
+          prefetchedPullRequestDetails: subscriptionResult.prefetchedPullRequestDetails,
           prefetchedWatchSnapshots: subscriptionResult.prefetchedWatchSnapshots,
         });
         successfulItems += pollResult.successfulWatchIds.length;

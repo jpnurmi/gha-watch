@@ -141,12 +141,14 @@ export type WorkflowSubscriptionSyncResult = {
   failures: WorkflowSubscriptionFailure[];
   notificationFailures: NotificationDeliveryFailure[];
   anyGithubRequestSucceeded: boolean;
+  prefetchedPullRequestDetails: ReadonlyMap<string, PullRequestDetails>;
   prefetchedWatchSnapshots: ReadonlyMap<string, WatchSnapshot>;
 };
 
 export type WatchPollOptions = {
   triageState?: Exclude<WatchTriageState, "done">;
   includeInactive?: boolean;
+  prefetchedPullRequestDetails?: ReadonlyMap<string, PullRequestDetails>;
   prefetchedWatchSnapshots?: ReadonlyMap<string, WatchSnapshot>;
   watchIds?: string[];
 };
@@ -222,6 +224,7 @@ type RepositorySyncOutcome =
       successful: true;
       notificationFailures: NotificationDeliveryFailure[];
       anyGithubRequestSucceeded: boolean;
+      prefetchedPullRequestDetails: ReadonlyMap<string, PullRequestDetails>;
       prefetchedWatchSnapshots: ReadonlyMap<string, WatchSnapshot>;
     }
   | {
@@ -235,6 +238,7 @@ type RepositorySyncOutcome =
 type WatchedRepoSyncResult = {
   notificationFailures: NotificationDeliveryFailure[];
   anyGithubRequestSucceeded: boolean;
+  prefetchedPullRequestDetails: ReadonlyMap<string, PullRequestDetails>;
   prefetchedWatchSnapshots: ReadonlyMap<string, WatchSnapshot>;
 };
 
@@ -514,48 +518,55 @@ export function createWatchController(
 
   async function refreshPullRequestDetails(
     targets = getTrackedPullRequestTargets(watches),
+    prefetchedDetails: ReadonlyMap<string, PullRequestDetails> = new Map(),
   ): Promise<MetadataRefreshResult> {
-    if (!deps.fetchPullRequestDetails) {
-      return emptyMetadataRefreshResult();
-    }
-
     const uniqueTargets = new Map(targets.map((target) => [getPullRequestKey(target), target]));
-    const detailsByKey = new Map<string, PullRequestDetails>();
-    const batch = [...uniqueTargets.values()];
+    const detailsByKey = new Map(
+      [...uniqueTargets.keys()]
+        .map((key) => [key, prefetchedDetails.get(key)] as const)
+        .filter((entry): entry is [string, PullRequestDetails] => Boolean(entry[1])),
+    );
+    const batch = [...uniqueTargets]
+      .filter(([key]) => !detailsByKey.has(key))
+      .map(([, target]) => target);
+    let anyGithubRequestSucceeded = false;
 
-    if (batch.length === 0) {
+    if (uniqueTargets.size === 0) {
       return emptyMetadataRefreshResult();
     }
 
-    try {
-      const details = await deps.fetchPullRequestDetails(batch);
+    if (batch.length > 0 && deps.fetchPullRequestDetails) {
+      try {
+        const details = await deps.fetchPullRequestDetails(batch);
+        anyGithubRequestSucceeded = true;
 
-      batch.forEach((target, index) => {
-        const result = details[index];
+        batch.forEach((target, index) => {
+          const result = details[index];
 
-        if (result) {
-          detailsByKey.set(getPullRequestKey(target), result);
-        }
-      });
-    } catch (error) {
-      return {
-        successfulWatchIds: [],
-        failures: [
-          {
-            scope: "pull-request-details",
-            watchIds: getWatchIdsForPullRequestTargets(watches, batch),
-            message: normalizeFailureMessage(error),
-          },
-        ],
-        anyGithubRequestSucceeded: false,
-      };
+          if (result) {
+            detailsByKey.set(getPullRequestKey(target), result);
+          }
+        });
+      } catch (error) {
+        return {
+          successfulWatchIds: [],
+          failures: [
+            {
+              scope: "pull-request-details",
+              watchIds: getWatchIdsForPullRequestTargets(watches, batch),
+              message: normalizeFailureMessage(error),
+            },
+          ],
+          anyGithubRequestSucceeded: false,
+        };
+      }
     }
 
     if (detailsByKey.size === 0) {
       return {
         successfulWatchIds: [],
         failures: [],
-        anyGithubRequestSucceeded: true,
+        anyGithubRequestSucceeded,
       };
     }
 
@@ -583,7 +594,7 @@ export function createWatchController(
     return {
       successfulWatchIds,
       failures: [],
-      anyGithubRequestSucceeded: true,
+      anyGithubRequestSucceeded,
     };
   }
 
@@ -757,6 +768,7 @@ export function createWatchController(
     let defaultBranch = "";
     let anyGithubRequestSucceeded = false;
     const prefetchedWatchSnapshots = new Map<string, WatchSnapshot>();
+    const prefetchedPullRequestDetails = new Map<string, PullRequestDetails>();
     const baselineFailures: WatchPollFailureError[] = [];
     const notificationFailures: NotificationDeliveryFailure[] = [];
 
@@ -829,15 +841,21 @@ export function createWatchController(
             watchedRepo.pullRequestScope === "all" ||
             pullRequest.authorLogin?.toLowerCase() === userLogin.toLowerCase()
           ) {
+            const target = {
+              kind: "pr",
+              owner: watchedRepo.owner,
+              repo: watchedRepo.repo,
+              prNumber: pullRequest.number,
+              url: pullRequest.url,
+            } as const;
+            prefetchedPullRequestDetails.set(
+              getPullRequestKey(target),
+              toPullRequestDetails(pullRequest),
+            );
+
             if (pullRequest.checkSnapshot) {
               prefetchedWatchSnapshots.set(
-                getWatchId({
-                  kind: "pr",
-                  owner: watchedRepo.owner,
-                  repo: watchedRepo.repo,
-                  prNumber: pullRequest.number,
-                  url: pullRequest.url,
-                }),
+                getWatchId(target),
                 pullRequest.checkSnapshot,
               );
             }
@@ -864,6 +882,7 @@ export function createWatchController(
         return {
           notificationFailures,
           anyGithubRequestSucceeded,
+          prefetchedPullRequestDetails,
           prefetchedWatchSnapshots,
         };
       }
@@ -941,6 +960,7 @@ export function createWatchController(
       return {
         notificationFailures,
         anyGithubRequestSucceeded,
+        prefetchedPullRequestDetails,
         prefetchedWatchSnapshots,
       };
     } catch (error) {
@@ -1728,6 +1748,7 @@ export function createWatchController(
               successful: true,
               notificationFailures: result.notificationFailures,
               anyGithubRequestSucceeded: result.anyGithubRequestSucceeded,
+              prefetchedPullRequestDetails: result.prefetchedPullRequestDetails,
               prefetchedWatchSnapshots: result.prefetchedWatchSnapshots,
             };
           } catch (error) {
@@ -1767,6 +1788,11 @@ export function createWatchController(
           .filter((outcome) => outcome.successful)
           .flatMap((outcome) => [...outcome.prefetchedWatchSnapshots]),
       );
+      const prefetchedPullRequestDetails = new Map(
+        outcomes
+          .filter((outcome) => outcome.successful)
+          .flatMap((outcome) => [...outcome.prefetchedPullRequestDetails]),
+      );
 
       return {
         status: getPollSummaryStatus(
@@ -1777,6 +1803,7 @@ export function createWatchController(
         failures,
         notificationFailures,
         anyGithubRequestSucceeded,
+        prefetchedPullRequestDetails,
         prefetchedWatchSnapshots,
       };
     },
@@ -1785,6 +1812,7 @@ export function createWatchController(
       const notificationTime = getNow();
       const triageState = pollOptions.triageState ?? "inbox";
       const watchIdSet = pollOptions.watchIds ? new Set(pollOptions.watchIds) : undefined;
+      const prefetchedPullRequestDetails = pollOptions.prefetchedPullRequestDetails ?? new Map();
       const prefetchedWatchSnapshots = pollOptions.prefetchedWatchSnapshots ?? new Map();
       pruneExpiredSuppressions(notificationTime);
       pruneExpiredDoneWatches(notificationTime);
@@ -1890,6 +1918,7 @@ export function createWatchController(
               (!watchIdSet || watchIdSet.has(watch.id)),
           ),
         ),
+        prefetchedPullRequestDetails,
       );
       successfulWatchIds.push(...pullRequestRefresh.successfulWatchIds);
       metadataFailures.push(...pullRequestRefresh.failures);
@@ -2159,6 +2188,15 @@ function withPullRequestDetails(
 
 function getPullRequestKey(target: PrWatchTarget): string {
   return `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}#${target.prNumber}`;
+}
+
+function toPullRequestDetails(pullRequest: OpenPullRequest): PullRequestDetails {
+  return {
+    ...(pullRequest.authorLogin ? { authorLogin: pullRequest.authorLogin } : {}),
+    ...(pullRequest.headBranch ? { branchName: pullRequest.headBranch } : {}),
+    state: pullRequest.state ?? (pullRequest.isDraft ? "draft" : "ready"),
+    title: pullRequest.title,
+  };
 }
 
 function findTrackedPullRequestByBranch(
