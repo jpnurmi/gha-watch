@@ -39,6 +39,7 @@ import type { RerunMode, WatchSnapshot } from "../platform/gh";
 import type {
   ActiveWorkflowRun,
   OpenPullRequest,
+  OpenPullRequestCheckOptions,
   PullRequestDetails,
   WorkflowRunSummary,
   WorkflowDefinition,
@@ -53,7 +54,7 @@ export type WatchControllerDeps = {
   fetchOpenPullRequests?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   fetchOpenPullRequestsWithChecks?(
     target: Pick<WatchedRepo, "owner" | "repo">,
-    options?: { author?: "@me" },
+    options?: OpenPullRequestCheckOptions,
   ): Promise<OpenPullRequest[]>;
   fetchPullRequestDetails?(targets: PrWatchTarget[]): Promise<Array<PullRequestDetails | undefined>>;
   fetchRepositoryDefaultBranch?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<string>;

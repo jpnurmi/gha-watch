@@ -871,7 +871,9 @@ function getPullRequestCheckBucket(response: PullRequestCheckResponse): string {
     state === "ERROR" ||
     state === "FAILURE" ||
     state === "TIMED_OUT" ||
-    state === "ACTION_REQUIRED"
+    state === "ACTION_REQUIRED" ||
+    state === "STALE" ||
+    state === "STARTUP_FAILURE"
   ) {
     return "fail";
   }

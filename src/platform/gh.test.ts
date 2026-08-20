@@ -1158,6 +1158,43 @@ describe("fetchOpenPullRequests", () => {
     ]);
   });
 
+  it("classifies stale and startup failure check conclusions as failures", async () => {
+    const targets = [
+      { number: 51, conclusion: "STALE" },
+      { number: 52, conclusion: "STARTUP_FAILURE" },
+    ];
+    const { executor } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify(targets.map(({ number, conclusion }) => ({
+        number,
+        title: `Pull request ${String(number)}`,
+        isDraft: false,
+        statusCheckRollup: [{
+          __typename: "CheckRun",
+          name: "CI",
+          workflowName: "Build",
+          status: "COMPLETED",
+          conclusion,
+          startedAt: "2026-05-17T12:00:00Z",
+          completedAt: "2026-05-17T12:02:00Z",
+        }],
+        url: `https://github.com/getsentry/sentry/pull/${String(number)}`,
+      }))),
+      stderr: "",
+    });
+
+    const pullRequests = await fetchOpenPullRequestsWithChecks(
+      { owner: "getsentry", repo: "sentry" },
+      {},
+      executor,
+    );
+
+    expect(pullRequests.map((pullRequest) => pullRequest.checkSnapshot)).toMatchObject([
+      { status: "completed", conclusion: "failure", prNumber: "51" },
+      { status: "completed", conclusion: "failure", prNumber: "52" },
+    ]);
+  });
+
   it("drops malformed pull requests from the gh response", async () => {
     const { executor } = createExecutor({
       code: 0,
