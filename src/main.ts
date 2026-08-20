@@ -1,7 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
-import { getAdaptivePollIntervalMs } from "./app/adaptivePolling";
+import { createAdaptivePollingCoordinator } from "./app/adaptivePolling";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import {
   createDesktopNotificationActionHandler,
@@ -166,7 +166,6 @@ let isAdding = false;
 let addError: string | undefined;
 let pullRequestDiscovery: PullRequestDiscoveryState = { status: "idle" };
 let isPolling = false;
-let pollTimeoutId: number | undefined;
 let isClearMenuOpen = false;
 let isPopupOpen = false;
 let autoStartEnabled = false;
@@ -325,6 +324,16 @@ const controller = createWatchController(
   isDemoMode ? [] : loadWatchSuppressions(),
   isDemoMode ? undefined : loadWorkflowDiscoveryState(),
 );
+const polling = createAdaptivePollingCoordinator({
+  clearTimeout: window.clearTimeout.bind(window),
+  hasActiveWatches: () => controller.getWatches().some(
+    (watch) => getWatchTriageState(watch) === "inbox" && watch.active,
+  ),
+  poll: () => {
+    void poll();
+  },
+  setTimeout: window.setTimeout.bind(window),
+});
 
 function notifyStatusChange(notification: WatchNotification): Promise<void> {
   return sendDesktopNotification(notification);
@@ -359,7 +368,7 @@ controller.subscribe(() => {
   render();
   void updateTrayIndicator();
   void refreshListedRepositoryCiStatuses();
-  scheduleNextPoll();
+  polling.scheduleNext();
 });
 
 render();
@@ -367,7 +376,7 @@ void updateTrayIndicator();
 void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void refreshListedRepositoryCiStatuses();
-scheduleNextPoll();
+polling.scheduleNext();
 void refreshSettingsAndStatuses();
 document.addEventListener("click", (event) => {
   const target = event.target;
@@ -415,10 +424,10 @@ window.addEventListener("keydown", (event) => {
 });
 void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   isPopupOpen = focused;
+  polling.handleFocusChanged(focused);
 
   if (focused) {
     render();
-    void poll();
     void refreshListedRepositoryCiStatuses();
   } else {
     void acknowledgePopupDismissal();
@@ -468,13 +477,12 @@ function renderRateLimitIndicator(): string {
 }
 
 function renderFreshnessIndicator(): string {
-  const pollIntervalMs = getCurrentPollIntervalMs();
   const freshness = getFreshnessState({
     isRefreshing: isPolling,
     lastRefreshFailed: lastRefreshFailed || lastRefreshDegraded,
     lastUpdatedAt: lastSuccessfulRefreshAt?.getTime(),
     now: Date.now(),
-    staleAfterMs: pollIntervalMs * 2,
+    staleAfterMs: polling.getIntervalMs() * 2,
   });
   const refreshTitle = lastSuccessfulRefreshAt
     ? `Last updated at ${lastSuccessfulRefreshAt.toLocaleTimeString()}${lastRefreshFailed ? ". Latest refresh failed." : lastRefreshDegraded ? ". Latest refresh partially failed." : ""}`
@@ -3467,28 +3475,9 @@ async function poll(forceVisibleData = false): Promise<void> {
     console.warn("Could not refresh GitHub status.", error);
   } finally {
     isPolling = false;
-    scheduleNextPoll();
+    polling.scheduleNext();
     render();
   }
-}
-
-function scheduleNextPoll(): void {
-  if (pollTimeoutId !== undefined) {
-    window.clearTimeout(pollTimeoutId);
-  }
-
-  pollTimeoutId = window.setTimeout(() => {
-    pollTimeoutId = undefined;
-    void poll();
-  }, getCurrentPollIntervalMs());
-}
-
-function getCurrentPollIntervalMs(): number {
-  const hasActiveWatches = controller.getWatches().some(
-    (watch) => getWatchTriageState(watch) === "inbox" && watch.active,
-  );
-
-  return getAdaptivePollIntervalMs(hasActiveWatches);
 }
 
 async function refreshListedRepositoryCiStatuses(force = false): Promise<void> {

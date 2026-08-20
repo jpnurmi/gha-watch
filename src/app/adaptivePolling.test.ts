@@ -1,34 +1,71 @@
-import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activePollIntervalMs,
-  getAdaptivePollIntervalMs,
+  createAdaptivePollingCoordinator,
   terminalPollIntervalMs,
 } from "./adaptivePolling";
 
-const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
-
-describe("getAdaptivePollIntervalMs", () => {
-  it("polls active watches every 30 seconds", () => {
-    expect(getAdaptivePollIntervalMs(true)).toBe(activePollIntervalMs);
-    expect(activePollIntervalMs).toBe(30_000);
+describe("adaptive polling coordinator", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
   });
 
-  it("backs off to five minutes when all watches are terminal", () => {
-    expect(getAdaptivePollIntervalMs(false)).toBe(terminalPollIntervalMs);
-    expect(terminalPollIntervalMs).toBe(5 * 60_000);
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
-  it("schedules the next poll from the current Inbox activity", () => {
-    expect(mainSource).toContain('getWatchTriageState(watch) === "inbox" && watch.active');
-    expect(mainSource).toContain("scheduleNextPoll();");
-    expect(mainSource).toContain("window.setTimeout(() => {");
-    expect(mainSource).not.toContain("window.setInterval(() => {");
+  function createCoordinator(hasActiveWatches: () => boolean) {
+    const poll = vi.fn();
+    const coordinator = createAdaptivePollingCoordinator({
+      clearTimeout,
+      hasActiveWatches,
+      poll,
+      setTimeout,
+    });
+
+    return { coordinator, poll };
+  }
+
+  it("schedules active and terminal polls at their adaptive intervals", () => {
+    let active = true;
+    const { coordinator, poll } = createCoordinator(() => active);
+
+    expect(coordinator.getIntervalMs()).toBe(30_000);
+    coordinator.scheduleNext();
+    vi.advanceTimersByTime(activePollIntervalMs - 1);
+    expect(poll).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(poll).toHaveBeenCalledTimes(1);
+
+    active = false;
+    expect(coordinator.getIntervalMs()).toBe(5 * 60_000);
+    coordinator.scheduleNext();
+    vi.advanceTimersByTime(terminalPollIntervalMs - 1);
+    expect(poll).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(poll).toHaveBeenCalledTimes(2);
   });
 
-  it("polls immediately when the window gains focus", () => {
-    expect(mainSource).toMatch(
-      /onFocusChanged[\s\S]*?if \(focused\) \{[\s\S]*?void poll\(\);/,
-    );
+  it("cancels the pending timeout when rescheduling", () => {
+    let active = true;
+    const { coordinator, poll } = createCoordinator(() => active);
+
+    coordinator.scheduleNext();
+    active = false;
+    coordinator.scheduleNext();
+    vi.advanceTimersByTime(activePollIntervalMs);
+    expect(poll).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(terminalPollIntervalMs - activePollIntervalMs);
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
+
+  it("polls immediately only when focus is gained", () => {
+    const { coordinator, poll } = createCoordinator(() => false);
+
+    coordinator.handleFocusChanged(false);
+    expect(poll).not.toHaveBeenCalled();
+    coordinator.handleFocusChanged(true);
+    expect(poll).toHaveBeenCalledTimes(1);
   });
 });
