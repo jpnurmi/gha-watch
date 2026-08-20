@@ -2093,6 +2093,77 @@ describe("watchController", () => {
     ]);
   });
 
+  it("reuses repository pull request snapshots during status polling", async () => {
+    const updatedAt = "2026-05-17T12:00:00Z";
+    const snapshot: WatchSnapshot = {
+      status: "completed",
+      conclusion: "failure",
+      title: "Pull request #51",
+      prNumber: "51",
+      timing: {
+        startedAt: "2026-05-17T12:01:00Z",
+        completedAt: "2026-05-17T12:03:00Z",
+      },
+      url: prTarget.url,
+    };
+    const { deps, fetches, notifications } = createDeps([]);
+    let detailFetches = 0;
+    let checkOptions: { author?: "@me" } | undefined;
+    deps.fetchOpenPullRequestsWithChecks = async (_target, options) => {
+      checkOptions = options;
+      return [{
+        number: "51",
+        title: "Improve pull request polling",
+        isDraft: false,
+        authorLogin: "jpnurmi",
+        updatedAt,
+        checkSnapshot: snapshot,
+        url: prTarget.url,
+      }];
+    };
+    deps.fetchPullRequestDetails = async () => {
+      detailFetches += 1;
+      return [];
+    };
+    const controller = createWatchController(deps, [{
+      id: getWatchId(prTarget),
+      target: prTarget,
+      label: "Improve pull request polling",
+      metadata: {
+        prTitle: "Improve pull request polling",
+        prUpdatedAt: updatedAt,
+      },
+      sourceState: "ready",
+      status: "in_progress",
+      lastSeenStatus: "in_progress",
+      lastState: { status: "in_progress", conclusion: null },
+      active: true,
+      error: undefined,
+    }]);
+
+    const syncResult = await controller.syncWorkflowSubscriptions([{
+      owner: "getsentry",
+      repo: "sentry",
+      pullRequestScope: "user",
+    }]);
+    const pollResult = await controller.pollNow({
+      prefetchedWatchSnapshots: syncResult.prefetchedWatchSnapshots,
+    });
+
+    expect(fetches).toEqual([]);
+    expect(checkOptions).toEqual({ author: "@me" });
+    expect(detailFetches).toBe(1);
+    expect(pollResult.successfulWatchIds).toEqual([getWatchId(prTarget)]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "completed:failure",
+      active: false,
+      error: undefined,
+    });
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toContain("Improve pull request polling:");
+    expect(notifications[0]).toContain("Failed");
+  });
+
   it("rechecks inactive authored PRs when workflow reruns do not update the PR", async () => {
     const pullRequestTarget = {
       kind: "pr",
@@ -3322,6 +3393,7 @@ describe("watchController", () => {
       ],
       notificationFailures: [],
       anyGithubRequestSucceeded: true,
+      prefetchedWatchSnapshots: new Map(),
     });
     expect(controller.getWatches().map((watch) => watch.id)).toEqual([
       "getsentry/sentry/run/123",
@@ -3485,6 +3557,7 @@ describe("watchController", () => {
       }],
       notificationFailures: [],
       anyGithubRequestSucceeded: true,
+      prefetchedWatchSnapshots: new Map(),
     });
     expect(controller.getWatches()).toMatchObject([
       {

@@ -4,6 +4,7 @@ import {
   fetchAuthoredOpenPullRequests,
   fetchAuthenticatedUserLogin,
   fetchOpenPullRequests,
+  fetchOpenPullRequestsWithChecks,
   fetchPullRequestDetails,
   fetchRateLimit,
   fetchRepositoryDefaultBranchCiStatus,
@@ -1073,6 +1074,85 @@ describe("fetchOpenPullRequests", () => {
           "100",
           "--json",
           "number,title,isDraft,author,headRefName,updatedAt,url",
+        ],
+      },
+    ]);
+  });
+
+  it("includes current check snapshots in the repository pull request query", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify([
+        {
+          number: 51,
+          title: "Batch pull request checks",
+          isDraft: false,
+          statusCheckRollup: [
+            {
+              __typename: "CheckRun",
+              name: "CI",
+              workflowName: "Build",
+              status: "COMPLETED",
+              conclusion: "CANCELLED",
+              startedAt: "2026-05-17T11:00:00Z",
+              completedAt: "2026-05-17T11:02:00Z",
+            },
+            {
+              __typename: "CheckRun",
+              name: "CI",
+              workflowName: "Build",
+              status: "COMPLETED",
+              conclusion: "SUCCESS",
+              startedAt: "2026-05-17T12:00:00Z",
+              completedAt: "2026-05-17T12:02:00Z",
+            },
+            {
+              __typename: "StatusContext",
+              context: "Code review",
+              state: "PENDING",
+              startedAt: "2026-05-17T12:01:00Z",
+            },
+          ],
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+      ]),
+      stderr: "",
+    });
+
+    await expect(
+      fetchOpenPullRequestsWithChecks(
+        { owner: "getsentry", repo: "sentry" },
+        { author: "@me" },
+        executor,
+      ),
+    ).resolves.toMatchObject([
+      {
+        checkSnapshot: {
+          status: "in_progress",
+          conclusion: null,
+          title: "Pull request #51",
+          prNumber: "51",
+          timing: { startedAt: "2026-05-17T12:00:00.000Z" },
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+      },
+    ]);
+    expect(calls).toEqual([
+      {
+        program: "gh",
+        args: [
+          "pr",
+          "list",
+          "-R",
+          "getsentry/sentry",
+          "--state",
+          "open",
+          "--limit",
+          "100",
+          "--author",
+          "@me",
+          "--json",
+          "number,title,isDraft,author,headRefName,updatedAt,url,statusCheckRollup",
         ],
       },
     ]);
