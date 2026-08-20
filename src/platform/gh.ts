@@ -186,6 +186,7 @@ export type RepositoryCiStatus = {
 };
 
 export type RepositoryCiStatusOptions = {
+  commitSha?: string;
   defaultBranch?: string;
 };
 
@@ -368,6 +369,22 @@ export async function fetchRepositoryDefaultBranch(
   }
 }
 
+export async function fetchRepositoryCommitSha(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  ref: string,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<string> {
+  try {
+    const commit = await fetchConditionalApiJson<CommitViewResponse>(executor, [
+      `repos/${target.owner}/${target.repo}/commits/${encodeURIComponent(ref)}`,
+    ]);
+
+    return requiredString(commit.sha, "repository commit");
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
 export async function fetchRepositoryDefaultBranchCiStatus(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
   options: RepositoryCiStatusOptions = {},
@@ -375,10 +392,7 @@ export async function fetchRepositoryDefaultBranchCiStatus(
 ): Promise<RepositoryCiStatus> {
   try {
     const defaultBranch = options.defaultBranch ?? await fetchRepositoryDefaultBranch(target, executor);
-    const commit = await fetchConditionalApiJson<CommitViewResponse>(executor, [
-      `repos/${target.owner}/${target.repo}/commits/${encodeURIComponent(defaultBranch)}`,
-    ]);
-    const commitSha = requiredString(commit.sha, "default branch commit");
+    const commitSha = options.commitSha ?? await fetchRepositoryCommitSha(target, defaultBranch, executor);
     const response = await fetchConditionalApiJson<WorkflowRunsApiResponse>(executor, [
       `repos/${target.owner}/${target.repo}/actions/runs`,
       "--method",

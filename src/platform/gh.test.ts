@@ -7,6 +7,7 @@ import {
   fetchOpenPullRequestsWithChecks,
   fetchPullRequestDetails,
   fetchRateLimit,
+  fetchRepositoryCommitSha,
   fetchRepositoryDefaultBranchCiStatus,
   fetchRepositoryDefaultBranch,
   fetchRepositoryIconUrl,
@@ -745,6 +746,26 @@ describe("fetchRepositoryDefaultBranch", () => {
   });
 });
 
+describe("fetchRepositoryCommitSha", () => {
+  it("fetches the requested repository ref", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({ sha: "abc123" }),
+      stderr: "",
+    });
+
+    await expect(fetchRepositoryCommitSha(
+      { owner: "getsentry", repo: "sentry" },
+      "release/1.0",
+      executor,
+    )).resolves.toBe("abc123");
+    expect(calls).toEqual([{
+      program: "gh",
+      args: ["api", "--include", "repos/getsentry/sentry/commits/release%2F1.0"],
+    }]);
+  });
+});
+
 describe("fetchRepositoryDefaultBranchCiStatus", () => {
   it("summarizes the latest known default branch workflow run in two requests", async () => {
     const { executor, calls } = createSequenceExecutor([
@@ -887,6 +908,25 @@ describe("fetchRepositoryDefaultBranchCiStatus", () => {
       "repos/getsentry/sentry/commits/main",
     ]);
     expect(calls[3].args).toContain('If-None-Match: "runs-v1"');
+  });
+
+  it("uses a prefetched commit without requesting it again", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({ workflow_runs: [] }),
+      stderr: "",
+    });
+
+    await expect(fetchRepositoryDefaultBranchCiStatus(
+      { owner: "getsentry", repo: "sentry" },
+      { commitSha: "abc123", defaultBranch: "main" },
+      executor,
+    )).resolves.toMatchObject({
+      commitSha: "abc123",
+      defaultBranch: "main",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toContain("head_sha=abc123");
   });
 
   it("ignores same-branch workflow runs that are not push builds for the latest commit", async () => {
