@@ -20,7 +20,7 @@ function notification(overrides: Partial<WatchNotification> = {}): WatchNotifica
     group: "jpnurmi/gha",
     persistent: true,
     actions: [
-      { id: "dismiss", label: "Dismiss" },
+      { id: "open", label: "Open" },
     ],
     ...overrides,
   };
@@ -46,7 +46,7 @@ describe("sendDesktopNotification", () => {
     expect(shownNotifications).toEqual([notification()]);
   });
 
-  it("listens for native notification click events", async () => {
+  it("listens for native notification action events", async () => {
     const actions: DesktopNotificationAction[] = [];
     let emitAction: ((payload: unknown) => void) | undefined;
     const unlisten = vi.fn();
@@ -120,7 +120,7 @@ describe("sendDesktopNotification", () => {
   it("accepts only the typed action payload shape", () => {
     expect(isDesktopNotificationAction({
       watchId: "jpnurmi/gha/job/456",
-      action: "dismiss",
+      action: "open",
     })).toBe(true);
     expect(isDesktopNotificationAction({
       watchId: "jpnurmi/gha/job/456",

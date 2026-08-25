@@ -74,10 +74,6 @@ export function createDesktopNotificationActionHandler(
         return;
       }
 
-      if (action.action === "dismiss") {
-        return;
-      }
-
       if (action.action === "save" || action.action === "done") {
         const nextState = action.action === "save" ? "saved" : "done";
 

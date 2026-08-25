@@ -7,11 +7,10 @@ export type DesktopNotificationActionId =
   | "rerun-all"
   | "rerun-failed"
   | "save"
-  | "done"
-  | "dismiss";
+  | "done";
 
 export type WatchNotificationAction = {
-  id: Exclude<DesktopNotificationActionId, "open">;
+  id: DesktopNotificationActionId;
   label: string;
 };
 
@@ -138,7 +137,7 @@ function getNotificationActions(
       : doneCandidate
         ? [{ id: "done" as const, label: "Done" }]
         : []),
-    { id: "dismiss", label: "Dismiss" },
+    { id: "open", label: "Open" },
   ];
 }
 

@@ -10,8 +10,8 @@ describe("Windows notification configuration", () => {
     expect(rustSource).toContain("toast.add_button(&action.label, action.id.native_id())");
   });
 
-  it("falls back to Open for the notification body activation", () => {
-    expect(rustSource).toContain(".unwrap_or(DesktopNotificationActionId::Open)");
+  it("shows the app for notification body activation", () => {
+    expect(rustSource).toContain("None => show_main_window(&activation_app, None)");
     expect(rustSource).toContain("emit_desktop_notification_action(");
   });
 });

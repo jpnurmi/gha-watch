@@ -15,10 +15,10 @@ describe("macOS notification configuration", () => {
     expect(rustSource).toContain("center.removeDeliveredNotification(&notification)");
   });
 
-  it("keeps content click as Open and maps validated action labels", () => {
+  it("shows the app on content click and maps validated action labels", () => {
     expect(rustSource).toContain("mac_notification_sys::MainButton::SingleAction(label)");
     expect(rustSource).toContain("mac_notification_sys::MainButton::DropdownActions(");
-    expect(rustSource).toContain("DesktopNotificationActionId::Open");
+    expect(rustSource).toMatch(/NotificationResponse::Click\) => \{\s*show_main_window\(&app, None\)/);
     expect(rustSource).toContain(".find(|action| action.label == label)");
     expect(rustSource).toContain("emit_desktop_notification_action(&app, &notification, action.id)");
   });

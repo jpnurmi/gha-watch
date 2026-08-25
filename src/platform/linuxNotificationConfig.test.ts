@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import rustSource from "../../src-tauri/src/main.rs?raw";
 
 describe("Linux notification configuration", () => {
-  it("keeps Open as the default and routes supported native actions", () => {
+  it("shows the app for the default click and routes supported native actions", () => {
     expect(rustSource).toContain('#[cfg(target_os = "linux")]\nfn show_clickable_notification');
-    expect(rustSource).toContain('native.action("default", "Open")');
+    expect(rustSource).toContain('native.action("default", "Show")');
     expect(rustSource).toContain("handle.wait_for_action(|action|");
+    expect(rustSource).toContain('if action == "default"');
+    expect(rustSource).toContain("show_main_window(&app, None)");
     expect(rustSource).toContain("notify_rust::get_capabilities()");
     expect(rustSource).toContain("if supports_custom_actions");
     expect(rustSource).toContain("for action in &notification.actions");

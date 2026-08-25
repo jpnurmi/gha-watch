@@ -126,6 +126,5 @@ function isDesktopNotificationActionId(action: unknown): action is DesktopNotifi
     action === "rerun-all" ||
     action === "rerun-failed" ||
     action === "save" ||
-    action === "done" ||
-    action === "dismiss";
+    action === "done";
 }

@@ -86,7 +86,6 @@ enum DesktopNotificationActionId {
     RerunFailed,
     Save,
     Done,
-    Dismiss,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -171,10 +170,7 @@ fn validate_desktop_notification(notification: &DesktopNotification) -> Result<(
     let mut action_ids = HashSet::new();
 
     for action in &notification.actions {
-        if action.id == DesktopNotificationActionId::Open
-            || action.label != action.id.expected_label()
-            || !action_ids.insert(action.id)
-        {
+        if action.label != action.id.expected_label() || !action_ids.insert(action.id) {
             return Err("The desktop notification actions are invalid.".to_string());
         }
     }
@@ -204,19 +200,17 @@ impl DesktopNotificationActionId {
             Self::RerunFailed => "Re-run failed",
             Self::Save => "Save",
             Self::Done => "Done",
-            Self::Dismiss => "Dismiss",
         }
     }
 
     #[cfg(any(target_os = "linux", windows, test))]
     fn from_native_id(action: &str) -> Option<Self> {
         match action {
-            "open" | "default" => Some(Self::Open),
+            "open" => Some(Self::Open),
             "rerun-all" => Some(Self::RerunAll),
             "rerun-failed" => Some(Self::RerunFailed),
             "save" => Some(Self::Save),
             "done" => Some(Self::Done),
-            "dismiss" => Some(Self::Dismiss),
             _ => None,
         }
     }
@@ -229,7 +223,6 @@ impl DesktopNotificationActionId {
             Self::RerunFailed => "rerun-failed",
             Self::Save => "save",
             Self::Done => "done",
-            Self::Dismiss => "dismiss",
         }
     }
 }
@@ -298,11 +291,7 @@ fn show_clickable_notification(
 
         match response {
             Ok(mac_notification_sys::NotificationResponse::Click) => {
-                emit_desktop_notification_action(
-                    &app,
-                    &notification,
-                    DesktopNotificationActionId::Open,
-                );
+                show_main_window(&app, None);
                 dismiss_macos_notification(&notification.title, &notification.body);
             }
             Ok(mac_notification_sys::NotificationResponse::ActionButton(label)) => {
@@ -352,7 +341,7 @@ fn show_clickable_notification(
 ) -> Result<(), String> {
     let mut native = NativeNotification::new();
     native.summary(&notification.title).body(&notification.body);
-    native.action("default", "Open");
+    native.action("default", "Show");
 
     let supports_custom_actions = *SUPPORTS_CUSTOM_NOTIFICATION_ACTIONS.get_or_init(|| {
         notify_rust::get_capabilities().is_ok_and(|capabilities| {
@@ -383,15 +372,19 @@ fn show_clickable_notification(
     let handle = native.show().map_err(|error| error.to_string())?;
     std::thread::spawn(move || {
         handle.wait_for_action(|action| {
+            if action == "default" {
+                show_main_window(&app, None);
+                return;
+            }
+
             let action_id = DesktopNotificationActionId::from_native_id(action);
-            let is_registered = action_id == Some(DesktopNotificationActionId::Open)
-                || (supports_custom_actions
-                    && action_id.is_some_and(|id| {
-                        notification
-                            .actions
-                            .iter()
-                            .any(|registered| registered.id == id)
-                    }));
+            let is_registered = supports_custom_actions
+                && action_id.is_some_and(|id| {
+                    notification
+                        .actions
+                        .iter()
+                        .any(|registered| registered.id == id)
+                });
 
             if let Some(action_id) = action_id.filter(|_| is_registered) {
                 emit_desktop_notification_action(&app, &notification, action_id);
@@ -425,18 +418,24 @@ fn show_clickable_notification(
             ToastDuration::Short
         })
         .on_activated(move |native_action| {
-            let action = native_action
-                .as_deref()
-                .and_then(DesktopNotificationActionId::from_native_id)
-                .unwrap_or(DesktopNotificationActionId::Open);
-            let is_registered = action == DesktopNotificationActionId::Open
-                || activation_notification
-                    .actions
-                    .iter()
-                    .any(|registered| registered.id == action);
-
-            if is_registered {
-                emit_desktop_notification_action(&activation_app, &activation_notification, action);
+            match native_action.as_deref() {
+                Some(native_action) => {
+                    if let Some(action) = DesktopNotificationActionId::from_native_id(native_action)
+                        .filter(|action| {
+                            activation_notification
+                                .actions
+                                .iter()
+                                .any(|registered| registered.id == *action)
+                        })
+                    {
+                        emit_desktop_notification_action(
+                            &activation_app,
+                            &activation_notification,
+                            action,
+                        );
+                    }
+                }
+                None => show_main_window(&activation_app, None),
             }
 
             Ok(())
@@ -1323,7 +1322,7 @@ mod tests {
         let notification = desktop_notification(vec![
             action(DesktopNotificationActionId::RerunAll, "Re-run all"),
             action(DesktopNotificationActionId::RerunFailed, "Re-run failed"),
-            action(DesktopNotificationActionId::Dismiss, "Dismiss"),
+            action(DesktopNotificationActionId::Open, "Open"),
         ]);
 
         assert!(validate_desktop_notification(&notification).is_ok());
@@ -1335,8 +1334,6 @@ mod tests {
             DesktopNotificationActionId::Save,
             "Run a command",
         )]);
-        let open_button =
-            desktop_notification(vec![action(DesktopNotificationActionId::Open, "Open")]);
         let duplicate = desktop_notification(vec![
             action(DesktopNotificationActionId::Done, "Done"),
             action(DesktopNotificationActionId::Done, "Done"),
@@ -1345,18 +1342,18 @@ mod tests {
             action(DesktopNotificationActionId::RerunAll, "Re-run all"),
             action(DesktopNotificationActionId::RerunFailed, "Re-run failed"),
             action(DesktopNotificationActionId::Done, "Done"),
-            action(DesktopNotificationActionId::Dismiss, "Dismiss"),
+            action(DesktopNotificationActionId::Open, "Open"),
         ]);
 
         assert!(validate_desktop_notification(&wrong_label).is_err());
-        assert!(validate_desktop_notification(&open_button).is_err());
         assert!(validate_desktop_notification(&duplicate).is_err());
         assert!(validate_desktop_notification(&too_many).is_err());
         assert_eq!(DesktopNotificationActionId::from_native_id("archive"), None);
         assert_eq!(
-            DesktopNotificationActionId::from_native_id("dismiss"),
-            Some(DesktopNotificationActionId::Dismiss)
+            DesktopNotificationActionId::from_native_id("open"),
+            Some(DesktopNotificationActionId::Open)
         );
+        assert_eq!(DesktopNotificationActionId::from_native_id("default"), None);
     }
 
     #[test]

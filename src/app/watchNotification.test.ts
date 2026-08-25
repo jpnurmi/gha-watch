@@ -46,7 +46,7 @@ describe("createWatchNotification", () => {
       timeoutMs: 15_000,
       actions: [
         { id: "done", label: "Done" },
-        { id: "dismiss", label: "Dismiss" },
+        { id: "open", label: "Open" },
       ],
     });
   });
@@ -85,7 +85,7 @@ describe("createWatchNotification", () => {
     );
 
     expect(notification.persistent).toBe(false);
-    expect(notification.actions).toEqual([{ id: "dismiss", label: "Dismiss" }]);
+    expect(notification.actions).toEqual([{ id: "open", label: "Open" }]);
   });
 
   it("keeps failures persistent until they are confirmed", () => {
@@ -101,7 +101,7 @@ describe("createWatchNotification", () => {
       actions: [
         { id: "rerun-all", label: "Re-run all" },
         { id: "rerun-failed", label: "Re-run failed" },
-        { id: "dismiss", label: "Dismiss" },
+        { id: "open", label: "Open" },
       ],
     });
     expect(notification).not.toHaveProperty("timeoutMs");
@@ -113,12 +113,12 @@ describe("createWatchNotification", () => {
     ).toMatchObject({
       actions: [
         { id: "done", label: "Done" },
-        { id: "dismiss", label: "Dismiss" },
+        { id: "open", label: "Open" },
       ],
     });
   });
 
-  it("uses the exact watched URL for notification clicks", () => {
+  it("uses the exact watched URL for the Open action", () => {
     expect(
       createWatchNotification(
         watch({

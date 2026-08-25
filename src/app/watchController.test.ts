@@ -2885,7 +2885,7 @@ describe("watchController", () => {
         group: "getsentry/sentry",
         actions: [
           { id: "done", label: "Done" },
-          { id: "dismiss", label: "Dismiss" },
+          { id: "open", label: "Open" },
         ],
       },
     ]);

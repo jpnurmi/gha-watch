@@ -119,7 +119,7 @@ function action(
 }
 
 describe("desktop notification actions", () => {
-  it("opens the current watch URL and acknowledges its unseen status", async () => {
+  it("opens the current watch URL from the Open action and acknowledges its unseen status", async () => {
     const { deps, controller, clearNotifications, openUrl } = createDeps();
     const handle = createDesktopNotificationActionHandler(deps);
 
@@ -127,20 +127,6 @@ describe("desktop notification actions", () => {
 
     expect(controller.markSeen).toHaveBeenCalledWith("getsentry/sentry/run/123");
     expect(openUrl).toHaveBeenCalledWith("https://github.com/getsentry/sentry/actions/runs/123");
-    expect(clearNotifications).toHaveBeenCalledTimes(1);
-  });
-
-  it("dismisses by acknowledging the watch", async () => {
-    const { deps, controller, clearNotifications, openUrl, queueSync } = createDeps();
-    const handle = createDesktopNotificationActionHandler(deps);
-
-    await handle(action("dismiss"));
-
-    expect(controller.markSeen).toHaveBeenCalledWith("getsentry/sentry/run/123");
-    expect(controller.setTriageState).not.toHaveBeenCalled();
-    expect(controller.rerun).not.toHaveBeenCalled();
-    expect(openUrl).not.toHaveBeenCalled();
-    expect(queueSync).not.toHaveBeenCalled();
     expect(clearNotifications).toHaveBeenCalledTimes(1);
   });
 
