@@ -601,7 +601,7 @@ input {
   --tree-leading-width: 22px;
   --tree-column-gap: 4px;
   --tree-actions-width: 63px;
-  --repo-actions-width: 72px;
+  --repo-actions-width: 120px;
   --scrollbar-gutter-width: 14px;
 
   display: flex;
@@ -689,6 +689,7 @@ input {
   display: inline-grid;
   width: 18px;
   height: 18px;
+  flex: 0 0 auto;
   place-items: center;
   border: 0;
   border-radius: 6px;

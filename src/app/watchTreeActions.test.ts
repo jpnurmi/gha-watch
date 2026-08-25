@@ -218,7 +218,10 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain('"watch-group-triage-button"');
     expect(mainSource).not.toContain('data-action="arm-remove-repo"');
     expect(mainSource).not.toContain('data-action="confirm-remove-repo"');
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*72px;/s);
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*120px;/s);
+    expect(styles).toMatch(
+      /\.watch-group-watch,[^{]*\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-triage-button\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*flex:\s*0 0 auto;/s,
+    );
     expect(styles).toMatch(
       /\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-triage-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
     );
