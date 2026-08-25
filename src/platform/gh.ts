@@ -591,7 +591,7 @@ export async function fetchUserActiveWorkflowRuns(
 }
 
 const workflowRunsPerPage = 100;
-export const activeWorkflowRunLimit = 1_000;
+export const activeWorkflowRunLimit = 100;
 export const workflowRunCatchUpPageLimit = 10;
 
 export async function fetchWorkflowRunsSince(

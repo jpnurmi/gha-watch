@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  branchPatternWildcardLimit,
   createWatchController,
   getWorkflowRunSubscriptionMatch,
   workflowDiscoveryMaxLookbackMs,
@@ -1781,6 +1782,22 @@ describe("watchController", () => {
     expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
       workflowName: "CI",
       branchName: "Release/1.2",
+    }))).toBeUndefined();
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
+      workflowName: "CI",
+      branchName: "pre-release/1.2",
+    }))).toBeUndefined();
+    expect(getWorkflowRunSubscriptionMatch({
+      owner: "getsentry",
+      repo: "sentry",
+      workflowTargets: [{
+        kind: "include",
+        pattern: `release/${"*".repeat(branchPatternWildcardLimit + 1)}`,
+        workflowNames: ["CI"],
+      }],
+    }, completedWorkflowRun({
+      workflowName: "CI",
+      branchName: "release/1.2",
     }))).toBeUndefined();
   });
 

@@ -159,6 +159,10 @@ export type WatchPollOptions = {
 
 export const workflowDiscoveryOverlapMs = 5 * 60 * 1_000;
 export const workflowDiscoveryMaxLookbackMs = 24 * 60 * 60 * 1_000;
+export const branchPatternWildcardLimit = 16;
+
+const branchPatternCacheLimit = 256;
+const branchPatternExpressions = new Map<string, RegExp | null>();
 
 export type WorkflowRunSubscriptionMatch =
   | { kind: "workflow" }
@@ -244,8 +248,30 @@ function branchPatternMatches(pattern: string | undefined, branchName: string | 
     return false;
   }
 
+  let expression = branchPatternExpressions.get(pattern);
+
+  if (expression === undefined) {
+    expression = compileBranchPattern(pattern);
+
+    if (branchPatternExpressions.size >= branchPatternCacheLimit) {
+      branchPatternExpressions.clear();
+    }
+
+    branchPatternExpressions.set(pattern, expression);
+  }
+
+  return expression?.test(branchName) ?? false;
+}
+
+function compileBranchPattern(pattern: string): RegExp | null {
+  const wildcardCount = [...pattern].filter((character) => character === "*").length;
+
+  if (wildcardCount > branchPatternWildcardLimit) {
+    return null;
+  }
+
   const source = pattern.split("*").map(escapeRegularExpression).join(".*");
-  return new RegExp(`^${source}$`).test(branchName);
+  return new RegExp(`^${source}$`);
 }
 
 function escapeRegularExpression(value: string): string {
