@@ -1342,6 +1342,7 @@ export function createWatchController(
     const metadata = {
       ...(run.workflowName ? { workflowName: run.workflowName } : {}),
       ...(run.runTitle ? { runTitle: run.runTitle } : {}),
+      ...(run.runNumber ? { runNumber: run.runNumber } : {}),
       ...(run.branchName ? { branchName: run.branchName } : {}),
       ...(run.commitSha ? { commitSha: run.commitSha } : {}),
     };

@@ -32,7 +32,7 @@ export type WatchRowViewModel = {
   id: string;
   label: string;
   subject: WatchSubject;
-  prReference?: string;
+  referenceLabel?: string;
   prState?: PrStateViewModel;
   branchName?: string;
   statusLabel: string;
@@ -163,7 +163,7 @@ function createWatchRowViewModel(
       id: watch.id,
       label: getWatchDisplayLabel(watch),
       subject: getWatchSubject(watch),
-      prReference: getPullRequestReference(watch),
+      referenceLabel: getWatchReference(watch),
       prState: getPullRequestState(watch),
       branchName: getBranchName(watch),
       statusLabel: "Errored",
@@ -233,7 +233,7 @@ function createRow(
     id: watch.id,
     label: getWatchDisplayLabel(watch),
     subject: getWatchSubject(watch),
-    prReference: getPullRequestReference(watch),
+    referenceLabel: getWatchReference(watch),
     prState: getPullRequestState(watch),
     branchName: getBranchName(watch),
     statusLabel,
@@ -297,7 +297,12 @@ function isPullRequestWatch(watch: WatchRecord): boolean {
   return watch.target.kind === "pr" || Boolean(watch.target.prNumber || watch.source || watch.sourceState);
 }
 
-function getPullRequestReference(watch: WatchRecord): string | undefined {
+function getWatchReference(watch: WatchRecord): string | undefined {
+  if (watch.target.kind === "run" && !watch.target.prNumber) {
+    const runNumber = watch.metadata?.runNumber?.trim();
+    return runNumber ? `#${runNumber}` : undefined;
+  }
+
   if (!watch.target.prNumber) {
     return undefined;
   }
@@ -493,7 +498,7 @@ function getDirectWorkflowTreeNode(
   let node = group.tree.find((item) => item.id === nodeId);
 
   if (!node) {
-    node = createTreeNode(nodeId, "workflow", getDirectWorkflowNodeLabel(watch, row), row.tone, undefined, undefined, sourceRun.url, row.branchName);
+    node = createTreeNode(nodeId, "workflow", getDirectWorkflowNodeLabel(watch, row), row.tone, row.referenceLabel, undefined, sourceRun.url, row.branchName);
     group.tree.push(node);
     group.items.push({ kind: "tree", node });
   }
@@ -503,6 +508,7 @@ function getDirectWorkflowTreeNode(
 
 function updateDirectWorkflowParentNode(node: WatchTreeNodeViewModel, row: WatchRowViewModel): void {
   node.label = row.label;
+  node.referenceLabel = row.referenceLabel;
   node.primaryRowId = row.id;
   node.url = row.url;
   node.timingText = row.timingText;
@@ -671,7 +677,7 @@ function createTreeRow(
   return {
     ...row,
     label: getNestedWatchRowLabel(watch, row, parentNode, workflowLabel),
-    prReference: undefined,
+    referenceLabel: undefined,
     prState: undefined,
   };
 }
@@ -715,7 +721,7 @@ function createDirectWorkflowTreeRow(
   return {
     ...row,
     label: getDirectWorkflowChildLabel(watch, row, workflowNode),
-    prReference: undefined,
+    referenceLabel: undefined,
     prState: undefined,
   };
 }

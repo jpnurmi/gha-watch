@@ -1397,14 +1397,18 @@ function renderActiveWorkflowRunItem(group: WatchGroupViewModel, run: ActiveWork
       title="${escapeHtml(getActiveWorkflowRunTitle(run))}"
     >
       <span class="repo-action-number">${escapeHtml(formatWorkflowRunStatus(run.status))}</span>
-      <span class="repo-action-title">${escapeHtml(run.title)}</span>
+      <span class="repo-action-title watch-title-cluster">
+        <span class="watch-title-text">${escapeHtml(run.title)}</span>
+        ${run.runNumber ? `<span class="repo-action-number">#${escapeHtml(run.runNumber)}</span>` : ""}
+      </span>
       ${renderBranchBadge(run.branchName)}
     </button>
   `;
 }
 
 function getActiveWorkflowRunTitle(run: ActiveWorkflowRun): string {
-  return run.branchName ? `${run.title} · ${run.branchName}` : run.title;
+  const title = `${run.title}${run.runNumber ? ` #${run.runNumber}` : ""}`;
+  return run.branchName ? `${title} · ${run.branchName}` : title;
 }
 
 function renderBranchBadge(branchName: string | undefined): string {
@@ -1679,7 +1683,7 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
       ${renderLeadingIcon(row)}
       <div class="watch-main">
         <span class="watch-label">
-          ${renderWatchTitleLink(row.label, row.prReference, row.url, [row.id])}
+          ${renderWatchTitleLink(row.label, row.referenceLabel, row.url, [row.id])}
         </span>
         ${renderMetadata(row)}
       </div>

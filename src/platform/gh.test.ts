@@ -80,6 +80,7 @@ describe("fetchWatchState", () => {
         conclusion: "",
         display_title: "Run tests",
         name: "CI",
+        run_number: 1785,
         head_branch: "feature/build-status",
         head_sha: "abc123",
         created_at: "2026-05-16T12:00:00Z",
@@ -114,6 +115,7 @@ describe("fetchWatchState", () => {
       metadata: {
         workflowName: "CI",
         runTitle: "Run tests",
+        runNumber: "1785",
         branchName: "feature/build-status",
         commitSha: "abc123",
       },
@@ -1473,6 +1475,7 @@ describe("fetchActiveWorkflowRuns", () => {
         stdout: JSON.stringify([
           {
             databaseId: 101,
+            number: 1784,
             displayTitle: "Older run",
             workflowName: "CI",
             headBranch: "main",
@@ -1489,6 +1492,7 @@ describe("fetchActiveWorkflowRuns", () => {
         stdout: JSON.stringify([
           {
             databaseId: 102,
+            number: 1785,
             displayTitle: "Newer run",
             workflowName: "Deploy",
             headBranch: "release/0.2",
@@ -1505,6 +1509,7 @@ describe("fetchActiveWorkflowRuns", () => {
     await expect(fetchActiveWorkflowRuns({ owner: "getsentry", repo: "sentry" }, executor)).resolves.toEqual([
       {
         runId: "102",
+        runNumber: "1785",
         title: "Deploy: Newer run",
         workflowName: "Deploy",
         status: "in_progress",
@@ -1515,6 +1520,7 @@ describe("fetchActiveWorkflowRuns", () => {
       },
       {
         runId: "101",
+        runNumber: "1784",
         title: "CI: Older run",
         workflowName: "CI",
         status: "queued",
@@ -1538,7 +1544,7 @@ describe("fetchActiveWorkflowRuns", () => {
           "--limit",
           "100",
           "--json",
-          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,number,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
       },
       {
@@ -1553,7 +1559,7 @@ describe("fetchActiveWorkflowRuns", () => {
           "--limit",
           "100",
           "--json",
-          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,number,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
       },
     ]);
@@ -1624,7 +1630,7 @@ describe("fetchActiveWorkflowRuns", () => {
           "--user",
           "jpnurmi",
           "--json",
-          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,number,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
       },
       {
@@ -1641,7 +1647,7 @@ describe("fetchActiveWorkflowRuns", () => {
           "--user",
           "jpnurmi",
           "--json",
-          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,number,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ],
       },
     ]);
@@ -1699,6 +1705,7 @@ describe("fetchWorkflowRunsSince", () => {
   it("paginates workflow runs across statuses and preserves terminal metadata", async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) => ({
       id: index + 1,
+      run_number: index + 1700,
       display_title: `Run ${index + 1}`,
       name: "CI",
       event: index === 0 ? "workflow_dispatch" : "push",
@@ -1760,6 +1767,7 @@ describe("fetchWorkflowRunsSince", () => {
     expect(runs).toHaveLength(101);
     expect(runs[0]).toEqual({
       runId: "1",
+      runNumber: "1700",
       title: "CI: Run 1",
       runTitle: "Run 1",
       event: "workflow_dispatch",

@@ -73,7 +73,7 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain(
       '<span class="watch-title-text" title="${escapeHtml(label)}">${renderTitleMarkup(label)}</span>',
     );
-    expect(mainSource).toContain("renderWatchTitleLink(row.label, row.prReference, row.url, [row.id])");
+    expect(mainSource).toContain("renderWatchTitleLink(row.label, row.referenceLabel, row.url, [row.id])");
     expect(mainSource).toContain("renderWatchTitleLink(node.label, node.referenceLabel, node.url, node.rowIds)");
     expect(mainSource).toContain("renderWatchMetadataContent(items, row.branchName)");
     expect(mainSource).toContain("renderWatchMetadataContent(items, node.branchName)");
@@ -351,7 +351,7 @@ describe("watch tree group actions", () => {
       /\.watch:hover \.watch-action-button\.is-done-candidate,[^{]*\.watch:focus-within \.watch-action-button\.is-done-candidate\s*\{[^}]*opacity:\s*0\.72;/s,
     );
     expect(styles).toMatch(
-      /\.watch\.has-done-candidate \.watch-label,\s*\.watch\.is-deemphasized \.watch-label\s*\{[^}]*opacity:\s*0\.55;/s,
+      /\.watch\.has-done-candidate \.watch-title-text,\s*\.watch\.is-deemphasized \.watch-title-text\s*\{[^}]*opacity:\s*0\.55;/s,
     );
     expect(styles).toMatch(
       /\.watch\.has-done-candidate :is\(\.watch-workflow-status\.status-icon-success, \.watch-workflow-status\.status-icon-failure\),\s*\.watch\.is-deemphasized :is\(\.watch-workflow-status\.status-icon-success, \.watch-workflow-status\.status-icon-failure\)\s*\{[^}]*color:\s*#8b949e;/s,

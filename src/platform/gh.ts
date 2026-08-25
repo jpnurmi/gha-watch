@@ -46,6 +46,7 @@ type RunViewResponse = {
   jobs_url?: string;
   name?: string;
   pull_requests?: PullRequestReference[];
+  run_number?: number | string;
   run_started_at?: string;
   updated_at?: string;
 };
@@ -145,6 +146,7 @@ export type PullRequestDetailsBatch = Array<PullRequestDetails | undefined>;
 
 export type ActiveWorkflowRun = {
   runId: string;
+  runNumber?: string;
   title: string;
   runTitle?: string;
   event?: string;
@@ -244,6 +246,7 @@ type WorkflowRunListResponse = {
   event?: string;
   headBranch?: string | null;
   headSha?: string | null;
+  number?: number | string;
   status?: string;
   updatedAt?: string;
   url?: string;
@@ -270,6 +273,7 @@ type WorkflowRunApiResponse = {
   id?: number | string;
   name?: string;
   pull_requests?: WorkflowRunPullRequestResponse[];
+  run_number?: number | string;
   run_started_at?: string;
   status?: string;
   updated_at?: string;
@@ -668,7 +672,7 @@ async function fetchActiveWorkflowRunsWithArgs(
           String(activeWorkflowRunLimit),
           ...extraArgs,
           "--json",
-          "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
+          "databaseId,number,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
         ]);
 
         assertSuccessfulGhResult(result);
@@ -689,6 +693,7 @@ async function fetchActiveWorkflowRunsWithArgs(
 
 function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWorkflowRun | undefined {
   const runId = getRunDatabaseId(response.databaseId);
+  const runNumber = getRunDatabaseId(response.number);
   const event = response.event?.trim();
   const workflowName = response.workflowName?.trim();
   const title = joinTitle(workflowName, response.displayTitle);
@@ -703,6 +708,7 @@ function normalizeActiveWorkflowRun(response: WorkflowRunListResponse): ActiveWo
 
   return {
     runId,
+    ...(runNumber ? { runNumber } : {}),
     title,
     ...(event ? { event } : {}),
     ...(workflowName ? { workflowName } : {}),
@@ -719,6 +725,7 @@ function normalizeWorkflowRunSummary(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
 ): WorkflowRunSummary | undefined {
   const runId = getRunDatabaseId(response.id);
+  const runNumber = getRunDatabaseId(response.run_number);
   const status = response.status?.trim();
   const url = response.html_url?.trim();
   const createdAt = normalizeApiTimestamp(response.created_at);
@@ -740,6 +747,7 @@ function normalizeWorkflowRunSummary(
 
   return {
     runId,
+    ...(runNumber ? { runNumber } : {}),
     title,
     ...(runTitle ? { runTitle } : {}),
     ...(event ? { event } : {}),
@@ -1443,6 +1451,7 @@ function toRunSnapshot(
     metadata: compactMetadata({
       workflowName: response.name,
       runTitle: response.display_title,
+      runNumber: getRunDatabaseId(response.run_number),
       branchName: response.head_branch ?? undefined,
       commitSha: response.head_sha ?? undefined,
     }),

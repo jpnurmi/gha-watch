@@ -964,7 +964,7 @@ describe("watchController", () => {
     const { deps, fetches, notificationRecords, workflowRunFetches } = createDeps([]);
     deps.fetchWorkflowRunsSince = async (target, createdAfter, createdBefore) => {
       workflowRunFetches.push({ target, createdAfter, createdBefore });
-      return [completedWorkflowRun()];
+      return [completedWorkflowRun({ runNumber: "1785" })];
     };
     const controller = createWatchController(
       { ...deps, now: () => now },
@@ -1005,6 +1005,7 @@ describe("watchController", () => {
         metadata: {
           workflowName: "CI",
           runTitle: "Fast checks",
+          runNumber: "1785",
           branchName: "main",
         },
         timing: {
