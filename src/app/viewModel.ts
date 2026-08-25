@@ -33,6 +33,7 @@ export type WatchRowViewModel = {
   label: string;
   subject: WatchSubject;
   referenceLabel?: string;
+  pullRequestReferenceLabel?: string;
   prState?: PrStateViewModel;
   branchName?: string;
   statusLabel: string;
@@ -164,6 +165,7 @@ function createWatchRowViewModel(
       label: getWatchDisplayLabel(watch),
       subject: getWatchSubject(watch),
       referenceLabel: getWatchReference(watch),
+      pullRequestReferenceLabel: getRunPullRequestReference(watch),
       prState: getPullRequestState(watch),
       branchName: getBranchName(watch),
       statusLabel: "Errored",
@@ -234,6 +236,7 @@ function createRow(
     label: getWatchDisplayLabel(watch),
     subject: getWatchSubject(watch),
     referenceLabel: getWatchReference(watch),
+    pullRequestReferenceLabel: getRunPullRequestReference(watch),
     prState: getPullRequestState(watch),
     branchName: getBranchName(watch),
     statusLabel,
@@ -298,7 +301,7 @@ function isPullRequestWatch(watch: WatchRecord): boolean {
 }
 
 function getWatchReference(watch: WatchRecord): string | undefined {
-  if (watch.target.kind === "run" && !watch.target.prNumber) {
+  if (watch.target.kind === "run") {
     const runNumber = watch.metadata?.runNumber?.trim();
     return runNumber ? `#${runNumber}` : undefined;
   }
@@ -311,6 +314,12 @@ function getWatchReference(watch: WatchRecord): string | undefined {
   return watch.target.kind === "pr" && getWatchDisplayLabel(watch) === `Pull request ${reference}`
     ? undefined
     : reference;
+}
+
+function getRunPullRequestReference(watch: WatchRecord): string | undefined {
+  return watch.target.kind === "run" && watch.target.prNumber
+    ? `#${watch.target.prNumber}`
+    : undefined;
 }
 
 function getWatchDisplayLabel(watch: WatchRecord): string {
@@ -678,6 +687,7 @@ function createTreeRow(
     ...row,
     label: getNestedWatchRowLabel(watch, row, parentNode, workflowLabel),
     referenceLabel: undefined,
+    pullRequestReferenceLabel: undefined,
     prState: undefined,
   };
 }
@@ -722,6 +732,7 @@ function createDirectWorkflowTreeRow(
     ...row,
     label: getDirectWorkflowChildLabel(watch, row, workflowNode),
     referenceLabel: undefined,
+    pullRequestReferenceLabel: undefined,
     prState: undefined,
   };
 }

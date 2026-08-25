@@ -73,8 +73,8 @@ describe("watch tree group actions", () => {
     expect(mainSource).toContain(
       '<span class="watch-title-text" title="${escapeHtml(label)}">${renderTitleMarkup(label)}</span>',
     );
-    expect(mainSource).toContain("renderWatchTitleLink(row.label, row.referenceLabel, row.url, [row.id])");
-    expect(mainSource).toContain("renderWatchTitleLink(node.label, node.referenceLabel, node.url, node.rowIds)");
+    expect(mainSource).toContain("[row.referenceLabel, row.pullRequestReferenceLabel]");
+    expect(mainSource).toContain("renderWatchTitleLink(node.label, [node.referenceLabel], node.url, node.rowIds)");
     expect(mainSource).toContain("renderWatchMetadataContent(items, row.branchName)");
     expect(mainSource).toContain("renderWatchMetadataContent(items, node.branchName)");
     expect(mainSource).not.toContain('watch-label${row.branchName');

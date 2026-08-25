@@ -1538,7 +1538,7 @@ function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): strin
         ${renderWatchTreeLeading(node, depth, isCollapsed)}
         <div class="watch-tree-main">
           <span class="watch-label">
-            ${renderWatchTitleLink(node.label, node.referenceLabel, node.url, node.rowIds)}
+            ${renderWatchTitleLink(node.label, [node.referenceLabel], node.url, node.rowIds)}
           </span>
           ${renderWatchTreeMetadata(node)}
         </div>
@@ -1683,7 +1683,12 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
       ${renderLeadingIcon(row)}
       <div class="watch-main">
         <span class="watch-label">
-          ${renderWatchTitleLink(row.label, row.referenceLabel, row.url, [row.id])}
+          ${renderWatchTitleLink(
+            row.label,
+            [row.referenceLabel, row.pullRequestReferenceLabel],
+            row.url,
+            [row.id],
+          )}
         </span>
         ${renderMetadata(row)}
       </div>
@@ -1782,13 +1787,17 @@ function renderWorkflowStatusIcon(
 
 function renderWatchTitleLink(
   label: string,
-  referenceLabel: string | undefined,
+  referenceLabels: Array<string | undefined>,
   url: string | undefined,
   rowIds: string[],
 ): string {
+  const references = referenceLabels
+    .filter((reference): reference is string => Boolean(reference))
+    .map((reference) => `<span class="watch-title-reference">${escapeHtml(reference)}</span>`)
+    .join("");
   const content = `
     <span class="watch-title-text" title="${escapeHtml(label)}">${renderTitleMarkup(label)}</span>
-    ${referenceLabel ? `<span class="watch-title-reference">${escapeHtml(referenceLabel)}</span>` : ""}
+    ${references}
   `;
 
   if (!url) {
