@@ -1,4 +1,8 @@
-import type { WatchedRepo } from "./watchedRepos";
+import {
+  getWatchedWorkflowTargets,
+  type WatchedRepo,
+  type WatchedWorkflowTarget,
+} from "./watchedRepos";
 
 export const workflowDiscoveryStateVersion = 2;
 export const workflowDiscoveryRecentRunLimit = 1_000;
@@ -30,8 +34,7 @@ export function getWorkflowDiscoveryRepositoryKey(
 export function getWorkflowDiscoverySubscriptionFingerprint(repo: WatchedRepo): string {
   return buildSubscriptionFingerprint({
     pullRequestScope: repo.pullRequestScope ?? null,
-    defaultBranchWorkflowNames: normalizeSubscriptionNames(repo.defaultBranchWorkflowNames),
-    userWorkflowNames: normalizeSubscriptionNames(repo.userWorkflowNames),
+    workflowTargets: normalizeWorkflowTargets(getWatchedWorkflowTargets(repo)),
   });
 }
 
@@ -145,13 +148,11 @@ function normalizeSubscriptionNames(value: string[] | undefined): string[] {
 
 function buildSubscriptionFingerprint(fields: {
   pullRequestScope: NonNullable<WatchedRepo["pullRequestScope"]> | null;
-  defaultBranchWorkflowNames: string[];
-  userWorkflowNames: string[];
+  workflowTargets: WatchedWorkflowTarget[];
 }): string {
   return JSON.stringify({
     pullRequestScope: fields.pullRequestScope,
-    defaultBranchWorkflowNames: fields.defaultBranchWorkflowNames,
-    userWorkflowNames: fields.userWorkflowNames,
+    workflowTargets: fields.workflowTargets,
   });
 }
 
@@ -173,14 +174,68 @@ function normalizeSubscriptionFingerprint(value: unknown): string | undefined {
       return undefined;
     }
 
-    return buildSubscriptionFingerprint({
-      pullRequestScope,
-      defaultBranchWorkflowNames: normalizeUnknownSubscriptionNames(parsed.defaultBranchWorkflowNames),
-      userWorkflowNames: normalizeUnknownSubscriptionNames(parsed.userWorkflowNames),
-    });
+    const workflowTargets = Array.isArray(parsed.workflowTargets)
+      ? normalizeUnknownWorkflowTargets(parsed.workflowTargets)
+      : normalizeWorkflowTargets([
+        {
+          kind: "default",
+          workflowNames: normalizeUnknownSubscriptionNames(parsed.defaultBranchWorkflowNames),
+        },
+        {
+          kind: "own",
+          workflowNames: normalizeUnknownSubscriptionNames(parsed.userWorkflowNames),
+        },
+      ]);
+
+    return buildSubscriptionFingerprint({ pullRequestScope, workflowTargets });
   } catch {
     return undefined;
   }
+}
+
+function normalizeWorkflowTargets(value: WatchedWorkflowTarget[] | undefined): WatchedWorkflowTarget[] {
+  return (value ?? [])
+    .map((target) => ({
+      kind: target.kind,
+      ...(target.pattern ? { pattern: target.pattern.trim() } : {}),
+      workflowNames: normalizeSubscriptionNames(target.workflowNames),
+    }))
+    .filter((target) => target.workflowNames.length > 0)
+    .sort((left, right) => getWorkflowTargetKey(left).localeCompare(getWorkflowTargetKey(right)));
+}
+
+function normalizeUnknownWorkflowTargets(value: unknown[]): WatchedWorkflowTarget[] {
+  const targets: WatchedWorkflowTarget[] = [];
+
+  for (const item of value) {
+    if (!isRecord(item)) {
+      continue;
+    }
+
+    const kind = item.kind;
+
+    if (kind !== "default" && kind !== "own" && kind !== "all" && kind !== "include" && kind !== "exclude") {
+      continue;
+    }
+
+    const pattern = typeof item.pattern === "string" ? item.pattern.trim() : "";
+
+    if ((kind === "include" || kind === "exclude") && !pattern) {
+      continue;
+    }
+
+    targets.push({
+      kind,
+      ...(pattern ? { pattern } : {}),
+      workflowNames: normalizeUnknownSubscriptionNames(item.workflowNames),
+    });
+  }
+
+  return normalizeWorkflowTargets(targets);
+}
+
+function getWorkflowTargetKey(target: Pick<WatchedWorkflowTarget, "kind" | "pattern">): string {
+  return target.pattern ? `${target.kind}:${target.pattern}` : target.kind;
 }
 
 function normalizeUnknownSubscriptionNames(value: unknown): string[] {

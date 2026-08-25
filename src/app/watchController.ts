@@ -1,4 +1,8 @@
-import type { WatchedRepo } from "../domain/watchedRepos";
+import {
+  getWatchedWorkflowTargets,
+  type WatchedRepo,
+  type WatchedWorkflowTarget,
+} from "../domain/watchedRepos";
 import {
   emptyWorkflowDiscoveryState,
   getWorkflowDiscoveryRepositoryKey,
@@ -155,6 +159,10 @@ export type WatchPollOptions = {
 
 export const workflowDiscoveryOverlapMs = 5 * 60 * 1_000;
 export const workflowDiscoveryMaxLookbackMs = 24 * 60 * 60 * 1_000;
+export const branchPatternWildcardLimit = 16;
+
+const branchPatternCacheLimit = 256;
+const branchPatternExpressions = new Map<string, RegExp | null>();
 
 export type WorkflowRunSubscriptionMatch =
   | { kind: "workflow" }
@@ -173,9 +181,13 @@ export function getWorkflowRunSubscriptionMatch(
   const actorMatchesUser = Boolean(
     userLogin && run.actorLogin?.trim().toLowerCase() === userLogin,
   );
-  const userWorkflowMatches = run.event === "workflow_dispatch" &&
+  const workflowTargets = getWatchedWorkflowTargets(watchedRepo);
+  const ownWorkflowMatches = workflowTargets.some((target) =>
+    target.kind === "own" &&
+    run.event === "workflow_dispatch" &&
     actorMatchesUser &&
-    workflowNameIsSelected(run.workflowName, watchedRepo.userWorkflowNames ?? []);
+    workflowNameIsSelected(run.workflowName, target.workflowNames)
+  );
   const pullRequest = options.openPullRequests?.find(
     (candidate) =>
       run.pullRequests?.some((reference) => reference.number === candidate.number) ||
@@ -186,21 +198,84 @@ export function getWorkflowRunSubscriptionMatch(
     const pullRequestMatches = watchedRepo.pullRequestScope === "all" ||
       (watchedRepo.pullRequestScope === "user" &&
         pullRequest.authorLogin?.trim().toLowerCase() === userLogin) ||
-      (userWorkflowMatches && pullRequest.authorLogin?.trim().toLowerCase() === userLogin);
+      (ownWorkflowMatches && pullRequest.authorLogin?.trim().toLowerCase() === userLogin);
 
     if (pullRequestMatches) {
       return { kind: "pull-request", pullRequest };
     }
   }
 
-  const defaultBranchMatches = run.branchName === options.defaultBranch &&
-    workflowNameIsSelected(run.workflowName, watchedRepo.defaultBranchWorkflowNames ?? []);
+  const included = workflowTargets.some((target) =>
+    target.kind !== "exclude" &&
+    workflowNameIsSelected(run.workflowName, target.workflowNames) &&
+    workflowTargetMatches(target, run, options.defaultBranch, ownWorkflowMatches)
+  );
+  const excluded = workflowTargets.some((target) =>
+    target.kind === "exclude" &&
+    workflowNameIsSelected(run.workflowName, target.workflowNames) &&
+    branchPatternMatches(target.pattern, run.branchName)
+  );
 
-  if (defaultBranchMatches || userWorkflowMatches) {
+  if (included && !excluded) {
     return { kind: "workflow" };
   }
 
   return undefined;
+}
+
+function workflowTargetMatches(
+  target: WatchedWorkflowTarget,
+  run: ActiveWorkflowRun,
+  defaultBranch: string | undefined,
+  ownWorkflowMatches: boolean,
+): boolean {
+  switch (target.kind) {
+    case "default":
+      return Boolean(run.branchName && run.branchName === defaultBranch);
+    case "own":
+      return ownWorkflowMatches;
+    case "all":
+      return Boolean(run.branchName);
+    case "include":
+      return branchPatternMatches(target.pattern, run.branchName);
+    case "exclude":
+      return false;
+  }
+}
+
+function branchPatternMatches(pattern: string | undefined, branchName: string | undefined): boolean {
+  if (!pattern || !branchName) {
+    return false;
+  }
+
+  let expression = branchPatternExpressions.get(pattern);
+
+  if (expression === undefined) {
+    expression = compileBranchPattern(pattern);
+
+    if (branchPatternExpressions.size >= branchPatternCacheLimit) {
+      branchPatternExpressions.clear();
+    }
+
+    branchPatternExpressions.set(pattern, expression);
+  }
+
+  return expression?.test(branchName) ?? false;
+}
+
+function compileBranchPattern(pattern: string): RegExp | null {
+  const wildcardCount = [...pattern].filter((character) => character === "*").length;
+
+  if (wildcardCount > branchPatternWildcardLimit) {
+    return null;
+  }
+
+  const source = pattern.split("*").map(escapeRegularExpression).join(".*");
+  return new RegExp(`^${source}$`);
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
 }
 
 type MetadataRefreshResult = {
@@ -752,12 +827,19 @@ export function createWatchController(
   }
 
   async function syncWatchedWorkflowSubscriptions(watchedRepo: WatchedRepo): Promise<WatchedRepoSyncResult> {
-    const defaultBranchWorkflowNames = watchedRepo.defaultBranchWorkflowNames ?? [];
-    const userWorkflowNames = watchedRepo.userWorkflowNames ?? [];
-    const needsPullRequestList = userWorkflowNames.length > 0;
+    const workflowTargets = getWatchedWorkflowTargets(watchedRepo);
+    const needsOwnRuns = workflowTargets.some(
+      (target) => target.kind === "own" && target.workflowNames.length > 0,
+    );
+    const needsGeneralRuns = workflowTargets.some(
+      (target) => target.kind !== "own" && target.kind !== "exclude" && target.workflowNames.length > 0,
+    );
+    const needsPullRequestList = needsOwnRuns;
     const needsPullRequestChecks = Boolean(watchedRepo.pullRequestScope);
-    const needsUserLogin = watchedRepo.pullRequestScope === "user" || userWorkflowNames.length > 0;
-    const needsDefaultBranch = defaultBranchWorkflowNames.length > 0;
+    const needsUserLogin = watchedRepo.pullRequestScope === "user" || needsOwnRuns;
+    const needsDefaultBranch = workflowTargets.some(
+      (target) => target.kind === "default" && target.workflowNames.length > 0,
+    );
     let openPullRequests: OpenPullRequest[] = [];
     let userLogin = "";
     let defaultBranch = "";
@@ -884,9 +966,9 @@ export function createWatchController(
 
       const targets = new Map<string, ActiveWorkflowRun>();
 
-      if (defaultBranchWorkflowNames.length > 0) {
+      if (needsGeneralRuns) {
         if (!deps.fetchActiveWorkflowRuns) {
-          throw new Error("Default branch workflow subscriptions need GitHub run listing support.");
+          throw new Error("Branch workflow subscriptions need GitHub run listing support.");
         }
 
         const runs = await trackRequest(deps.fetchActiveWorkflowRuns(watchedRepo));
@@ -909,7 +991,7 @@ export function createWatchController(
         }
       }
 
-      if (userWorkflowNames.length > 0) {
+      if (needsOwnRuns) {
         if (!deps.fetchUserActiveWorkflowRuns) {
           throw new Error("User workflow subscriptions need GitHub run listing support.");
         }
@@ -1085,14 +1167,17 @@ export function createWatchController(
   }
 
   async function resolveCatchUpPullRequests(
-    repo: Pick<WatchedRepo, "owner" | "repo" | "pullRequestScope" | "userWorkflowNames">,
+    repo: Pick<WatchedRepo, "owner" | "repo" | "pullRequestScope" | "workflowTargets">,
     runs: WorkflowRunSummary[],
     openPullRequests: OpenPullRequest[],
   ): Promise<OpenPullRequest[]> {
     const pullRequests = new Map(openPullRequests.map((pullRequest) => [pullRequest.number, pullRequest]));
     const references = new Map<string, { authorLogin?: string; branchName?: string }>();
 
-    if (!repo.pullRequestScope && !repo.userWorkflowNames?.length) {
+    if (
+      !repo.pullRequestScope &&
+      !getWatchedWorkflowTargets(repo).some((target) => target.kind === "own" && target.workflowNames.length > 0)
+    ) {
       return openPullRequests;
     }
 

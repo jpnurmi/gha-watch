@@ -72,7 +72,7 @@ describe("watch suppression storage", () => {
           baselineAt: "2026-08-09T00:00:00.000Z",
           lastScannedAt: "2026-08-09T00:00:00.000Z",
           recentRunIds: ["123", "122"],
-          subscriptionFingerprint: "{\"pullRequestScope\":null,\"defaultBranchWorkflowNames\":[\"CI\"],\"userWorkflowNames\":[]}",
+          subscriptionFingerprint: "{\"pullRequestScope\":null,\"workflowTargets\":[{\"kind\":\"default\",\"workflowNames\":[\"CI\"]}]}",
           updatedAt: "2026-08-09T00:00:00.000Z",
         },
       },
