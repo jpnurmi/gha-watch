@@ -1759,8 +1759,8 @@ button.watch-tree-leading {
   text-align: left;
 }
 
-.watch.has-done-candidate .watch-label,
-.watch.is-deemphasized .watch-label {
+.watch.has-done-candidate .watch-title-text,
+.watch.is-deemphasized .watch-title-text {
   opacity: 0.55;
 }
 

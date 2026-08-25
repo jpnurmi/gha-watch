@@ -172,7 +172,7 @@ describe("createPopupViewModel", () => {
         row: {
           id: "getsentry/sentry/run/123",
           label: "CI: Build app",
-          prReference: "#51",
+          pullRequestReferenceLabel: "#51",
           prState: { label: "Ready", tone: "ready" },
           subject: "workflow",
         },
@@ -182,7 +182,7 @@ describe("createPopupViewModel", () => {
         row: {
           id: "getsentry/sentry/job/456",
           label: "CI: macOS",
-          prReference: "#51",
+          referenceLabel: "#51",
           prState: { label: "Ready", tone: "ready" },
           subject: "job",
         },
@@ -264,7 +264,7 @@ describe("createPopupViewModel", () => {
           id: "getsentry/sentry/pull/51",
           label: "Fix flaky CI",
           branchName: "feature/flaky-ci",
-          prReference: "#51",
+          referenceLabel: "#51",
           prState: { label: "Ready", tone: "ready" },
           subject: "pull-request",
         },
@@ -288,7 +288,7 @@ describe("createPopupViewModel", () => {
     ]);
 
     expect(model.rows[0]).toMatchObject({ label: "Pull request #51" });
-    expect(model.rows[0].prReference).toBeUndefined();
+    expect(model.rows[0].referenceLabel).toBeUndefined();
   });
 
   it("orders repository groups by saved repo order", () => {
@@ -848,7 +848,7 @@ describe("createPopupViewModel", () => {
     ]);
   });
 
-  it("exposes muted pull request references for watch titles", () => {
+  it("exposes muted references for watch titles", () => {
     const model = createPopupViewModel([
       watch({
         target: {
@@ -859,10 +859,23 @@ describe("createPopupViewModel", () => {
           prNumber: "51",
           url: "https://github.com/getsentry/sentry/actions/runs/123?pr=51",
         },
+        metadata: { runNumber: " 1785 " },
       }),
     ]);
 
-    expect(model.rows[0].prReference).toBe("#51");
+    expect(model.rows[0]).toMatchObject({
+      referenceLabel: "#1785",
+      pullRequestReferenceLabel: "#51",
+    });
+
+    const run = createPopupViewModel([
+      watch({
+        metadata: { runNumber: "1785" },
+      }),
+    ]);
+
+    expect(run.rows[0].referenceLabel).toBe("#1785");
+    expect(run.rows[0].pullRequestReferenceLabel).toBeUndefined();
   });
 
   it("formats queued, running, and completed timing text", () => {

@@ -18,6 +18,7 @@ export type WatchMetadata = {
   prUpdatedAt?: string;
   workflowName?: string;
   runTitle?: string;
+  runNumber?: string;
   jobName?: string;
   branchName?: string;
   commitSha?: string;
