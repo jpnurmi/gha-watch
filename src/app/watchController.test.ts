@@ -920,6 +920,44 @@ describe("watchController", () => {
     expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/123"]);
   });
 
+  it("subscribes to active workflow runs on matching branch patterns", async () => {
+    const { deps, activeWorkflowRunFetches, defaultBranchFetches } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI: Release",
+        metadata: {
+          workflowName: "CI",
+          branchName: "release/1.2",
+        },
+        url: "https://github.com/getsentry/sentry/actions/runs/124",
+      },
+    ]);
+    deps.fetchActiveWorkflowRuns = async (target) => {
+      activeWorkflowRunFetches.push(target);
+      return [{
+        runId: "124",
+        title: "CI: Release",
+        workflowName: "CI",
+        status: "in_progress",
+        branchName: "release/1.2",
+        url: "https://github.com/getsentry/sentry/actions/runs/124",
+      }];
+    };
+    const controller = createWatchController(deps);
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      workflowTargets: [{ kind: "include", pattern: "release/*", workflowNames: ["CI"] }],
+    };
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(activeWorkflowRunFetches).toEqual([watchedRepo]);
+    expect(defaultBranchFetches).toEqual([]);
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/124"]);
+  });
+
   it("catches and notifies a workflow run that completes between polls", async () => {
     const now = new Date("2026-08-12T10:02:00Z");
     const { deps, fetches, notificationRecords, workflowRunFetches } = createDeps([]);
@@ -1716,6 +1754,34 @@ describe("watchController", () => {
       branchName: "feature/tray",
       event: "workflow_dispatch",
     }), options)).toEqual({ kind: "pull-request", pullRequest: openPullRequest });
+  });
+
+  it("matches included branch patterns and applies exclusions per workflow", () => {
+    const repo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      workflowTargets: [
+        { kind: "include", pattern: "release/*", workflowNames: ["CI", "Deploy"] },
+        { kind: "exclude", pattern: "release/experimental/*", workflowNames: ["CI"] },
+      ],
+    };
+
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
+      workflowName: "CI",
+      branchName: "release/1.2",
+    }))).toEqual({ kind: "workflow" });
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
+      workflowName: "CI",
+      branchName: "release/experimental/cache",
+    }))).toBeUndefined();
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
+      workflowName: "Deploy",
+      branchName: "release/experimental/cache",
+    }))).toEqual({ kind: "workflow" });
+    expect(getWorkflowRunSubscriptionMatch(repo, completedWorkflowRun({
+      workflowName: "CI",
+      branchName: "Release/1.2",
+    }))).toBeUndefined();
   });
 
   it("does not reopen done watches while syncing subscriptions", async () => {

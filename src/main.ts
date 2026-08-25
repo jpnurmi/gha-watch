@@ -63,16 +63,20 @@ import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
 import { createSettingsSync } from "./app/settingsSync";
 import {
+  addWatchedWorkflowTarget,
   addWatchedRepo,
   getWatchedPullRequestScope,
   getWatchedRepoKey,
+  getWatchedWorkflowTargetKey,
   isWatchedRepo,
+  removeWatchedWorkflowTarget,
   toggleWatchedPullRequestScope,
   toggleWatchedWorkflowSubscription,
   updateWatchedRepoIcon,
   type WatchedPullRequestScope,
   type WatchedRepo,
-  type WatchedWorkflowSubscriptionScope,
+  type WatchedWorkflowTarget,
+  type WatchedWorkflowTargetKind,
 } from "./domain/watchedRepos";
 import {
   isOwnerlessPullRequestSlug,
@@ -271,6 +275,8 @@ type RepositoryWatchMenuState =
       defaultBranch: string;
       userLogin: string;
       workflows: WorkflowDefinition[];
+      selectedTargetKey?: string;
+      targetEditor?: "menu" | "include" | "exclude";
     }
   | {
       repoKey: string;
@@ -1023,7 +1029,7 @@ function renderRepositoryWatchPopover(
   } else {
     const workflows = getWorkflowSubscriptionMenuWorkflows(group, menuState.workflows);
     workflowContent = workflows.length > 0
-      ? workflows.map((workflow) => renderWorkflowSubscriptionItem(group, workflow, menuState.defaultBranch, menuState.userLogin)).join("")
+      ? renderWorkflowTargetingEditor(group, menuState, workflows)
       : `<div class="repo-action-status">No workflows</div>`;
   }
 
@@ -1078,54 +1084,223 @@ function renderPullRequestWatchScope(
   `;
 }
 
-function renderWorkflowSubscriptionItem(
+function renderWorkflowTargetingEditor(
   group: WatchGroupViewModel,
-  workflow: WorkflowDefinition,
-  defaultBranch: string,
-  userLogin: string,
+  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
+  workflows: WorkflowDefinition[],
 ): string {
+  const targets = findWatchedRepo(group)?.workflowTargets ?? [];
+  const selectedTargetKey = getSelectedWorkflowTargetKey(menuState, targets);
+  const selectedTarget = targets.find(
+    (target) => getWatchedWorkflowTargetKey(target) === selectedTargetKey,
+  );
+
   return `
-    <div class="repository-watch-item" role="none">
-      <span class="repo-action-title" title="${escapeHtml(workflow.name)}">${escapeHtml(workflow.name)}</span>
-      <span class="repository-watch-segmented" role="group" aria-label="${escapeHtml(workflow.name)} watches">
-        ${renderWorkflowSubscriptionToggle(group, workflow.name, "defaultBranch", defaultBranch)}
-        ${renderWorkflowSubscriptionToggle(group, workflow.name, "user", undefined, userLogin)}
-      </span>
+    <section class="workflow-targeting" aria-label="Workflow branches">
+      <div class="workflow-targeting-header">
+        <span class="repo-action-title">Branches</span>
+        <button
+          class="workflow-target-add"
+          type="button"
+          data-action="toggle-workflow-target-editor"
+          aria-expanded="${menuState.targetEditor ? "true" : "false"}"
+          aria-label="Add branch rule"
+        >${renderWorkflowTargetAddIcon()}</button>
+      </div>
+      ${renderWorkflowTargetEditor(group, menuState, targets)}
+      <div class="workflow-target-list" role="list">
+        ${targets.length > 0
+          ? targets.map((target) => renderWorkflowTarget(group, target, menuState, selectedTargetKey)).join("")
+          : `<div class="workflow-target-empty">Add a branch rule to watch workflows.</div>`}
+      </div>
+      ${selectedTarget
+        ? `<div class="workflow-target-workflows">
+            <div class="workflow-target-workflows-title">Workflows for ${escapeHtml(getWorkflowTargetLabel(selectedTarget, menuState))}</div>
+            ${workflows.map((workflow) => renderWorkflowTargetWorkflow(group, selectedTarget, workflow)).join("")}
+          </div>`
+        : ""}
+    </section>
+  `;
+}
+
+function renderWorkflowTargetEditor(
+  group: WatchGroupViewModel,
+  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
+  targets: WatchedWorkflowTarget[],
+): string {
+  if (!menuState.targetEditor) {
+    return "";
+  }
+
+  if (menuState.targetEditor === "include" || menuState.targetEditor === "exclude") {
+    return `
+      <form class="workflow-target-pattern-form" data-action="add-workflow-pattern" data-kind="${menuState.targetEditor}">
+        <div class="add-field workflow-target-pattern-field">
+          <input
+            class="workflow-target-pattern-input"
+            name="pattern"
+            maxlength="255"
+            placeholder="${menuState.targetEditor === "include" ? "release/*" : "release/experimental/*"}"
+            aria-label="Branch pattern"
+            autocomplete="off"
+            autofocus
+          />
+          <div class="add-field-actions">
+            <button class="add-form-submit" type="submit">Add</button>
+          </div>
+        </div>
+      </form>
+    `;
+  }
+
+  const existingKinds = new Set(targets.map((target) => target.kind));
+
+  return `
+    <div class="workflow-target-add-menu" role="menu">
+      ${renderAddWorkflowTargetAction(group, "default", "Include default branch", existingKinds.has("default"))}
+      ${renderAddWorkflowTargetAction(group, "own", "Include own branches", existingKinds.has("own"))}
+      ${renderAddWorkflowTargetAction(group, "all", "Include all branches", existingKinds.has("all"))}
+      <div class="workflow-target-add-divider"></div>
+      ${renderAddWorkflowTargetAction(group, "include", "Include by pattern", false)}
+      ${renderAddWorkflowTargetAction(group, "exclude", "Exclude by pattern", false)}
     </div>
   `;
 }
 
-function renderWorkflowSubscriptionToggle(
+function renderAddWorkflowTargetAction(
   group: WatchGroupViewModel,
-  workflowName: string,
-  scope: WatchedWorkflowSubscriptionScope,
-  defaultBranch?: string,
-  userLogin?: string,
+  kind: WatchedWorkflowTargetKind,
+  label: string,
+  disabled: boolean,
 ): string {
-  const checked = workflowIsSubscribed(group, workflowName, scope);
-  const cleanDefaultBranch = defaultBranch?.trim() || "default branch";
-  const displayLabel = scope === "defaultBranch" ? cleanDefaultBranch : userLogin?.trim() || "PRs";
-  const label = scope === "defaultBranch"
-    ? cleanDefaultBranch
-    : `manually dispatched runs triggered by ${displayLabel}`;
+  return `
+    <button
+      type="button"
+      role="menuitem"
+      data-action="add-workflow-target"
+      data-owner="${escapeHtml(group.owner)}"
+      data-repo="${escapeHtml(group.repo)}"
+      data-kind="${kind}"
+      ${disabled ? "disabled" : ""}
+    >${renderWorkflowTargetSign(kind === "exclude")}<span>${label}</span></button>
+  `;
+}
+
+function renderWorkflowTarget(
+  group: WatchGroupViewModel,
+  target: WatchedWorkflowTarget,
+  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
+  selectedTargetKey: string | undefined,
+): string {
+  const targetKey = getWatchedWorkflowTargetKey(target);
+  const selected = targetKey === selectedTargetKey;
+  const label = getWorkflowTargetLabel(target, menuState);
+
+  return `
+    <div class="workflow-target-row${selected ? " is-selected" : ""}" role="listitem">
+      <button
+        class="workflow-target-select"
+        type="button"
+        data-action="select-workflow-target"
+        data-target="${escapeHtml(targetKey)}"
+        aria-pressed="${selected ? "true" : "false"}"
+      >
+        ${renderWorkflowTargetSign(target.kind === "exclude")}
+        <span class="workflow-target-label">${escapeHtml(label)}</span>
+      </button>
+      <button
+        class="workflow-target-remove"
+        type="button"
+        data-action="remove-workflow-target"
+        data-owner="${escapeHtml(group.owner)}"
+        data-repo="${escapeHtml(group.repo)}"
+        data-target="${escapeHtml(targetKey)}"
+        aria-label="Remove ${escapeHtml(label)}"
+      >${renderWorkflowTargetRemoveIcon()}</button>
+    </div>
+  `;
+}
+
+function renderWorkflowTargetWorkflow(
+  group: WatchGroupViewModel,
+  target: WatchedWorkflowTarget,
+  workflow: WorkflowDefinition,
+): string {
+  const checked = target.workflowNames.includes(workflow.name);
 
   return `
     <button
-      class="repository-watch-segment repository-watch-segment-${scope}${checked ? " is-selected" : ""}"
+      class="workflow-target-workflow${checked ? " is-selected" : ""}"
       type="button"
-      role="menuitemcheckbox"
+      role="checkbox"
       aria-checked="${checked ? "true" : "false"}"
       data-action="toggle-workflow-subscription"
       data-owner="${escapeHtml(group.owner)}"
       data-repo="${escapeHtml(group.repo)}"
-      data-workflow="${escapeHtml(workflowName)}"
-      data-scope="${scope}"
-      title="${checked ? "Stop watching" : "Watch"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
-      aria-label="${checked ? "Stop watching" : "Watch"} ${escapeHtml(workflowName)} on ${escapeHtml(label)}"
-    >
-      ${escapeHtml(displayLabel)}
-    </button>
+      data-workflow="${escapeHtml(workflow.name)}"
+      data-target="${escapeHtml(getWatchedWorkflowTargetKey(target))}"
+    ><span class="workflow-target-checkbox" aria-hidden="true">${checked ? renderWorkflowTargetCheckIcon() : ""}</span><span title="${escapeHtml(workflow.name)}">${escapeHtml(workflow.name)}</span></button>
   `;
+}
+
+function renderWorkflowTargetSign(exclude: boolean): string {
+  return `
+    <svg class="workflow-target-sign is-${exclude ? "exclude" : "include"}" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path d="${exclude ? "M5 8h6" : "M5 8h6M8 5v6"}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
+    </svg>
+  `;
+}
+
+function renderWorkflowTargetAddIcon(): string {
+  return `
+    <svg class="workflow-target-add-icon" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M6 2.5v7M2.5 6h7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
+    </svg>
+  `;
+}
+
+function renderWorkflowTargetRemoveIcon(): string {
+  return `
+    <svg class="workflow-target-remove-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
+    </svg>
+  `;
+}
+
+function renderWorkflowTargetCheckIcon(): string {
+  return `
+    <svg viewBox="0 0 12 12" aria-hidden="true">
+      <path d="m2.5 6 2.25 2.25 4.75-4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+    </svg>
+  `;
+}
+
+function getSelectedWorkflowTargetKey(
+  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
+  targets: WatchedWorkflowTarget[],
+): string | undefined {
+  return targets.some((target) => getWatchedWorkflowTargetKey(target) === menuState.selectedTargetKey)
+    ? menuState.selectedTargetKey
+    : targets[0] ? getWatchedWorkflowTargetKey(targets[0]) : undefined;
+}
+
+function getWorkflowTargetLabel(
+  target: WatchedWorkflowTarget,
+  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
+): string {
+  switch (target.kind) {
+    case "default":
+      return `Default · ${menuState.defaultBranch.trim() || "default branch"}`;
+    case "own":
+      return `Own · ${menuState.userLogin.trim() || "authenticated user"}`;
+    case "all":
+      return "All branches";
+    case "include":
+      return target.pattern ?? "Include pattern";
+    case "exclude":
+      return target.pattern ?? "Exclude pattern";
+  }
 }
 
 function getWorkflowSubscriptionMenuWorkflows(
@@ -1134,30 +1309,22 @@ function getWorkflowSubscriptionMenuWorkflows(
 ): WorkflowDefinition[] {
   const watchedRepo = findWatchedRepo(group);
   const workflowNames = new Set(workflows.map((workflow) => workflow.name));
-  const missingSelectedWorkflows = [
-    ...(watchedRepo?.defaultBranchWorkflowNames ?? []),
-    ...(watchedRepo?.userWorkflowNames ?? []),
-  ]
-    .filter((workflowName) => !workflowNames.has(workflowName))
+  const missingSelectedWorkflows = (watchedRepo?.workflowTargets ?? [])
+    .flatMap((target) => target.workflowNames)
+    .filter((workflowName) => {
+      if (workflowNames.has(workflowName)) {
+        return false;
+      }
+
+      workflowNames.add(workflowName);
+      return true;
+    })
     .map((workflowName) => ({
       name: workflowName,
       path: "",
     }));
 
   return [...workflows, ...missingSelectedWorkflows];
-}
-
-function workflowIsSubscribed(
-  repo: Pick<WatchedRepo, "owner" | "repo">,
-  workflowName: string,
-  scope: WatchedWorkflowSubscriptionScope,
-): boolean {
-  const watchedRepo = findWatchedRepo(repo);
-  const workflowNames = scope === "defaultBranch"
-    ? watchedRepo?.defaultBranchWorkflowNames
-    : watchedRepo?.userWorkflowNames;
-
-  return Boolean(workflowNames?.includes(workflowName));
 }
 
 function findWatchedRepo(repo: Pick<WatchedRepo, "owner" | "repo">): WatchedRepo | undefined {
@@ -2015,8 +2182,91 @@ function bindEvents(): void {
         owner: button.dataset.owner || "",
         repo: button.dataset.repo || "",
         workflowName: button.dataset.workflow || "",
-        scope: getWorkflowSubscriptionScope(button.dataset.scope),
+        targetKey: button.dataset.target || "",
       });
+    });
+  }
+
+  app.querySelector<HTMLButtonElement>('[data-action="toggle-workflow-target-editor"]')?.addEventListener(
+    "click",
+    () => {
+      if (repositoryWatchMenu?.status !== "loaded") {
+        return;
+      }
+
+      repositoryWatchMenu = {
+        ...repositoryWatchMenu,
+        targetEditor: repositoryWatchMenu.targetEditor ? undefined : "menu",
+      };
+      render();
+    },
+  );
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="add-workflow-target"]')) {
+    button.addEventListener("click", () => {
+      const kind = getWorkflowTargetKind(button.dataset.kind);
+
+      if (!kind || repositoryWatchMenu?.status !== "loaded") {
+        return;
+      }
+
+      if (kind === "include" || kind === "exclude") {
+        repositoryWatchMenu = { ...repositoryWatchMenu, targetEditor: kind };
+        render();
+        return;
+      }
+
+      addWorkflowTarget({
+        owner: button.dataset.owner || "",
+        repo: button.dataset.repo || "",
+      }, kind);
+    });
+  }
+
+  app.querySelector<HTMLFormElement>('[data-action="add-workflow-pattern"]')?.addEventListener(
+    "submit",
+    (event) => {
+      event.preventDefault();
+      const form = event.currentTarget as HTMLFormElement;
+      const kind = getWorkflowTargetKind(form.dataset.kind);
+      const pattern = new FormData(form).get("pattern");
+      const group = repositoryWatchMenu?.repoKey.split("/");
+
+      if (
+        (kind !== "include" && kind !== "exclude") ||
+        typeof pattern !== "string" ||
+        !pattern.trim() ||
+        !group ||
+        group.length !== 2
+      ) {
+        return;
+      }
+
+      addWorkflowTarget({ owner: group[0], repo: group[1] }, kind, pattern.trim());
+    },
+  );
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="select-workflow-target"]')) {
+    button.addEventListener("click", () => {
+      if (repositoryWatchMenu?.status !== "loaded") {
+        return;
+      }
+
+      repositoryWatchMenu = {
+        ...repositoryWatchMenu,
+        selectedTargetKey: button.dataset.target,
+        targetEditor: undefined,
+      };
+      render();
+    });
+  }
+
+  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="remove-workflow-target"]')) {
+    button.addEventListener("click", () => {
+      removeWorkflowTarget({
+        owner: button.dataset.owner || "",
+        repo: button.dataset.repo || "",
+      }, button.dataset.target || "");
     });
   }
 
@@ -3007,11 +3257,11 @@ async function toggleRepositoryWatchMenu(repo: Pick<WatchedRepo, "owner" | "repo
 
 function toggleWorkflowSubscription(
   target: Pick<WatchedRepo, "owner" | "repo"> & {
-    scope: WatchedWorkflowSubscriptionScope | undefined;
+    targetKey: string;
     workflowName: string;
   },
 ): void {
-  if (!target.owner || !target.repo || !target.workflowName || !target.scope) {
+  if (!target.owner || !target.repo || !target.workflowName || !target.targetKey) {
     return;
   }
 
@@ -3019,7 +3269,7 @@ function toggleWorkflowSubscription(
   let watchedRepos = toggleWatchedWorkflowSubscription(
     settings.watchedRepos,
     target,
-    target.scope,
+    target.targetKey,
     target.workflowName,
   );
 
@@ -3037,8 +3287,47 @@ function toggleWorkflowSubscription(
   void poll();
 }
 
-function getWorkflowSubscriptionScope(value: string | undefined): WatchedWorkflowSubscriptionScope | undefined {
-  return value === "defaultBranch" || value === "user" ? value : undefined;
+function addWorkflowTarget(
+  repo: Pick<WatchedRepo, "owner" | "repo">,
+  kind: WatchedWorkflowTargetKind,
+  pattern?: string,
+): void {
+  const wasWatched = isWatchedRepo(settings.watchedRepos, repo);
+  let watchedRepos = addWatchedWorkflowTarget(settings.watchedRepos, repo, { kind, pattern });
+  const targetKey = getWatchedWorkflowTargetKey({ kind, pattern });
+
+  if (!wasWatched) {
+    watchedRepos = updateWatchedRepoIcon(watchedRepos, repo, findRepoIconUrl(repo));
+  }
+
+  if (repositoryWatchMenu?.repoKey === getWatchedRepoKey(repo) && repositoryWatchMenu.status === "loaded") {
+    repositoryWatchMenu = { ...repositoryWatchMenu, selectedTargetKey: targetKey, targetEditor: undefined };
+  }
+
+  void updateAppSettings({ ...settings, watchedRepos }, true);
+  render();
+
+  if (!wasWatched) {
+    void refreshWatchedRepoIcon(repo);
+  }
+}
+
+function removeWorkflowTarget(repo: Pick<WatchedRepo, "owner" | "repo">, targetKey: string): void {
+  const watchedRepos = removeWatchedWorkflowTarget(settings.watchedRepos, repo, targetKey);
+
+  if (repositoryWatchMenu?.repoKey === getWatchedRepoKey(repo) && repositoryWatchMenu.status === "loaded") {
+    repositoryWatchMenu = { ...repositoryWatchMenu, selectedTargetKey: undefined };
+  }
+
+  void updateAppSettings({ ...settings, watchedRepos }, true);
+  render();
+  void poll();
+}
+
+function getWorkflowTargetKind(value: string | undefined): WatchedWorkflowTargetKind | undefined {
+  return value === "default" || value === "own" || value === "all" || value === "include" || value === "exclude"
+    ? value
+    : undefined;
 }
 
 async function watchActiveWorkflowRun(

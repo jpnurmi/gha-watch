@@ -591,6 +591,7 @@ export async function fetchUserActiveWorkflowRuns(
 }
 
 const workflowRunsPerPage = 100;
+export const activeWorkflowRunLimit = 1_000;
 export const workflowRunCatchUpPageLimit = 10;
 
 export async function fetchWorkflowRunsSince(
@@ -664,7 +665,7 @@ async function fetchActiveWorkflowRunsWithArgs(
           "--status",
           status,
           "--limit",
-          "20",
+          String(activeWorkflowRunLimit),
           ...extraArgs,
           "--json",
           "databaseId,displayTitle,event,workflowName,headBranch,status,createdAt,updatedAt,url",
