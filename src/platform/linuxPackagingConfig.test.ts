@@ -7,6 +7,7 @@ describe("Linux packaging configuration", () => {
     expect(config.app.windows[0]).toMatchObject({
       label: "main",
       width: 460,
+      center: true,
       resizable: true,
       maximizable: false,
       minimizable: false,
