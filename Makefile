@@ -55,6 +55,19 @@ build: | node_modules
 			;; \
 		MINGW*|MSYS*|CYGWIN*) \
 			$(NPM) run tauri -- build --config src-tauri/tauri.windows.conf.json; \
+			installer=''; \
+			for candidate in "$(CURDIR)"/src-tauri/target/release/bundle/nsis/*.exe; do \
+				if [ -f "$$candidate" ]; then installer=$$candidate; break; fi; \
+			done; \
+			if [ -z "$$installer" ]; then \
+				printf '%s\n' 'Missing Windows NSIS installer under src-tauri/target/release/bundle/nsis/' >&2; \
+				exit 1; \
+			fi; \
+			printf '\033[1;32m%s\033[0m %s \033[1;33m%s\033[0m:\n%s\n' \
+				'    Install' \
+				'and' \
+				'restart' \
+				"        MSYS_NO_PATHCONV=1 '$$installer' /S /R"; \
 			;; \
 		*) \
 			$(NPM) run tauri build; \
