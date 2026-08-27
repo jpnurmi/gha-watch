@@ -172,6 +172,7 @@ let isAdding = false;
 let addError: string | undefined;
 let pullRequestDiscovery: PullRequestDiscoveryState = { status: "idle" };
 let isPolling = false;
+let pendingForcedPoll = false;
 let isClearMenuOpen = false;
 let isPopupOpen = false;
 let autoStartEnabled = false;
@@ -305,7 +306,7 @@ const controller = createWatchController(
       ? async () => {
           throw new Error("Demo mode does not poll GitHub.");
         }
-      : fetchWatchState,
+      : (target, options) => fetchWatchState(target, undefined, options),
     fetchActiveWorkflowRuns: isDemoMode ? fetchDemoActiveWorkflowRuns : fetchActiveWorkflowRuns,
     fetchOpenPullRequests: isDemoMode ? fetchDemoOpenPullRequests : fetchOpenPullRequests,
     fetchOpenPullRequestsWithChecks: isDemoMode
@@ -3700,6 +3701,7 @@ async function refreshSettingsAndStatuses(forceVisibleData = false): Promise<voi
 
 async function poll(forceVisibleData = false): Promise<void> {
   if (isPolling) {
+    pendingForcedPoll ||= forceVisibleData;
     return;
   }
 
@@ -3781,8 +3783,14 @@ async function poll(forceVisibleData = false): Promise<void> {
     console.warn("Could not refresh GitHub status.", error);
   } finally {
     isPolling = false;
+    const forceNextPoll = pendingForcedPoll;
+    pendingForcedPoll = false;
     polling.scheduleNext();
     render();
+
+    if (forceNextPoll) {
+      void poll(true);
+    }
   }
 }
 

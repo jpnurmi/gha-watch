@@ -39,7 +39,7 @@ import {
   type WatchRecord,
   type WatchTriageState,
 } from "../domain/watches";
-import type { RerunMode, WatchSnapshot } from "../platform/gh";
+import type { RerunMode, WatchSnapshot, WatchStateFetchOptions } from "../platform/gh";
 import type {
   ActiveWorkflowRun,
   OpenPullRequest,
@@ -53,7 +53,7 @@ import { createWatchNotification, type WatchNotification } from "./watchNotifica
 import { isDeemphasizedPullRequest } from "./viewModel";
 
 export type WatchControllerDeps = {
-  fetchState(target: WatchTarget): Promise<WatchSnapshot>;
+  fetchState(target: WatchTarget, options?: WatchStateFetchOptions): Promise<WatchSnapshot>;
   fetchActiveWorkflowRuns?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<ActiveWorkflowRun[]>;
   fetchOpenPullRequests?(target: Pick<WatchedRepo, "owner" | "repo">): Promise<OpenPullRequest[]>;
   fetchOpenPullRequestsWithChecks?(
@@ -536,6 +536,7 @@ export function createWatchController(
     id: string,
     target: WatchTarget,
     prefetchedSnapshot?: WatchSnapshot,
+    force = false,
   ): Promise<BaselineWatchOutcome | undefined> {
     const existingWatch = watches.find((watch) => watch.id === id);
 
@@ -544,7 +545,7 @@ export function createWatchController(
     }
 
     try {
-      const snapshot = prefetchedSnapshot ?? await deps.fetchState(target);
+      const snapshot = prefetchedSnapshot ?? await deps.fetchState(target, { force });
       let watch = existingWatch;
       updateWatch(id, (current) => {
         watch = withBaselineSnapshot(current, snapshot);
@@ -1489,6 +1490,12 @@ export function createWatchController(
     const existingWatch = watches.find((watch) => watch.id === id);
 
     if (existingWatch) {
+      if (!existingWatch.active && getWatchTriageState(existingWatch) === "inbox") {
+        const baselineOutcome = await loadBaselineState(id, target, undefined, true);
+        throwBaselineFailure(baselineOutcome);
+        return;
+      }
+
       reuseTrackedPullRequestForSubscribedRun(existingWatch, target, run);
       return;
     }
@@ -1929,7 +1936,7 @@ export function createWatchController(
             return {
               watch,
               snapshot: prefetchedWatchSnapshots.get(watch.id) ??
-                await deps.fetchState(watch.target),
+                await deps.fetchState(watch.target, { force: pollOptions.includeInactive }),
             };
           } catch (error) {
             return { watch, failure: createWatchPollFailure(watch.id, error) };

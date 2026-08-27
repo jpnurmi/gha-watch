@@ -211,6 +211,42 @@ describe("fetchWatchState", () => {
     ]);
   });
 
+  it("bypasses and replaces a cached run response when forced", async () => {
+    const target = {
+      kind: "run",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      url: "https://github.com/getsentry/sentry/actions/runs/123",
+    } as const;
+    const failed = JSON.stringify({
+      status: "completed",
+      conclusion: "failure",
+      display_title: "Run tests",
+      name: "CI",
+      html_url: target.url,
+    });
+    const successful = JSON.stringify({
+      status: "completed",
+      conclusion: "success",
+      display_title: "Run tests",
+      name: "CI",
+      html_url: target.url,
+    });
+    const { executor, calls } = createSequenceExecutor([
+      createIncludedResult(200, failed, '"run-v1"'),
+      createIncludedResult(200, successful, '"run-v2"'),
+      createIncludedResult(304, "", '"run-v2"'),
+    ]);
+
+    await expect(fetchWatchState(target, executor)).resolves.toMatchObject({ conclusion: "failure" });
+    await expect(fetchWatchState(target, executor, { force: true })).resolves.toMatchObject({ conclusion: "success" });
+    await expect(fetchWatchState(target, executor)).resolves.toMatchObject({ conclusion: "success" });
+
+    expect(calls[1]?.args).not.toContain("If-None-Match: \"run-v1\"");
+    expect(calls[2]?.args).toContain("If-None-Match: \"run-v2\"");
+  });
+
   it("marks in-progress run state when a child job has already failed", async () => {
     const { executor, calls } = createSequenceExecutor([
       {

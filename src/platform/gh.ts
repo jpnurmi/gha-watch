@@ -35,6 +35,10 @@ export type WatchSnapshot = WatchState & {
   url: string;
 };
 
+export type WatchStateFetchOptions = {
+  force?: boolean;
+};
+
 type RunViewResponse = {
   status?: string;
   conclusion?: string | null;
@@ -308,6 +312,7 @@ type PullRequestReference = {
 export async function fetchWatchState(
   target: WatchTarget,
   executor: ShellExecutor = createTauriShellExecutor(),
+  options: WatchStateFetchOptions = {},
 ): Promise<WatchSnapshot> {
   try {
     if (target.kind === "pr") {
@@ -328,7 +333,7 @@ export async function fetchWatchState(
     if (target.kind === "run") {
       const response = await fetchConditionalApiJson<RunViewResponse>(executor, [
         `repos/${target.owner}/${target.repo}/actions/runs/${target.runId}`,
-      ]);
+      ], options.force);
       const failedChildren = shouldFetchRunJobs(response)
         ? await fetchRunFailedChildren(target, executor)
         : undefined;
@@ -338,7 +343,7 @@ export async function fetchWatchState(
 
     const response = await fetchConditionalApiJson<JobViewResponse>(executor, [
       `repos/${target.owner}/${target.repo}/actions/jobs/${target.jobId}`,
-    ]);
+    ], options.force);
     return toJobSnapshot(target.url, response);
   } catch (error) {
     throw normalizeGhError(error);
@@ -1734,7 +1739,11 @@ function parseJson<T>(stdout: string): T {
   }
 }
 
-async function fetchConditionalApiJson<T>(executor: ShellExecutor, args: string[]): Promise<T> {
+async function fetchConditionalApiJson<T>(
+  executor: ShellExecutor,
+  args: string[],
+  force = false,
+): Promise<T> {
   let cache = conditionalApiCaches.get(executor);
 
   if (!cache) {
@@ -1743,7 +1752,7 @@ async function fetchConditionalApiJson<T>(executor: ShellExecutor, args: string[
   }
 
   const key = JSON.stringify(args);
-  const cached = cache.get(key);
+  const cached = force ? undefined : cache.get(key);
 
   if (cached) {
     cache.delete(key);
