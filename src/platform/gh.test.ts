@@ -211,6 +211,42 @@ describe("fetchWatchState", () => {
     ]);
   });
 
+  it("bypasses and replaces a cached run response when forced", async () => {
+    const target = {
+      kind: "run",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      url: "https://github.com/getsentry/sentry/actions/runs/123",
+    } as const;
+    const failed = JSON.stringify({
+      status: "completed",
+      conclusion: "failure",
+      display_title: "Run tests",
+      name: "CI",
+      html_url: target.url,
+    });
+    const successful = JSON.stringify({
+      status: "completed",
+      conclusion: "success",
+      display_title: "Run tests",
+      name: "CI",
+      html_url: target.url,
+    });
+    const { executor, calls } = createSequenceExecutor([
+      createIncludedResult(200, failed, '"run-v1"'),
+      createIncludedResult(200, successful, '"run-v2"'),
+      createIncludedResult(304, "", '"run-v2"'),
+    ]);
+
+    await expect(fetchWatchState(target, executor)).resolves.toMatchObject({ conclusion: "failure" });
+    await expect(fetchWatchState(target, executor, { force: true })).resolves.toMatchObject({ conclusion: "success" });
+    await expect(fetchWatchState(target, executor)).resolves.toMatchObject({ conclusion: "success" });
+
+    expect(calls[1]?.args).not.toContain("If-None-Match: \"run-v1\"");
+    expect(calls[2]?.args).toContain("If-None-Match: \"run-v2\"");
+  });
+
   it("marks in-progress run state when a child job has already failed", async () => {
     const { executor, calls } = createSequenceExecutor([
       {
@@ -271,6 +307,46 @@ describe("fetchWatchState", () => {
         args: ["api", "--include", "repos/getsentry/sentry/actions/runs/123/jobs?per_page=100"],
       },
     ]);
+  });
+
+  it("bypasses cached failed children during a forced run refresh", async () => {
+    const target = {
+      kind: "run",
+      owner: "getsentry",
+      repo: "sentry",
+      runId: "123",
+      url: "https://github.com/getsentry/sentry/actions/runs/123",
+    } as const;
+    const run = JSON.stringify({
+      status: "in_progress",
+      conclusion: "",
+      display_title: "Run tests",
+      name: "CI",
+      jobs_url: "https://api.github.com/repos/getsentry/sentry/actions/runs/123/jobs",
+      html_url: target.url,
+    });
+    const failedJobs = JSON.stringify({
+      jobs: [{ status: "completed", conclusion: "failure" }],
+    });
+    const currentJobs = JSON.stringify({
+      jobs: [{ status: "in_progress", conclusion: null }],
+    });
+    const { executor, calls } = createSequenceExecutor([
+      createIncludedResult(200, run, '"run-v1"'),
+      createIncludedResult(200, failedJobs, '"jobs-v1"'),
+      createIncludedResult(200, run, '"run-v2"'),
+      createIncludedResult(200, currentJobs, '"jobs-v2"'),
+    ]);
+
+    await expect(fetchWatchState(target, executor)).resolves.toMatchObject({
+      hasFailedChildren: true,
+    });
+    await expect(fetchWatchState(target, executor, { force: true })).resolves.not.toHaveProperty(
+      "hasFailedChildren",
+    );
+
+    expect(calls[2]?.args).not.toContain('If-None-Match: "run-v1"');
+    expect(calls[3]?.args).not.toContain('If-None-Match: "jobs-v1"');
   });
 
   it("fetches job state via gh api", async () => {

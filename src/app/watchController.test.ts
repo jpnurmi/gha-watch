@@ -22,6 +22,7 @@ import type {
   OpenPullRequest,
   RerunMode,
   WatchSnapshot,
+  WatchStateFetchOptions,
   WorkflowDefinition,
   WorkflowRunSummary,
 } from "../platform/gh";
@@ -73,6 +74,7 @@ function createDeps(
   suppressionSaves: WatchSuppression[][];
   discoverySaves: WorkflowDiscoveryState[];
   fetches: WatchTarget[];
+  fetchOptions: Array<WatchStateFetchOptions | undefined>;
   reruns: Array<[WatchTarget, RerunMode]>;
   openPullRequestFetches: WatchedRepo[];
   activeWorkflowRunFetches: WatchedRepo[];
@@ -91,6 +93,7 @@ function createDeps(
   const suppressionSaves: WatchSuppression[][] = [];
   const discoverySaves: WorkflowDiscoveryState[] = [];
   const fetches: WatchTarget[] = [];
+  const fetchOptions: Array<WatchStateFetchOptions | undefined> = [];
   const reruns: Array<[WatchTarget, RerunMode]> = [];
   const openPullRequestFetches: WatchedRepo[] = [];
   const activeWorkflowRunFetches: WatchedRepo[] = [];
@@ -110,6 +113,7 @@ function createDeps(
     suppressionSaves,
     discoverySaves,
     fetches,
+    fetchOptions,
     reruns,
     openPullRequestFetches,
     activeWorkflowRunFetches,
@@ -118,8 +122,9 @@ function createDeps(
     workflowDefinitionFetches,
     workflowRunFetches,
     deps: {
-      async fetchState(target) {
+      async fetchState(target, options) {
         fetches.push(target);
+        fetchOptions.push(options);
         const state = states.shift();
 
         if (!state) {
@@ -1408,6 +1413,36 @@ describe("watchController", () => {
       baselineAt: "2026-08-12T10:02:00.000Z",
       recentRunIds: ["123"],
       subscriptionFingerprint: getWorkflowDiscoverySubscriptionFingerprint(nextRepo),
+    });
+  });
+
+  it("force-refreshes an inactive workflow when the same run becomes active again", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, fetches, fetchOptions } = createDeps([{
+      status: "in_progress",
+      conclusion: null,
+      title: "CI: Build",
+      url: runTarget.url,
+    }]);
+    const controller = createWatchController(deps, [{
+      ...existingWatch(),
+      status: "completed:failure",
+      lastSeenStatus: "completed:failure",
+      lastState: { status: "completed", conclusion: "failure" },
+    }]);
+
+    await controller.syncWorkflowSubscriptions([watchedRepo]);
+
+    expect(fetches).toEqual([runTarget]);
+    expect(fetchOptions).toEqual([{ force: true }]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "in_progress",
+      lastState: { status: "in_progress", conclusion: null },
+      active: true,
     });
   });
 
