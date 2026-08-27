@@ -7,11 +7,17 @@ describe("settings sync wiring", () => {
   it("syncs settings before startup and manual status refreshes", () => {
     expect(mainSource).toContain("void refreshSettingsAndStatuses();");
     expect(mainSource).toMatch(
-      /data-action="refresh"[\s\S]*?void refreshSettingsAndStatuses\(true\);/,
+      /data-action="refresh"[\s\S]*?void refreshSettingsAndStatuses\(currentWatchView\);/,
     );
     expect(mainSource).toMatch(
-      /async function refreshSettingsAndStatuses[\s\S]*?await syncSettingsFromGist\(\);[\s\S]*?await poll\(forceVisibleData\);/,
+      /async function refreshSettingsAndStatuses[\s\S]*?await syncSettingsFromGist\(\);[\s\S]*?await poll\(manualRefreshView\);/,
     );
+  });
+
+  it("preserves the selected view when a manual refresh is queued", () => {
+    expect(mainSource).toContain("pendingManualRefreshView ??= manualRefreshView");
+    expect(mainSource).toContain('const watchView = manualRefreshView ?? "inbox"');
+    expect(mainSource).toContain("void poll(nextManualRefreshView)");
   });
 
   it("uploads explicit settings and triage changes", () => {

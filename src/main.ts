@@ -172,7 +172,7 @@ let isAdding = false;
 let addError: string | undefined;
 let pullRequestDiscovery: PullRequestDiscoveryState = { status: "idle" };
 let isPolling = false;
-let pendingForcedPoll = false;
+let pendingManualRefreshView: WatchTriageState | undefined;
 let isClearMenuOpen = false;
 let isPopupOpen = false;
 let autoStartEnabled = false;
@@ -2069,7 +2069,7 @@ function bindEvents(): void {
   app.querySelector<HTMLButtonElement>('[data-action="refresh"]')?.addEventListener(
     "click",
     () => {
-      void refreshSettingsAndStatuses(true);
+      void refreshSettingsAndStatuses(currentWatchView);
     },
   );
 
@@ -3694,17 +3694,18 @@ async function syncSettingsFromGist(): Promise<void> {
   }
 }
 
-async function refreshSettingsAndStatuses(forceVisibleData = false): Promise<void> {
+async function refreshSettingsAndStatuses(manualRefreshView?: WatchTriageState): Promise<void> {
   await syncSettingsFromGist();
-  await poll(forceVisibleData);
+  await poll(manualRefreshView);
 }
 
-async function poll(forceVisibleData = false): Promise<void> {
+async function poll(manualRefreshView?: WatchTriageState): Promise<void> {
   if (isPolling) {
-    pendingForcedPoll ||= forceVisibleData;
+    pendingManualRefreshView ??= manualRefreshView;
     return;
   }
 
+  const forceVisibleData = manualRefreshView !== undefined;
   isPolling = true;
   render();
 
@@ -3734,7 +3735,7 @@ async function poll(forceVisibleData = false): Promise<void> {
         console.warn(`Could not notify for ${failure.watchId}: ${failure.message}`);
       }
 
-      const watchView = forceVisibleData ? currentWatchView : "inbox";
+      const watchView = manualRefreshView ?? "inbox";
 
       if (watchView !== "done") {
         const pollResult = await controller.pollNow({
@@ -3783,13 +3784,13 @@ async function poll(forceVisibleData = false): Promise<void> {
     console.warn("Could not refresh GitHub status.", error);
   } finally {
     isPolling = false;
-    const forceNextPoll = pendingForcedPoll;
-    pendingForcedPoll = false;
+    const nextManualRefreshView = pendingManualRefreshView;
+    pendingManualRefreshView = undefined;
     polling.scheduleNext();
     render();
 
-    if (forceNextPoll) {
-      void poll(true);
+    if (nextManualRefreshView) {
+      void poll(nextManualRefreshView);
     }
   }
 }
