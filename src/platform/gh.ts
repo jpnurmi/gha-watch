@@ -335,7 +335,7 @@ export async function fetchWatchState(
         `repos/${target.owner}/${target.repo}/actions/runs/${target.runId}`,
       ], options.force);
       const failedChildren = shouldFetchRunJobs(response)
-        ? await fetchRunFailedChildren(target, executor)
+        ? await fetchRunFailedChildren(target, executor, options.force)
         : undefined;
 
       return toRunSnapshot(target, response, failedChildren);
@@ -1421,10 +1421,11 @@ export function createTauriShellExecutor(): ShellExecutor {
 async function fetchRunFailedChildren(
   target: Extract<WatchTarget, { kind: "run" }>,
   executor: ShellExecutor,
+  force = false,
 ): Promise<boolean> {
   const response = await fetchConditionalApiJson<RunJobsResponse>(executor, [
     `repos/${target.owner}/${target.repo}/actions/runs/${target.runId}/jobs?per_page=100`,
-  ]);
+  ], force);
   return runJobsHaveFailures(response);
 }
 
