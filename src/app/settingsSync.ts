@@ -77,7 +77,13 @@ export function createSettingsSync(remote: SettingsRemote): SettingsSync {
             ),
           });
 
-          if (!statesEqual(migratedState, toSyncedState(remoteState))) {
+          const storedRemoteState: SyncedState = {
+            settings: remoteState.settings,
+            watches: remoteState.watches,
+            watchSuppressions: remoteState.watchSuppressions ?? [],
+          };
+
+          if (!statesEqual(migratedState, storedRemoteState)) {
             await remote.save(migratedState);
           }
 
@@ -101,7 +107,7 @@ export function mergeSyncedStates(
   const local = toSyncedState(localState);
   const remote = toSyncedState(remoteState);
 
-  return {
+  return toSyncedState({
     settings: {
       watchedRepos: mergeChangedValue(
         previous.settings.watchedRepos,
@@ -125,18 +131,30 @@ export function mergeSyncedStates(
       local.watchSuppressions,
       remote.watchSuppressions,
     ),
-  };
+  });
 }
 
 export function toSyncedState(state: SyncedState): SyncedState {
   const settings = normalizeAppSettings(state.settings);
-  const watches = clearExpiredDoneWatches(state.watches)
+  const syncedWatches = state.watches
     .filter((watch) => {
       const triageState = getWatchTriageState(watch);
       return triageState === "saved" || triageState === "done";
     })
     .map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch);
+  const watches = clearExpiredDoneWatches(syncedWatches);
   const watchIds = new Set(watches.map((watch) => watch.id));
+  const now = new Date();
+  const prunedDoneSuppressions = syncedWatches
+    .filter(
+      (watch) =>
+        getWatchTriageState(watch) === "done" &&
+        !watchIds.has(watch.id),
+    )
+    .map((watch) => ({
+      id: watch.id,
+      clearedAt: watch.doneAt ?? now.toISOString(),
+    }));
 
   return {
     settings: {
@@ -145,8 +163,9 @@ export function toSyncedState(state: SyncedState): SyncedState {
       dismissedPullRequests: settings.dismissedPullRequests,
     },
     watches,
-    watchSuppressions: clearExpiredWatchSuppressions(
+    watchSuppressions: combineWatchSuppressions(
       normalizeWatchSuppressions(state.watchSuppressions),
+      prunedDoneSuppressions,
     ).filter((suppression) => !watchIds.has(suppression.id)),
   };
 }

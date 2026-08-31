@@ -267,6 +267,35 @@ describe("settings sync", () => {
 
     expect(storedState.watchSuppressions).toEqual([suppression]);
   });
+
+  it("persists suppressions when remote Done history exceeds its visible limit", async () => {
+    const doneWatches = Array.from(
+      { length: 101 },
+      (_, index) => watch(String(index + 1), "done"),
+    );
+    let storedState: SyncedState = {
+      ...remoteState,
+      watches: doneWatches,
+    };
+    const remote: SettingsRemote = {
+      async load() {
+        return storedState;
+      },
+      async save(state) {
+        storedState = state;
+      },
+    };
+
+    await createSettingsSync(remote).sync(localState);
+
+    expect(storedState.watches).toHaveLength(100);
+    expect(storedState.watchSuppressions).toEqual([
+      {
+        id: "jpnurmi/gha-watch/run/101",
+        clearedAt: "2026-08-10T00:00:00.000Z",
+      },
+    ]);
+  });
 });
 
 describe("settings sync helpers", () => {
