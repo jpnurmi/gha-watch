@@ -12,10 +12,12 @@ export function createRefreshCoordinator<View>(
   deps: RefreshCoordinatorDeps<View>,
 ): RefreshCoordinator<View> {
   let refreshing = false;
+  let pending = false;
   let pendingView: View | undefined;
 
   async function refresh(view?: View): Promise<void> {
     if (refreshing) {
+      pending = true;
       pendingView ??= view;
       return;
     }
@@ -27,12 +29,14 @@ export function createRefreshCoordinator<View>(
       await deps.run(view);
     } finally {
       refreshing = false;
+      const hasPendingRefresh = pending;
       const nextView = pendingView;
+      pending = false;
       pendingView = undefined;
       deps.onRefreshingChanged(false);
       deps.onSettled();
 
-      if (nextView !== undefined) {
+      if (hasPendingRefresh) {
         void refresh(nextView);
       }
     }

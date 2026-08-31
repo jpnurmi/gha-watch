@@ -218,6 +218,36 @@ describe("settings sync", () => {
     expect(storedState.watches).toEqual([watch("2", "done"), watch("3", "done")]);
   });
 
+  it("merges sequential changes from two clients", async () => {
+    let storedState = toSyncedState({
+      ...localState,
+      watches: [watch("2", "saved"), watch("3", "saved")],
+    });
+    const remote: SettingsRemote = {
+      async load() {
+        return storedState;
+      },
+      async save(state) {
+        storedState = state;
+      },
+    };
+    const firstClient = createSettingsSync(remote);
+    const secondClient = createSettingsSync(remote);
+    await firstClient.sync(storedState);
+    await secondClient.sync(storedState);
+
+    await firstClient.push({
+      ...storedState,
+      watches: [watch("2", "done"), watch("3", "saved")],
+    });
+    await secondClient.push({
+      ...storedState,
+      watches: [watch("2", "saved"), watch("3", "done")],
+    });
+
+    expect(storedState.watches).toEqual([watch("2", "done"), watch("3", "done")]);
+  });
+
   it("merges a local change queued while a remote refresh starts", async () => {
     let storedState = toSyncedState(localState);
     const remote: SettingsRemote = {

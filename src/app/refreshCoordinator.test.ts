@@ -52,4 +52,43 @@ describe("refresh coordinator", () => {
     expect(refreshingChanges).toEqual([true, false, true, false]);
     expect(settled).toBe(2);
   });
+
+  it("runs a view-less refresh queued during an active refresh", async () => {
+    let releaseFirstRefresh: (() => void) | undefined;
+    const firstRefreshPending = new Promise<void>((resolve) => {
+      releaseFirstRefresh = resolve;
+    });
+    let finishQueuedRefresh: (() => void) | undefined;
+    const queuedRefreshFinished = new Promise<void>((resolve) => {
+      finishQueuedRefresh = resolve;
+    });
+    const views: Array<string | undefined> = [];
+    let settled = 0;
+    const coordinator = createRefreshCoordinator<string>({
+      onRefreshingChanged() {},
+      onSettled() {
+        settled += 1;
+
+        if (settled === 2) {
+          finishQueuedRefresh?.();
+        }
+      },
+      async run(view) {
+        views.push(view);
+
+        if (views.length === 1) {
+          await firstRefreshPending;
+        }
+      },
+    });
+
+    const firstRefresh = coordinator.refresh("done");
+    await Promise.resolve();
+    void coordinator.refresh();
+    releaseFirstRefresh?.();
+    await firstRefresh;
+    await queuedRefreshFinished;
+
+    expect(views).toEqual(["done", undefined]);
+  });
 });
