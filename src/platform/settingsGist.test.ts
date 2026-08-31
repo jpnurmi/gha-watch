@@ -104,7 +104,11 @@ describe("settings Gist", () => {
       },
     ]);
 
-    await expect(createSettingsGistRemote(executor).load()).resolves.toEqual(state);
+    await expect(createSettingsGistRemote(executor).load()).resolves.toEqual({
+      ...state,
+      watches: [{ ...savedWatch, errorKind: undefined, errorAt: undefined }],
+      watchSuppressions: [],
+    });
     expect(calls).toEqual([
       {
         program: "gh",
@@ -213,8 +217,23 @@ describe("settings Gist", () => {
     }))).toEqual({
       settings: state.settings,
       watches: [],
+      watchSuppressions: [],
       historyInitialized: false,
     });
+  });
+
+  it("round-trips compact watch suppressions", () => {
+    const watchSuppressions = [
+      {
+        id: "jpnurmi/gha-watch/pull/456",
+        clearedAt: "2026-08-31T12:00:00.000Z",
+      },
+    ];
+
+    expect(parseSettingsDocument(serializeSettingsDocument({
+      ...state,
+      watchSuppressions,
+    })).watchSuppressions).toEqual(watchSuppressions);
   });
 
   it("ignores malformed and inbox watch records", () => {

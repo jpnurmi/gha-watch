@@ -10,14 +10,22 @@ describe("settings sync wiring", () => {
       /data-action="refresh"[\s\S]*?void refreshSettingsAndStatuses\(currentWatchView\);/,
     );
     expect(mainSource).toMatch(
-      /async function refreshSettingsAndStatuses[\s\S]*?await syncSettingsFromGist\(\);[\s\S]*?await poll\(manualRefreshView\);/,
+      /createRefreshCoordinator<WatchTriageState>\(\{[\s\S]*?async run\(view\) \{\s*await syncSettingsFromGist\(\);\s*await poll\(view\);/,
+    );
+    expect(mainSource).toMatch(
+      /createAdaptivePollingCoordinator\(\{[\s\S]*?poll: \(\) => \{\s*void refreshSettingsAndStatuses\(\);/,
+    );
+    expect(mainSource).toMatch(
+      /controller\.replaceSyncedWatches\(\s*syncedState\.watches,\s*syncedState\.watchSuppressions,\s*\);\s*settingsSync\.acknowledge\(getLocalSyncedState\(\)\)/,
+    );
+    expect(mainSource).toMatch(
+      /await updateAppSettings\(syncedState\.settings, false\);\s*if \(syncedStateRevision !== revision\) \{\s*return;\s*\}[\s\S]*?controller\.replaceSyncedWatches/,
     );
   });
 
   it("preserves the selected view when a manual refresh is queued", () => {
-    expect(mainSource).toContain("pendingManualRefreshView ??= manualRefreshView");
+    expect(mainSource).toContain("await refreshCoordinator.refresh(manualRefreshView)");
     expect(mainSource).toContain('const watchView = manualRefreshView ?? "inbox"');
-    expect(mainSource).toContain("void poll(nextManualRefreshView)");
   });
 
   it("uploads explicit settings and triage changes", () => {
@@ -30,6 +38,9 @@ describe("settings sync wiring", () => {
     expect(mainSource).toMatch(
       /controller\.clearDone\([\s\S]*?queueSyncedStateUpload\(\);/,
     );
-    expect(mainSource).toContain("controller.replaceSyncedWatches(syncedState.watches)");
+    expect(mainSource).toMatch(
+      /controller\.replaceSyncedWatches\(\s*syncedState\.watches,\s*syncedState\.watchSuppressions,/,
+    );
+    expect(mainSource).toContain("watchSuppressions: controller.getWatchSuppressions()");
   });
 });

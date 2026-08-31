@@ -82,7 +82,10 @@ export type WatchControllerDeps = {
 
 export type WatchController = {
   add(target: ParsedWatchTarget): Promise<void>;
-  replaceSyncedWatches(watches: WatchRecord[]): void;
+  replaceSyncedWatches(
+    watches: WatchRecord[],
+    suppressions?: WatchSuppression[],
+  ): void;
   setTriageState(ids: string[], state: WatchTriageState): void;
   setWatchError(id: string, error: string): void;
   reorderGroupWithinRepo(draggedIds: string[], targetIds: string[], position: WatchDropPosition): void;
@@ -100,6 +103,7 @@ export type WatchController = {
   rerun(id: string, mode: RerunMode): Promise<void>;
   syncWorkflowSubscriptions(watchedRepos: WatchedRepo[]): Promise<WorkflowSubscriptionSyncResult>;
   pollNow(options?: WatchPollOptions): Promise<WatchPollResult>;
+  getWatchSuppressions(): WatchSuppression[];
   getWatches(): WatchRecord[];
   subscribe(listener: () => void): () => void;
 };
@@ -1642,19 +1646,35 @@ export function createWatchController(
       await refreshWatchPullRequestDetails(getWatchId(target));
     },
 
-    replaceSyncedWatches(syncedWatches) {
+    replaceSyncedWatches(syncedWatches, syncedSuppressions = []) {
       const now = getNow();
+      const normalizedSyncedWatches = syncedWatches
+        .map(normalizeWatchSeenStatus)
+        .map((watch) => normalizeWatchDoneAt(watch, now));
       const retainedSyncedWatches = clearExpiredDoneWatches(
-        syncedWatches
-          .map(normalizeWatchSeenStatus)
-          .map((watch) => normalizeWatchDoneAt(watch, now)),
+        normalizedSyncedWatches,
         now,
       );
       const syncedIds = new Set(retainedSyncedWatches.map((watch) => watch.id));
+      const prunedSyncedIds = normalizedSyncedWatches
+        .filter((watch) => !syncedIds.has(watch.id))
+        .map((watch) => watch.id);
+      const retainedSyncedSuppressions = clearExpiredWatchSuppressions(
+        addWatchSuppressions(syncedSuppressions, prunedSyncedIds, now),
+        now,
+      ).filter((suppression) => !syncedIds.has(suppression.id));
+      const suppressedIds = new Set(
+        retainedSyncedSuppressions.map((suppression) => suppression.id),
+      );
       const localInboxWatches = watches.filter(
-        (watch) => getWatchTriageState(watch) === "inbox" && !syncedIds.has(watch.id),
+        (watch) =>
+          getWatchTriageState(watch) === "inbox" &&
+          !syncedIds.has(watch.id) &&
+          !suppressedIds.has(watch.id),
       );
       const next = [...localInboxWatches, ...retainedSyncedWatches];
+
+      setSuppressions(retainedSyncedSuppressions);
 
       if (JSON.stringify(next) !== JSON.stringify(watches)) {
         setWatchesWithDonePruning(next, now);
@@ -2042,6 +2062,10 @@ export function createWatchController(
 
     getWatches() {
       return watches;
+    },
+
+    getWatchSuppressions() {
+      return suppressions;
     },
 
     subscribe(listener) {

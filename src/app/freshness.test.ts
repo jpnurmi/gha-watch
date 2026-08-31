@@ -55,7 +55,7 @@ describe("getFreshnessState", () => {
 
   it("wires a subtle manual refresh control into the header", () => {
     expect(mainSource).toContain('data-action="refresh"');
-    expect(mainSource).toContain("void poll();");
+    expect(mainSource).toContain("void refreshSettingsAndStatuses();");
     expect(mainSource).toContain('class="header-brand"');
     expect(mainSource).toContain("renderFreshnessIndicator()");
     expect(mainSource).toContain('class="header-freshness"');
