@@ -11,6 +11,7 @@ import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot 
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
 import { getRefreshHealth } from "./app/refreshHealth";
+import { createRefreshCoordinator } from "./app/refreshCoordinator";
 import { createRepositoryIconProvider } from "./app/repositoryIcon";
 import {
   getRepoCiStatusAfterRefreshError,
@@ -175,7 +176,6 @@ let isAdding = false;
 let addError: string | undefined;
 let pullRequestDiscovery: PullRequestDiscoveryState = { status: "idle" };
 let isPolling = false;
-let pendingManualRefreshView: WatchTriageState | undefined;
 let isClearMenuOpen = false;
 let isPopupOpen = false;
 let autoStartEnabled = false;
@@ -347,6 +347,20 @@ const polling = createAdaptivePollingCoordinator({
     void refreshSettingsAndStatuses();
   },
   setTimeout: window.setTimeout.bind(window),
+});
+const refreshCoordinator = createRefreshCoordinator<WatchTriageState>({
+  onRefreshingChanged(refreshing) {
+    isPolling = refreshing;
+    render();
+  },
+  onSettled() {
+    polling.scheduleNext();
+    render();
+  },
+  async run(view) {
+    await syncSettingsFromGist();
+    await poll(view);
+  },
 });
 const updateCheck = createUpdateCheckCoordinator({
   clearTimeout: window.clearTimeout.bind(window),
@@ -3326,7 +3340,7 @@ function toggleWorkflowSubscription(
     void refreshWatchedRepoIcon(target);
   }
 
-  void poll();
+  void refreshSettingsAndStatuses();
 }
 
 function addWorkflowTarget(
@@ -3363,7 +3377,7 @@ function removeWorkflowTarget(repo: Pick<WatchedRepo, "owner" | "repo">, targetK
 
   void updateAppSettings({ ...settings, watchedRepos }, true);
   render();
-  void poll();
+  void refreshSettingsAndStatuses();
 }
 
 function getWorkflowTargetKind(value: string | undefined): WatchedWorkflowTargetKind | undefined {
@@ -3711,6 +3725,10 @@ async function syncSettingsFromGist(): Promise<void> {
 
     if (JSON.stringify(syncedState.settings) !== JSON.stringify(settings)) {
       await updateAppSettings(syncedState.settings, false);
+
+      if (syncedStateRevision !== revision) {
+        return;
+      }
     }
 
     controller.replaceSyncedWatches(
@@ -3731,19 +3749,11 @@ async function syncSettingsFromGist(): Promise<void> {
 }
 
 async function refreshSettingsAndStatuses(manualRefreshView?: WatchTriageState): Promise<void> {
-  await syncSettingsFromGist();
-  await poll(manualRefreshView);
+  await refreshCoordinator.refresh(manualRefreshView);
 }
 
 async function poll(manualRefreshView?: WatchTriageState): Promise<void> {
-  if (isPolling) {
-    pendingManualRefreshView ??= manualRefreshView;
-    return;
-  }
-
   const forceVisibleData = manualRefreshView !== undefined;
-  isPolling = true;
-  render();
 
   try {
     let successfulItems = 0;
@@ -3818,16 +3828,6 @@ async function poll(manualRefreshView?: WatchTriageState): Promise<void> {
     lastRefreshFailed = true;
     lastRefreshDegraded = false;
     console.warn("Could not refresh GitHub status.", error);
-  } finally {
-    isPolling = false;
-    const nextManualRefreshView = pendingManualRefreshView;
-    pendingManualRefreshView = undefined;
-    polling.scheduleNext();
-    render();
-
-    if (nextManualRefreshView) {
-      void poll(nextManualRefreshView);
-    }
   }
 }
 

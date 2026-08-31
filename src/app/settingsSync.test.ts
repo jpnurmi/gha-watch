@@ -317,6 +317,32 @@ describe("settings sync helpers", () => {
     ]);
   });
 
+  it("keeps remote cache updates during a local triage transition", () => {
+    const previousWatch = watch("2", "saved");
+    const localWatch = watch("2", "done");
+    const remoteWatch: WatchRecord = {
+      ...previousWatch,
+      status: "completed:failure",
+      lastSeenStatus: "completed:failure",
+      lastState: { status: "completed", conclusion: "failure" },
+      error: "Remote refresh failed",
+      errorKind: "transient",
+      errorAt: "2026-08-31T12:01:00.000Z",
+    };
+
+    expect(mergeSyncedStates(
+      { ...localState, watches: [previousWatch] },
+      { ...localState, watches: [localWatch] },
+      { ...remoteState, watches: [remoteWatch] },
+    ).watches).toEqual([
+      {
+        ...remoteWatch,
+        triageState: "done",
+        doneAt: localWatch.doneAt,
+      },
+    ]);
+  });
+
   it("merges unrelated local and remote suppressions", () => {
     const localSuppression = {
       id: "jpnurmi/gha-watch/pull/local",

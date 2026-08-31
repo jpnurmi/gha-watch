@@ -203,7 +203,11 @@ function mergeWatches(
 
     if (getSyncedTriageState(previousWatch) !== getSyncedTriageState(localWatch)) {
       if (localWatch) {
-        merged.set(id, localWatch);
+        const remoteWatch = merged.get(id);
+        merged.set(
+          id,
+          remoteWatch ? mergeWatchTriage(localWatch, remoteWatch) : localWatch,
+        );
       } else {
         merged.delete(id);
       }
@@ -233,6 +237,21 @@ function mergeWatches(
       const watch = merged.get(id);
       return watch ? [watch] : [];
     });
+}
+
+function mergeWatchTriage(local: WatchRecord, remote: WatchRecord): WatchRecord {
+  const merged: WatchRecord = {
+    ...remote,
+    triageState: getWatchTriageState(local),
+  };
+
+  if (local.doneAt) {
+    merged.doneAt = local.doneAt;
+  } else {
+    delete merged.doneAt;
+  }
+
+  return merged;
 }
 
 function mergeWatchSuppressions(
