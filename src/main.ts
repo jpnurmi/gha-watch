@@ -50,6 +50,7 @@ import {
   type WatchViewCounts,
 } from "./app/watchViewCounts";
 import { createTrayState } from "./app/trayState";
+import { createUpdateCheckCoordinator } from "./app/updateCheck";
 import {
   createPopupViewModel,
   type RepoCiStatusViewModel,
@@ -123,6 +124,7 @@ import {
 } from "./platform/gh";
 import { clearDesktopNotifications, listenForDesktopNotificationActions, sendDesktopNotification } from "./platform/notifications";
 import { getAutoStartEnabled, setAutoStartEnabled } from "./platform/autostart";
+import { getBuildSha } from "./platform/build";
 import {
   loadSettings,
   loadWatches,
@@ -139,6 +141,7 @@ import "./styles.css";
 
 const rerunRefreshDelayMs = 1_000;
 const treeIndentStepPx = 26;
+const updateRepository = { owner: "jpnurmi", repo: "gha-watch" } as const;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
 document.documentElement.dataset.platform = getUiPlatform(navigator.userAgent);
 
@@ -177,6 +180,7 @@ let isClearMenuOpen = false;
 let isPopupOpen = false;
 let autoStartEnabled = false;
 let autoStartBusy = true;
+let updateAvailable = false;
 let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
@@ -344,6 +348,25 @@ const polling = createAdaptivePollingCoordinator({
   },
   setTimeout: window.setTimeout.bind(window),
 });
+const updateCheck = createUpdateCheckCoordinator({
+  clearTimeout: window.clearTimeout.bind(window),
+  async fetchLatestSha() {
+    const defaultBranch = await fetchRepositoryDefaultBranch(updateRepository);
+
+    return fetchRepositoryCommitSha(updateRepository, defaultBranch);
+  },
+  getBuildSha,
+  now: Date.now,
+  onAvailabilityChanged(available) {
+    updateAvailable = available;
+    render();
+    void updateTrayIndicator();
+  },
+  reportError(error) {
+    console.warn("Unable to check for GHA Watch updates", error);
+  },
+  setTimeout: window.setTimeout.bind(window),
+});
 
 function notifyStatusChange(notification: WatchNotification): Promise<void> {
   return sendDesktopNotification(notification);
@@ -387,6 +410,9 @@ void refreshAutoStartState();
 void controller.refreshRepositoryIcons();
 void refreshListedRepositoryCiStatuses();
 polling.scheduleNext();
+if (!isDemoMode) {
+  updateCheck.start();
+}
 void refreshSettingsAndStatuses();
 document.addEventListener("click", (event) => {
   const target = event.target;
@@ -523,6 +549,7 @@ function render(): void {
   replacePopupHtmlPreservingScroll(app, `
     <section class="shell">
       <header class="header">
+        ${updateAvailable ? `<span class="update-available-label">Update available</span>` : ""}
         <div class="header-row">
           <div class="header-brand">
             <h1 class="header-title">GHA Watch</h1>
@@ -3958,7 +3985,13 @@ function toRepoCiStatusViewModel(status: RepositoryCiStatus): RepoCiStatusViewMo
 
 async function updateTrayIndicator(): Promise<void> {
   const summary = createTrayState(controller.getWatches());
-  await setTrayIndicator(summary.status, summary.tooltip, summary.hasUnseenChanges);
+  const tooltip = updateAvailable ? `${summary.tooltip} · Update available` : summary.tooltip;
+
+  await setTrayIndicator(
+    summary.status,
+    tooltip,
+    summary.hasUnseenChanges || updateAvailable,
+  );
 }
 
 async function resizePopupToContent(): Promise<void> {

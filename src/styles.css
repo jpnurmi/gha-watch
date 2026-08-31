@@ -65,6 +65,20 @@ input {
   padding: 8px 0 16px;
 }
 
+.update-available-label {
+  position: absolute;
+  z-index: 1;
+  top: 2px;
+  right: 10px;
+  color: rgb(121 192 255 / 56%);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 .header-row {
   display: grid;
   min-height: 42px;

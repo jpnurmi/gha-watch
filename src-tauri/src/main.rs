@@ -144,6 +144,11 @@ fn set_tray_indicator(
 }
 
 #[tauri::command]
+fn get_build_sha() -> &'static str {
+    env!("GHA_WATCH_BUILD_SHA")
+}
+
+#[tauri::command]
 fn show_desktop_notification(
     app: AppHandle,
     notification: DesktopNotification,
@@ -1102,6 +1107,7 @@ fn main() {
         ))
         .manage(TrayIndicatorState::default())
         .invoke_handler(tauri::generate_handler![
+            get_build_sha,
             set_tray_indicator,
             show_desktop_notification
         ])
