@@ -34,6 +34,9 @@ describe("settings sync wiring", () => {
     expect(mainSource).toMatch(
       /controller\.clearDone\([\s\S]*?queueSyncedStateUpload\(\);/,
     );
-    expect(mainSource).toContain("controller.replaceSyncedWatches(syncedState.watches)");
+    expect(mainSource).toMatch(
+      /controller\.replaceSyncedWatches\(\s*syncedState\.watches,\s*syncedState\.watchSuppressions,/,
+    );
+    expect(mainSource).toContain("watchSuppressions: controller.getWatchSuppressions()");
   });
 });

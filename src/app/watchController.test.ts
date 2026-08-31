@@ -350,6 +350,25 @@ describe("watchController", () => {
     expect(saves.at(-1)).toEqual(controller.getWatches());
   });
 
+  it("removes local inbox watches suppressed after remote Done pruning", () => {
+    const { deps, suppressionSaves } = createDeps([]);
+    const localInbox = existingWatch();
+    const suppression = {
+      id: localInbox.id,
+      clearedAt: "2026-08-31T12:00:00.000Z",
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-31T13:00:00.000Z") },
+      [localInbox],
+    );
+
+    controller.replaceSyncedWatches([], [suppression]);
+
+    expect(controller.getWatches()).toEqual([]);
+    expect(controller.getWatchSuppressions()).toEqual([suppression]);
+    expect(suppressionSaves.at(-1)).toEqual([suppression]);
+  });
+
   it("publishes a watch with its baseline state without notifying", async () => {
     const { deps, notifications, saves } = createDeps([
       {
@@ -3079,6 +3098,49 @@ describe("watchController", () => {
         triageState: "done",
       },
     ]);
+  });
+
+  it("keeps bulk-Done overflow suppressed on another computer", () => {
+    const now = new Date("2026-08-31T12:00:00.000Z");
+    const inboxWatches = Array.from({ length: 118 }, (_, index): WatchRecord => {
+      const runId = String(index + 1);
+      const target: RunWatchTarget = {
+        kind: "run",
+        owner: "getsentry",
+        repo: "sentry",
+        runId,
+        url: `https://github.com/getsentry/sentry/actions/runs/${runId}`,
+      };
+
+      return {
+        ...existingWatch(),
+        id: getWatchId(target),
+        target,
+      };
+    });
+    const source = createWatchController(
+      { ...createDeps([]).deps, now: () => now },
+      inboxWatches,
+    );
+    source.markAllDone("inbox");
+
+    expect(source.getWatches()).toHaveLength(100);
+    expect(source.getWatchSuppressions()).toHaveLength(18);
+
+    const destination = createWatchController(
+      { ...createDeps([]).deps, now: () => now },
+      inboxWatches,
+    );
+    destination.replaceSyncedWatches(
+      source.getWatches(),
+      source.getWatchSuppressions(),
+    );
+
+    expect(getWatchViewCounts(destination.getWatches())).toEqual({
+      inbox: { total: 0, unseen: 0 },
+      saved: { total: 0, unseen: 0 },
+      done: { total: 100, unseen: 0 },
+    });
   });
 
   it("marks only finished watches done", async () => {

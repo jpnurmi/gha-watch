@@ -1,5 +1,10 @@
 import { normalizeAppSettings } from "../domain/settings";
 import {
+  clearExpiredWatchSuppressions,
+  normalizeWatchSuppressions,
+  type WatchSuppression,
+} from "../domain/watchSuppressions";
+import {
   clearExpiredDoneWatches,
   getWatchTriageState,
   type WatchRecord,
@@ -61,16 +66,22 @@ export function createSettingsSync(remote: SettingsRemote): SettingsSync {
         const remoteState = await remote.load();
 
         if (remoteState) {
-          if (remoteState.historyInitialized === false) {
-            const migratedState = toSyncedState({
-              settings: remoteState.settings,
-              watches: localState.watches,
-            });
+          const migratedState = toSyncedState({
+            settings: remoteState.settings,
+            watches: remoteState.historyInitialized === false
+              ? localState.watches
+              : remoteState.watches,
+            watchSuppressions: combineWatchSuppressions(
+              localState.watchSuppressions,
+              remoteState.watchSuppressions,
+            ),
+          });
+
+          if (!statesEqual(migratedState, toSyncedState(remoteState))) {
             await remote.save(migratedState);
-            return restoreLocalCaches(migratedState, localState);
           }
 
-          return restoreLocalCaches(remoteState, localState);
+          return restoreLocalCaches(migratedState, localState);
         }
 
         const initialState = toSyncedState(localState);
@@ -109,11 +120,23 @@ export function mergeSyncedStates(
       ),
     },
     watches: mergeWatches(previous.watches, local.watches, remote.watches),
+    watchSuppressions: mergeWatchSuppressions(
+      previous.watchSuppressions,
+      local.watchSuppressions,
+      remote.watchSuppressions,
+    ),
   };
 }
 
 export function toSyncedState(state: SyncedState): SyncedState {
   const settings = normalizeAppSettings(state.settings);
+  const watches = clearExpiredDoneWatches(state.watches)
+    .filter((watch) => {
+      const triageState = getWatchTriageState(watch);
+      return triageState === "saved" || triageState === "done";
+    })
+    .map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch);
+  const watchIds = new Set(watches.map((watch) => watch.id));
 
   return {
     settings: {
@@ -121,12 +144,10 @@ export function toSyncedState(state: SyncedState): SyncedState {
       repoOrder: settings.repoOrder,
       dismissedPullRequests: settings.dismissedPullRequests,
     },
-    watches: clearExpiredDoneWatches(state.watches)
-      .filter((watch) => {
-        const triageState = getWatchTriageState(watch);
-        return triageState === "saved" || triageState === "done";
-      })
-      .map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch),
+    watches,
+    watchSuppressions: clearExpiredWatchSuppressions(
+      normalizeWatchSuppressions(state.watchSuppressions),
+    ).filter((suppression) => !watchIds.has(suppression.id)),
   };
 }
 
@@ -158,6 +179,7 @@ export function restoreLocalCaches(
       const repoIconUrl = localWatchIcons.get(watch.id);
       return repoIconUrl ? { ...watch, repoIconUrl } : watch;
     }),
+    watchSuppressions: normalizeWatchSuppressions(remoteState.watchSuppressions),
   };
 }
 
@@ -211,6 +233,50 @@ function mergeWatches(
       const watch = merged.get(id);
       return watch ? [watch] : [];
     });
+}
+
+function mergeWatchSuppressions(
+  previousSuppressions: WatchSuppression[] = [],
+  localSuppressions: WatchSuppression[] = [],
+  remoteSuppressions: WatchSuppression[] = [],
+): WatchSuppression[] {
+  const previous = new Map(previousSuppressions.map((item) => [item.id, item]));
+  const local = new Map(localSuppressions.map((item) => [item.id, item]));
+  const merged = new Map(remoteSuppressions.map((item) => [item.id, item]));
+
+  for (const id of new Set([...previous.keys(), ...local.keys()])) {
+    const previousSuppression = previous.get(id);
+    const localSuppression = local.get(id);
+
+    if (statesEqual(previousSuppression, localSuppression)) {
+      continue;
+    }
+
+    if (localSuppression) {
+      merged.set(id, localSuppression);
+    } else {
+      merged.delete(id);
+    }
+  }
+
+  return [...merged.values()];
+}
+
+function combineWatchSuppressions(
+  localSuppressions: WatchSuppression[] = [],
+  remoteSuppressions: WatchSuppression[] = [],
+): WatchSuppression[] {
+  const combined = new Map(remoteSuppressions.map((item) => [item.id, item]));
+
+  for (const suppression of localSuppressions) {
+    const existing = combined.get(suppression.id);
+
+    if (!existing || Date.parse(suppression.clearedAt) > Date.parse(existing.clearedAt)) {
+      combined.set(suppression.id, suppression);
+    }
+  }
+
+  return clearExpiredWatchSuppressions([...combined.values()]);
 }
 
 function mergeWatchChanges(

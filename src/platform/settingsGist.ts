@@ -1,4 +1,8 @@
 import { normalizeAppSettings, type AppSettings } from "../domain/settings";
+import {
+  normalizeWatchSuppressions,
+  type WatchSuppression,
+} from "../domain/watchSuppressions";
 import { getWatchId, getWatchTriageState, type WatchRecord } from "../domain/watches";
 import { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "./gh";
 
@@ -23,11 +27,13 @@ type SyncedSettingsDocument = {
   version: typeof settingsFormatVersion;
   settings: AppSettings;
   watches?: WatchRecord[];
+  watchSuppressions?: WatchSuppression[];
 };
 
 export type SyncedState = {
   settings: AppSettings;
   watches: WatchRecord[];
+  watchSuppressions?: WatchSuppression[];
 };
 
 export type LoadedSyncedState = SyncedState & {
@@ -131,6 +137,7 @@ export function serializeSettingsDocument(state: SyncedState): string {
       dismissedPullRequests: normalized.dismissedPullRequests,
     },
     watches: normalizeSyncedWatches(state.watches).map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch),
+    watchSuppressions: normalizeWatchSuppressions(state.watchSuppressions),
   };
   return `${JSON.stringify(document, null, 2)}\n`;
 }
@@ -153,6 +160,7 @@ export function parseSettingsDocument(content: string): LoadedSyncedState {
   return {
     settings: normalizeAppSettings(document.settings),
     watches: normalizeSyncedWatches(document.watches),
+    watchSuppressions: normalizeWatchSuppressions(document.watchSuppressions),
     ...(!Object.hasOwn(document, "watches") ? { historyInitialized: false } : {}),
   };
 }

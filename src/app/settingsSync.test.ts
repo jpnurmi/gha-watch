@@ -86,6 +86,7 @@ describe("settings sync", () => {
         { ...watch("2", "done"), repoIconUrl: "https://avatars.example/watch.png" },
         watch("3", "saved"),
       ],
+      watchSuppressions: [],
     });
     expect(remote.save).not.toHaveBeenCalled();
   });
@@ -107,6 +108,7 @@ describe("settings sync", () => {
         dismissedPullRequests: ["getsentry/relay#123"],
       },
       watches: [watch("2", "saved")],
+      watchSuppressions: [],
     });
   });
 
@@ -125,6 +127,7 @@ describe("settings sync", () => {
     expect(remote.save).toHaveBeenCalledWith({
       settings: remoteState.settings,
       watches: [watch("2", "saved")],
+      watchSuppressions: [],
     });
     expect(synced.watches).toEqual([
       { ...watch("2", "saved"), repoIconUrl: "https://avatars.example/watch.png" },
@@ -241,6 +244,29 @@ describe("settings sync", () => {
 
     expect(storedState.watches).toEqual([watch("2", "done"), watch("3", "done")]);
   });
+
+  it("adds local pruned-Done suppressions to existing remote history", async () => {
+    let storedState = toSyncedState(remoteState);
+    const remote: SettingsRemote = {
+      async load() {
+        return storedState;
+      },
+      async save(state) {
+        storedState = state;
+      },
+    };
+    const suppression = {
+      id: "jpnurmi/gha-watch/pull/overflow",
+      clearedAt: "2026-08-31T12:00:00.000Z",
+    };
+
+    await createSettingsSync(remote).sync({
+      ...localState,
+      watchSuppressions: [suppression],
+    });
+
+    expect(storedState.watchSuppressions).toEqual([suppression]);
+  });
 });
 
 describe("settings sync helpers", () => {
@@ -289,5 +315,35 @@ describe("settings sync helpers", () => {
     ).watches).toEqual([
       { ...remoteWatch, status: "completed:failure" },
     ]);
+  });
+
+  it("merges unrelated local and remote suppressions", () => {
+    const localSuppression = {
+      id: "jpnurmi/gha-watch/pull/local",
+      clearedAt: "2026-08-31T12:00:00.000Z",
+    };
+    const remoteSuppression = {
+      id: "jpnurmi/gha-watch/pull/remote",
+      clearedAt: "2026-08-31T12:01:00.000Z",
+    };
+
+    expect(mergeSyncedStates(
+      { ...localState, watchSuppressions: [] },
+      { ...localState, watchSuppressions: [localSuppression] },
+      { ...remoteState, watchSuppressions: [remoteSuppression] },
+    ).watchSuppressions).toEqual([remoteSuppression, localSuppression]);
+  });
+
+  it("removes a remote suppression cleared locally", () => {
+    const suppression = {
+      id: "jpnurmi/gha-watch/pull/reactivated",
+      clearedAt: "2026-08-31T12:00:00.000Z",
+    };
+
+    expect(mergeSyncedStates(
+      { ...localState, watchSuppressions: [suppression] },
+      { ...localState, watchSuppressions: [] },
+      { ...remoteState, watchSuppressions: [suppression] },
+    ).watchSuppressions).toEqual([]);
   });
 });

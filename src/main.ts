@@ -3043,6 +3043,7 @@ async function addDiscoveredPullRequest(pullRequest: AuthoredOpenPullRequest): P
       prNumber: pullRequest.number,
       url: pullRequest.url,
     });
+    queueSyncedStateUpload();
     addError = undefined;
     render();
   } catch (error) {
@@ -3388,6 +3389,7 @@ async function watchActiveWorkflowRun(
       runId: target.runId,
       url: target.url,
     });
+    queueSyncedStateUpload();
     currentWatchView = "inbox";
     activeWorkflowRunMenu = undefined;
     repositoryWatchMenu = undefined;
@@ -3421,6 +3423,7 @@ async function watchPullRequest(
       prNumber: target.prNumber,
       url: `https://github.com/${target.owner}/${target.repo}/pull/${target.prNumber}`,
     });
+    queueSyncedStateUpload();
     currentWatchView = "inbox";
     pullRequestMenu = undefined;
     repositoryWatchMenu = undefined;
@@ -3607,6 +3610,7 @@ async function addWatch(url: string): Promise<void> {
       await addWatchedRepository(target);
     } else {
       await controller.add(target);
+      queueSyncedStateUpload();
     }
 
     currentWatchView = "inbox";
@@ -3660,6 +3664,7 @@ function getLocalSyncedState() {
   return {
     settings,
     watches: controller.getWatches(),
+    watchSuppressions: controller.getWatchSuppressions(),
   };
 }
 
@@ -3708,7 +3713,10 @@ async function syncSettingsFromGist(): Promise<void> {
       await updateAppSettings(syncedState.settings, false);
     }
 
-    controller.replaceSyncedWatches(syncedState.watches);
+    controller.replaceSyncedWatches(
+      syncedState.watches,
+      syncedState.watchSuppressions,
+    );
     settingsSync.acknowledge(getLocalSyncedState());
     render();
 
