@@ -359,6 +359,7 @@ const updateCheck = createUpdateCheckCoordinator({
   now: Date.now,
   onAvailabilityChanged(available) {
     updateAvailable = available;
+    render();
     void updateTrayIndicator();
   },
   reportError(error) {
