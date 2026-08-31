@@ -344,7 +344,7 @@ const polling = createAdaptivePollingCoordinator({
     (watch) => getWatchTriageState(watch) === "inbox" && watch.active,
   ),
   poll: () => {
-    void poll();
+    void refreshSettingsAndStatuses();
   },
   setTimeout: window.setTimeout.bind(window),
 });
@@ -3709,6 +3709,7 @@ async function syncSettingsFromGist(): Promise<void> {
     }
 
     controller.replaceSyncedWatches(syncedState.watches);
+    settingsSync.acknowledge(getLocalSyncedState());
     render();
 
     for (const watchedRepo of settings.watchedRepos) {

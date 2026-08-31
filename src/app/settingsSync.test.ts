@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { WatchRecord, WatchTriageState } from "../domain/watches";
 import type { SettingsRemote, SyncedState } from "../platform/settingsGist";
-import { createSettingsSync, restoreLocalCaches, toSyncedState } from "./settingsSync";
+import {
+  createSettingsSync,
+  mergeSyncedStates,
+  restoreLocalCaches,
+  toSyncedState,
+} from "./settingsSync";
 
 function watch(id: string, triageState: WatchTriageState, repoIconUrl?: string): WatchRecord {
   return {
@@ -184,6 +189,58 @@ describe("settings sync", () => {
 
     expect(saved.at(-1)).toEqual(toSyncedState(remoteState));
   });
+
+  it("preserves remote triage changes when uploading a different local change", async () => {
+    let storedState = toSyncedState(localState);
+    const remote: SettingsRemote = {
+      async load() {
+        return storedState;
+      },
+      async save(state) {
+        storedState = state;
+      },
+    };
+    const sync = createSettingsSync(remote);
+    await sync.sync(localState);
+
+    storedState = {
+      ...storedState,
+      watches: [watch("2", "done")],
+    };
+    await sync.push({
+      ...localState,
+      watches: [...localState.watches, watch("3", "done")],
+    });
+
+    expect(storedState.watches).toEqual([watch("2", "done"), watch("3", "done")]);
+  });
+
+  it("merges a local change queued while a remote refresh starts", async () => {
+    let storedState = toSyncedState(localState);
+    const remote: SettingsRemote = {
+      async load() {
+        return storedState;
+      },
+      async save(state) {
+        storedState = state;
+      },
+    };
+    const sync = createSettingsSync(remote);
+    await sync.sync(localState);
+
+    storedState = {
+      ...storedState,
+      watches: [watch("2", "done")],
+    };
+    const refresh = sync.sync(localState);
+    const upload = sync.push({
+      ...localState,
+      watches: [...localState.watches, watch("3", "done")],
+    });
+    await Promise.all([refresh, upload]);
+
+    expect(storedState.watches).toEqual([watch("2", "done"), watch("3", "done")]);
+  });
 });
 
 describe("settings sync helpers", () => {
@@ -198,6 +255,39 @@ describe("settings sync helpers", () => {
     expect(restoreLocalCaches(remoteState, localState).watches).toEqual([
       { ...watch("2", "done"), repoIconUrl: "https://avatars.example/watch.png" },
       watch("3", "saved"),
+    ]);
+  });
+
+  it("merges local removals with unrelated remote triage changes", () => {
+    const previous = {
+      ...localState,
+      watches: [watch("2", "saved"), watch("3", "saved")],
+    };
+    const local = {
+      ...previous,
+      watches: [watch("3", "saved")],
+    };
+    const remote = {
+      ...previous,
+      watches: [watch("2", "saved"), watch("3", "done")],
+    };
+
+    expect(mergeSyncedStates(previous, local, remote).watches).toEqual([
+      watch("3", "done"),
+    ]);
+  });
+
+  it("keeps a remote triage transition while applying local cache updates", () => {
+    const previousWatch = watch("2", "saved");
+    const localWatch = { ...previousWatch, status: "completed:failure" };
+    const remoteWatch = watch("2", "done");
+
+    expect(mergeSyncedStates(
+      { ...localState, watches: [previousWatch] },
+      { ...localState, watches: [localWatch] },
+      { ...localState, watches: [remoteWatch] },
+    ).watches).toEqual([
+      { ...remoteWatch, status: "completed:failure" },
     ]);
   });
 });

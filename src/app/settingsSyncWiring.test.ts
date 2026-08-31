@@ -12,6 +12,10 @@ describe("settings sync wiring", () => {
     expect(mainSource).toMatch(
       /async function refreshSettingsAndStatuses[\s\S]*?await syncSettingsFromGist\(\);[\s\S]*?await poll\(manualRefreshView\);/,
     );
+    expect(mainSource).toMatch(
+      /createAdaptivePollingCoordinator\(\{[\s\S]*?poll: \(\) => \{\s*void refreshSettingsAndStatuses\(\);/,
+    );
+    expect(mainSource).toContain("settingsSync.acknowledge(getLocalSyncedState())");
   });
 
   it("preserves the selected view when a manual refresh is queued", () => {
