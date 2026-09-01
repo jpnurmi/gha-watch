@@ -357,6 +357,12 @@ describe("watch tree group actions", () => {
       /\.watch\.has-done-candidate \.watch-title-text,\s*\.watch\.is-deemphasized \.watch-title-text\s*\{[^}]*opacity:\s*0\.55;/s,
     );
     expect(styles).toMatch(
+      /\.watch\.is-deemphasized \.watch-title-text\s*\{[^}]*font-style:\s*italic;/s,
+    );
+    expect(styles).toMatch(
+      /\.watch\.has-done-candidate \.watch-title-text\s*\{[^}]*text-decoration:\s*line-through;[^}]*text-decoration-thickness:\s*1px;/s,
+    );
+    expect(styles).toMatch(
       /\.watch\.has-done-candidate :is\(\.watch-workflow-status\.status-icon-success, \.watch-workflow-status\.status-icon-failure\),\s*\.watch\.is-deemphasized :is\(\.watch-workflow-status\.status-icon-success, \.watch-workflow-status\.status-icon-failure\)\s*\{[^}]*color:\s*#8b949e;/s,
     );
     expect(styles).toMatch(/\.watch\.has-done-candidate \.watch-actions::before/);

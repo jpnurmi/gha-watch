@@ -1779,6 +1779,15 @@ button.watch-tree-leading {
   opacity: 0.55;
 }
 
+.watch.is-deemphasized .watch-title-text {
+  font-style: italic;
+}
+
+.watch.has-done-candidate .watch-title-text {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
 .watch.has-done-candidate :is(.watch-workflow-status.status-icon-success, .watch-workflow-status.status-icon-failure),
 .watch.is-deemphasized :is(.watch-workflow-status.status-icon-success, .watch-workflow-status.status-icon-failure) {
   color: #8b949e;
