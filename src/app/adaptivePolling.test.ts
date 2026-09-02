@@ -36,7 +36,7 @@ describe("adaptive polling coordinator", () => {
     vi.advanceTimersByTime(activePollIntervalMs - 1);
     expect(poll).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(poll).toHaveBeenCalledTimes(1);
+    expect(poll).toHaveBeenLastCalledWith("minimal");
 
     active = false;
     expect(coordinator.getIntervalMs()).toBe(5 * 60_000);
@@ -44,7 +44,7 @@ describe("adaptive polling coordinator", () => {
     vi.advanceTimersByTime(terminalPollIntervalMs - 1);
     expect(poll).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(1);
-    expect(poll).toHaveBeenCalledTimes(2);
+    expect(poll).toHaveBeenLastCalledWith("minimal");
   });
 
   it("cancels the pending timeout when rescheduling", () => {
@@ -66,6 +66,6 @@ describe("adaptive polling coordinator", () => {
     coordinator.handleFocusChanged(false);
     expect(poll).not.toHaveBeenCalled();
     coordinator.handleFocusChanged(true);
-    expect(poll).toHaveBeenCalledTimes(1);
+    expect(poll).toHaveBeenCalledWith("full");
   });
 });

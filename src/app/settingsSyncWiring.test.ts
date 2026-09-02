@@ -13,7 +13,7 @@ describe("settings sync wiring", () => {
       /createRefreshCoordinator<WatchTriageState>\(\{[\s\S]*?async run\(view\) \{\s*await syncSettingsFromGist\(\);\s*await poll\(view\);/,
     );
     expect(mainSource).toMatch(
-      /createAdaptivePollingCoordinator\(\{[\s\S]*?poll: \(\) => \{\s*void refreshSettingsAndStatuses\(\);/,
+      /createAdaptivePollingCoordinator\(\{[\s\S]*?poll: \(mode\) => \{\s*void refreshSettingsAndStatuses\(mode === "full" \? currentWatchView : undefined\);/,
     );
     expect(mainSource).toMatch(
       /controller\.replaceSyncedWatches\(\s*syncedState\.watches,\s*syncedState\.watchSuppressions,\s*\);\s*settingsSync\.acknowledge\(getLocalSyncedState\(\)\)/,
@@ -26,6 +26,10 @@ describe("settings sync wiring", () => {
   it("preserves the selected view when a manual refresh is queued", () => {
     expect(mainSource).toContain("await refreshCoordinator.refresh(manualRefreshView)");
     expect(mainSource).toContain('const watchView = manualRefreshView ?? "inbox"');
+  });
+
+  it("fully refreshes the selected view on a full adaptive poll", () => {
+    expect(mainSource).toContain('mode === "full" ? currentWatchView : undefined');
   });
 
   it("uploads explicit settings and triage changes", () => {
