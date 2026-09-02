@@ -48,7 +48,7 @@ export function getStatusTransition(
 }
 
 export function isTerminalStatus(state: WatchState): boolean {
-  return state.status === "completed";
+  return state.status === "completed" && state.conclusion === "success";
 }
 
 function isInterestingNotificationState(state: WatchState): boolean {

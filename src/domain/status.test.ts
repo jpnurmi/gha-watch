@@ -90,9 +90,16 @@ describe("getStatusTransition", () => {
 });
 
 describe("isTerminalStatus", () => {
-  it("treats completed statuses as terminal", () => {
-    expect(isTerminalStatus({ status: "completed", conclusion: "failure" })).toBe(true);
+  it("treats successful completions as terminal", () => {
+    expect(isTerminalStatus({ status: "completed", conclusion: "success" })).toBe(true);
   });
+
+  it.each(["failure", "cancelled", "skipped", null])(
+    "keeps completed %s states active",
+    (conclusion) => {
+      expect(isTerminalStatus({ status: "completed", conclusion })).toBe(false);
+    },
+  );
 
   it("keeps non-completed statuses active", () => {
     expect(isTerminalStatus({ status: "in_progress", conclusion: null })).toBe(false);

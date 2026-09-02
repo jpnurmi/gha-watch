@@ -679,6 +679,7 @@ describe("watchController", () => {
     const controller = createWatchController(
       {
         ...deps,
+        now: () => new Date("2026-08-02T12:00:00.000Z"),
         async fetchPullRequestDetails(targets) {
           detailFetches.push(...targets);
           return targets.map(() => ({ state: "closed" as const, title: "Refine lifecycle icons" }));
@@ -1043,6 +1044,41 @@ describe("watchController", () => {
     expect(notificationRecords).toMatchObject([
       { watchId: "getsentry/sentry/run/900", title: "CI: Fast checks" },
     ]);
+  });
+
+  it("polls caught-up failed workflow runs for retries", async () => {
+    const { deps, fetches } = createDeps([{
+      status: "queued",
+      conclusion: null,
+      title: "CI: Fast checks",
+      url: "https://github.com/getsentry/sentry/actions/runs/900",
+    }]);
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun({ conclusion: "failure" })];
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") },
+      [],
+      [],
+      discoveryState(),
+    );
+
+    await controller.syncWorkflowSubscriptions([{
+      owner: "getsentry",
+      repo: "sentry",
+      defaultBranchWorkflowNames: ["CI"],
+    }]);
+
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "completed:failure",
+      active: true,
+    });
+
+    await controller.pollNow();
+
+    expect(fetches).toMatchObject([{ kind: "run", runId: "900" }]);
+    expect(controller.getWatches()[0]).toMatchObject({
+      status: "queued",
+      active: true,
+    });
   });
 
   it("advances discovery when catch-up notification permission is denied", async () => {
@@ -1556,7 +1592,7 @@ describe("watchController", () => {
       sourceState: "closed",
       status: "completed:failure",
       lastSeenStatus: "in_progress",
-      active: false,
+      active: true,
       timing: {
         queuedAt: "2026-08-12T10:01:00.000Z",
         startedAt: "2026-08-12T10:01:02.000Z",
@@ -2295,7 +2331,7 @@ describe("watchController", () => {
     expect(pollResult.successfulWatchIds).toEqual([getWatchId(prTarget)]);
     expect(controller.getWatches()[0]).toMatchObject({
       status: "completed:failure",
-      active: false,
+      active: true,
       error: undefined,
     });
     expect(notifications).toHaveLength(1);
@@ -2843,8 +2879,8 @@ describe("watchController", () => {
     ]);
   });
 
-  it("refreshes saved watches on demand without notifying", async () => {
-    const { deps, notificationRecords } = createDeps([
+  it("keeps polling failed workflows for retries", async () => {
+    const { deps, fetches, notificationRecords } = createDeps([
       {
         status: "in_progress",
         conclusion: null,
@@ -2867,23 +2903,21 @@ describe("watchController", () => {
     const controller = createWatchController(deps);
 
     await controller.add(runTarget);
-    controller.setTriageState(["getsentry/sentry/run/123"], "saved");
-    await controller.pollNow({ triageState: "saved", includeInactive: true });
+    await controller.pollNow();
 
-    expect(notificationRecords).toEqual([]);
+    expect(notificationRecords).toHaveLength(1);
     expect(controller.getWatches()).toMatchObject([
       {
-        triageState: "saved",
         status: "completed:failure",
-        active: false,
+        active: true,
       },
     ]);
 
-    await controller.pollNow({ triageState: "saved", includeInactive: true });
+    await controller.pollNow();
 
+    expect(fetches).toEqual([runTarget, runTarget, runTarget]);
     expect(controller.getWatches()).toMatchObject([
       {
-        triageState: "saved",
         status: "in_progress",
         active: true,
       },
