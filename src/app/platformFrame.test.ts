@@ -51,6 +51,9 @@ describe("platform frame styling", () => {
     expect(rustSource).toContain("tauri_plugin_window_state::StateFlags::SIZE");
     expect(rustSource).toContain("restore_linux_window_geometry(&window)");
     expect(rustSource).toContain("save_linux_window_geometry(window.app_handle())");
+    expect(rustSource).toContain("Could not restore Linux window geometry");
+    expect(rustSource).toContain("Could not save Linux window geometry");
+    expect(rustSource).toContain("matches!(event, tauri::RunEvent::Exit)");
   });
 
   it("does not move the native Linux window from app content", () => {
@@ -110,8 +113,13 @@ describe("platform frame styling", () => {
   });
 
   it("persists only supported Linux window geometry", () => {
-    expect(rustSource).toContain("let mut flags = tauri_plugin_window_state::StateFlags::SIZE");
+    expect(rustSource).toContain("fn linux_window_geometry_flags(supports_position: bool)");
+    expect(rustSource).toContain("if supports_position {\n        flags |=");
+    expect(rustSource).toContain(
+      "linux_window_geometry_flags(linux_window_supports_position())",
+    );
     expect(rustSource).toContain("display.backend().is_x11()");
+    expect(rustSource).toContain("linux_window_state_label(label, linux_window_supports_position())");
     expect(rustSource).not.toContain('std::env::set_var("GDK_BACKEND", "x11")');
   });
 

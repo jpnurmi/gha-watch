@@ -545,12 +545,22 @@ fn show_and_focus_window(window: &tauri::WebviewWindow) {
 }
 
 #[cfg(target_os = "linux")]
-fn linux_window_geometry_flags() -> tauri_plugin_window_state::StateFlags {
+fn linux_window_geometry_flags(supports_position: bool) -> tauri_plugin_window_state::StateFlags {
     let mut flags = tauri_plugin_window_state::StateFlags::SIZE;
-    if linux_window_supports_position() {
+    if supports_position {
         flags |= tauri_plugin_window_state::StateFlags::POSITION;
     }
     flags
+}
+
+#[cfg(target_os = "linux")]
+fn linux_window_state_label(label: &str, supports_position: bool) -> &str {
+    // Keep Wayland's size-only state from overwriting X11 position data.
+    if label == "main" && supports_position {
+        "main-x11"
+    } else {
+        label
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -563,7 +573,10 @@ fn linux_window_supports_position() -> bool {
 
 #[cfg(target_os = "linux")]
 fn restore_linux_window_geometry(window: &tauri::WebviewWindow) {
-    let _ = window.restore_state(linux_window_geometry_flags());
+    let flags = linux_window_geometry_flags(linux_window_supports_position());
+    if let Err(error) = window.restore_state(flags) {
+        eprintln!("Could not restore Linux window geometry: {error}");
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -573,7 +586,10 @@ fn save_linux_window_geometry(app: &AppHandle) {
     };
 
     if window.is_visible().unwrap_or(false) {
-        let _ = app.save_window_state(linux_window_geometry_flags());
+        let flags = linux_window_geometry_flags(linux_window_supports_position());
+        if let Err(error) = app.save_window_state(flags) {
+            eprintln!("Could not save Linux window geometry: {error}");
+        }
     }
 }
 
@@ -1126,6 +1142,7 @@ fn main() {
     let builder = builder.plugin(
         tauri_plugin_window_state::Builder::default()
             .with_state_flags(tauri_plugin_window_state::StateFlags::empty())
+            .map_label(|label| linux_window_state_label(label, linux_window_supports_position()))
             .build(),
     );
 
@@ -1224,8 +1241,17 @@ fn main() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running GHA Watch");
+        .build(tauri::generate_context!())
+        .expect("error while building GHA Watch")
+        .run(|app, event| {
+            #[cfg(target_os = "linux")]
+            if matches!(event, tauri::RunEvent::Exit) {
+                save_linux_window_geometry(app);
+            }
+
+            #[cfg(not(target_os = "linux"))]
+            let _ = (app, event);
+        });
 }
 
 #[cfg(test)]
@@ -1278,6 +1304,25 @@ mod tests {
             },
             scale_factor,
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn selects_supported_linux_window_geometry() {
+        let wayland = linux_window_geometry_flags(false);
+        assert!(wayland.contains(tauri_plugin_window_state::StateFlags::SIZE));
+        assert!(!wayland.contains(tauri_plugin_window_state::StateFlags::POSITION));
+
+        let x11 = linux_window_geometry_flags(true);
+        assert!(x11.contains(tauri_plugin_window_state::StateFlags::SIZE));
+        assert!(x11.contains(tauri_plugin_window_state::StateFlags::POSITION));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn partitions_x11_window_position_state() {
+        assert_eq!(linux_window_state_label("main", false), "main");
+        assert_eq!(linux_window_state_label("main", true), "main-x11");
     }
 
     #[test]
