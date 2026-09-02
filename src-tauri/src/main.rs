@@ -21,6 +21,8 @@ use tauri::{
 };
 #[cfg(any(target_os = "macos", test))]
 use tauri::{LogicalPosition, Monitor, PhysicalRect, PhysicalSize};
+#[cfg(target_os = "linux")]
+use tauri_plugin_window_state::{AppHandleExt as _, WindowExt as _};
 #[cfg(windows)]
 use tauri_winrt_notification::{Duration as ToastDuration, Scenario as ToastScenario, Toast};
 
@@ -501,6 +503,9 @@ fn show_main_window(app: &AppHandle, tray_rect: Option<Rect>) {
 fn toggle_main_window(app: &AppHandle, tray_rect: Rect) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
+            #[cfg(target_os = "linux")]
+            save_linux_window_geometry(app);
+
             let _ = window.hide();
         } else {
             #[cfg(target_os = "linux")]
@@ -536,6 +541,39 @@ fn show_and_focus_window(window: &tauri::WebviewWindow) {
             std::thread::sleep(std::time::Duration::from_millis(75));
             let _ = window.set_focus();
         });
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_window_geometry_flags() -> tauri_plugin_window_state::StateFlags {
+    let mut flags = tauri_plugin_window_state::StateFlags::SIZE;
+    if linux_window_supports_position() {
+        flags |= tauri_plugin_window_state::StateFlags::POSITION;
+    }
+    flags
+}
+
+#[cfg(target_os = "linux")]
+fn linux_window_supports_position() -> bool {
+    use gtk::gdk::prelude::*;
+
+    // Wayland reports every top-level at (0, 0) and does not support client positioning.
+    gtk::gdk::Display::default().is_some_and(|display| display.backend().is_x11())
+}
+
+#[cfg(target_os = "linux")]
+fn restore_linux_window_geometry(window: &tauri::WebviewWindow) {
+    let _ = window.restore_state(linux_window_geometry_flags());
+}
+
+#[cfg(target_os = "linux")]
+fn save_linux_window_geometry(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    if window.is_visible().unwrap_or(false) {
+        let _ = app.save_window_state(linux_window_geometry_flags());
     }
 }
 
@@ -1083,13 +1121,11 @@ fn position_window_near_top_right(window: &tauri::WebviewWindow) -> Result<(), S
 fn main() {
     let builder = tauri::Builder::default();
 
+    // Hidden GTK windows can report invalid geometry, so restore and save explicitly.
     #[cfg(target_os = "linux")]
     let builder = builder.plugin(
         tauri_plugin_window_state::Builder::default()
-            .with_state_flags(
-                tauri_plugin_window_state::StateFlags::POSITION
-                    | tauri_plugin_window_state::StateFlags::SIZE,
-            )
+            .with_state_flags(tauri_plugin_window_state::StateFlags::empty())
             .build(),
     );
 
@@ -1114,6 +1150,7 @@ fn main() {
         .on_window_event(|window, event| match event {
             #[cfg(target_os = "linux")]
             WindowEvent::CloseRequested { api, .. } => {
+                save_linux_window_geometry(window.app_handle());
                 api.prevent_close();
                 let _ = window.hide();
             }
@@ -1134,6 +1171,7 @@ fn main() {
 
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("main") {
+                restore_linux_window_geometry(&window);
                 configure_linux_window_frame(&window);
                 configure_linux_window_controls(&window);
             }
@@ -1173,7 +1211,11 @@ fn main() {
                     .menu(&menu)
                     .on_menu_event(|app, event| match event.id().as_ref() {
                         "show" => show_main_window(app, None),
-                        "quit" => app.exit(0),
+                        "quit" => {
+                            #[cfg(target_os = "linux")]
+                            save_linux_window_geometry(app);
+                            app.exit(0);
+                        }
                         _ => {}
                     })
             };

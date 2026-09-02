@@ -7,7 +7,6 @@ describe("Linux packaging configuration", () => {
     expect(config.app.windows[0]).toMatchObject({
       label: "main",
       width: 460,
-      center: true,
       resizable: true,
       maximizable: false,
       minimizable: false,
@@ -17,6 +16,7 @@ describe("Linux packaging configuration", () => {
       alwaysOnTop: true,
       skipTaskbar: true,
     });
+    expect(config.app.windows[0]).not.toHaveProperty("center");
   });
 
   it("does not need app-level drag permissions with native Linux decorations", () => {
