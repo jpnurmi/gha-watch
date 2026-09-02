@@ -44,8 +44,16 @@ describe("platform frame styling", () => {
       /\[target\.'cfg\(target_os = "linux"\)'\.dependencies\][\s\S]*tauri-plugin-window-state = "2\.4\.1"/,
     );
     expect(rustSource).toContain('#[cfg(target_os = "linux")]\n    let builder = builder.plugin(');
+    expect(rustSource).toContain(
+      ".with_state_flags(tauri_plugin_window_state::StateFlags::empty())",
+    );
     expect(rustSource).toContain("tauri_plugin_window_state::StateFlags::POSITION");
     expect(rustSource).toContain("tauri_plugin_window_state::StateFlags::SIZE");
+    expect(rustSource).toContain("restore_linux_window_geometry(&window)");
+    expect(rustSource).toContain("save_linux_window_geometry(window.app_handle())");
+    expect(rustSource).toContain("Could not restore Linux window geometry");
+    expect(rustSource).toContain("Could not save Linux window geometry");
+    expect(rustSource).toContain("matches!(event, tauri::RunEvent::Exit)");
   });
 
   it("does not move the native Linux window from app content", () => {
@@ -100,6 +108,19 @@ describe("platform frame styling", () => {
     expect(rustSource).toContain("WindowEvent::CloseRequested { api, .. }");
     expect(rustSource).toContain("api.prevent_close()");
     expect(rustSource).toContain("let _ = window.hide();");
+    expect(rustSource).not.toContain("window.minimize()");
+    expect(rustSource).not.toContain("window.unminimize()");
+  });
+
+  it("persists only supported Linux window geometry", () => {
+    expect(rustSource).toContain("fn linux_window_geometry_flags(supports_position: bool)");
+    expect(rustSource).toContain("if supports_position {\n        flags |=");
+    expect(rustSource).toContain(
+      "linux_window_geometry_flags(linux_window_supports_position())",
+    );
+    expect(rustSource).toContain("display.backend().is_x11()");
+    expect(rustSource).toContain("linux_window_state_label(label, linux_window_supports_position())");
+    expect(rustSource).not.toContain('std::env::set_var("GDK_BACKEND", "x11")');
   });
 
   it("does not fight Linux maximize requests after the window manager accepts them", () => {
@@ -110,6 +131,8 @@ describe("platform frame styling", () => {
   it("does not keep re-anchoring the Linux window", () => {
     expect(rustSource).toContain('#[cfg(not(target_os = "linux"))]\n        {');
     expect(rustSource).toContain('#[cfg(not(target_os = "linux"))]\n            {');
+    expect(rustSource).not.toContain("ensure_initial_linux_window_position");
+    expect(rustSource).not.toContain("window.center()");
   });
 
   it("hides non-Linux windows immediately when they lose focus", () => {
