@@ -343,8 +343,8 @@ const polling = createAdaptivePollingCoordinator({
   hasActiveWatches: () => controller.getWatches().some(
     (watch) => getWatchTriageState(watch) === "inbox" && watch.active,
   ),
-  poll: () => {
-    void refreshSettingsAndStatuses();
+  poll: (mode) => {
+    void refreshSettingsAndStatuses(mode === "full" ? currentWatchView : undefined);
   },
   setTimeout: window.setTimeout.bind(window),
 });

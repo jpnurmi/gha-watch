@@ -1,6 +1,8 @@
 export const activePollIntervalMs = 30_000;
 export const terminalPollIntervalMs = 5 * 60_000;
 
+export type AdaptivePollMode = "minimal" | "full";
+
 function getAdaptivePollIntervalMs(hasActiveWatches: boolean): number {
   return hasActiveWatches ? activePollIntervalMs : terminalPollIntervalMs;
 }
@@ -8,7 +10,7 @@ function getAdaptivePollIntervalMs(hasActiveWatches: boolean): number {
 type AdaptivePollingDeps<Timeout> = {
   clearTimeout(timeout: Timeout): void;
   hasActiveWatches(): boolean;
-  poll(): void;
+  poll(mode: AdaptivePollMode): void;
   setTimeout(callback: () => void, delay: number): Timeout;
 };
 
@@ -34,7 +36,7 @@ export function createAdaptivePollingCoordinator<Timeout>(
 
     timeout = deps.setTimeout(() => {
       timeout = undefined;
-      deps.poll();
+      deps.poll("minimal");
     }, getIntervalMs());
   }
 
@@ -42,7 +44,7 @@ export function createAdaptivePollingCoordinator<Timeout>(
     getIntervalMs,
     handleFocusChanged(focused) {
       if (focused) {
-        deps.poll();
+        deps.poll("full");
       }
     },
     scheduleNext,
