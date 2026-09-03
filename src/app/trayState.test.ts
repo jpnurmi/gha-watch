@@ -69,7 +69,7 @@ describe("createTrayState", () => {
         watch({
           id: "getsentry/sentry/run/456",
           triageState: "saved",
-          active: false,
+          active: true,
           status: "completed:failure",
           lastState: { status: "completed", conclusion: "failure" },
         }),
