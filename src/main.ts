@@ -114,6 +114,7 @@ import {
   fetchWatchState,
   fetchWorkflowDefinitions,
   fetchWorkflowRunsSince,
+  isRepositoryCommitAncestor,
   rerunWatch,
   type ActiveWorkflowRun,
   type AuthoredOpenPullRequest,
@@ -370,6 +371,9 @@ const updateCheck = createUpdateCheckCoordinator({
     return fetchRepositoryCommitSha(updateRepository, defaultBranch);
   },
   getBuildSha,
+  isAncestor(ancestorSha, descendantSha) {
+    return isRepositoryCommitAncestor(updateRepository, ancestorSha, descendantSha);
+  },
   now: Date.now,
   onAvailabilityChanged(available) {
     updateAvailable = available;

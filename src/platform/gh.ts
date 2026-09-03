@@ -114,6 +114,10 @@ type CommitViewResponse = {
   sha?: string;
 };
 
+type CommitComparisonResponse = {
+  status?: string;
+};
+
 type UserViewResponse = {
   login?: string;
 };
@@ -389,6 +393,24 @@ export async function fetchRepositoryCommitSha(
     ]);
 
     return requiredString(commit.sha, "repository commit");
+  } catch (error) {
+    throw normalizeGhError(error);
+  }
+}
+
+export async function isRepositoryCommitAncestor(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  ancestorSha: string,
+  descendantSha: string,
+  executor: ShellExecutor = createTauriShellExecutor(),
+): Promise<boolean> {
+  try {
+    const comparison = await fetchConditionalApiJson<CommitComparisonResponse>(executor, [
+      `repos/${target.owner}/${target.repo}/compare/${ancestorSha}...${descendantSha}`,
+    ]);
+    const status = comparison.status?.trim().toLowerCase();
+
+    return status === "ahead" || status === "identical";
   } catch (error) {
     throw normalizeGhError(error);
   }

@@ -15,6 +15,7 @@ import {
   fetchWatchState,
   fetchWorkflowDefinitions,
   fetchWorkflowRunsSince,
+  isRepositoryCommitAncestor,
   rerunWatch,
   type ShellExecutor,
 } from "./gh";
@@ -841,6 +842,44 @@ describe("fetchRepositoryCommitSha", () => {
       program: "gh",
       args: ["api", "--include", "repos/getsentry/sentry/commits/release%2F1.0"],
     }]);
+  });
+});
+
+describe("isRepositoryCommitAncestor", () => {
+  it("recognizes a descendant commit via the repository comparison", async () => {
+    const { executor, calls } = createExecutor(createIncludedResult(
+      200,
+      JSON.stringify({ status: "ahead" }),
+    ));
+
+    await expect(isRepositoryCommitAncestor(
+      { owner: "getsentry", repo: "sentry" },
+      "1111111111111111111111111111111111111111",
+      "2222222222222222222222222222222222222222",
+      executor,
+    )).resolves.toBe(true);
+    expect(calls).toEqual([{
+      program: "gh",
+      args: [
+        "api",
+        "--include",
+        "repos/getsentry/sentry/compare/1111111111111111111111111111111111111111...2222222222222222222222222222222222222222",
+      ],
+    }]);
+  });
+
+  it("rejects a commit behind the ancestor", async () => {
+    const { executor } = createExecutor(createIncludedResult(
+      200,
+      JSON.stringify({ status: "behind" }),
+    ));
+
+    await expect(isRepositoryCommitAncestor(
+      { owner: "getsentry", repo: "sentry" },
+      "1111111111111111111111111111111111111111",
+      "2222222222222222222222222222222222222222",
+      executor,
+    )).resolves.toBe(false);
   });
 });
 

@@ -14,6 +14,7 @@ export type UpdateCheckDependencies = {
   clearTimeout(timeout: Timeout): void;
   fetchLatestSha(): Promise<string>;
   getBuildSha(): Promise<string>;
+  isAncestor(ancestorSha: string, descendantSha: string): Promise<boolean>;
   now(): number;
   onAvailabilityChanged(available: boolean): void;
   reportError(error: unknown): void;
@@ -45,7 +46,8 @@ export function createUpdateCheckCoordinator(
           return;
         }
 
-        const nextAvailable = built.toLowerCase() !== latest.toLowerCase();
+        const nextAvailable = built.toLowerCase() !== latest.toLowerCase()
+          && await deps.isAncestor(built, latest);
 
         if (nextAvailable !== available) {
           available = nextAvailable;

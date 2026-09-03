@@ -18,6 +18,7 @@ function createCoordinator() {
     clearTimeout: vi.fn(),
     fetchLatestSha,
     getBuildSha: vi.fn(async () => builtSha),
+    isAncestor: vi.fn(async () => true),
     now: () => now,
     onAvailabilityChanged,
     reportError,
@@ -60,6 +61,7 @@ describe("update check coordinator", () => {
       clearTimeout: vi.fn(),
       fetchLatestSha: vi.fn(async () => builtSha),
       getBuildSha: vi.fn(async () => builtSha),
+      isAncestor: vi.fn(async () => true),
       now: () => 0,
       onAvailabilityChanged,
       reportError: vi.fn(),
@@ -68,6 +70,26 @@ describe("update check coordinator", () => {
 
     await coordinator.checkNow();
 
+    expect(onAvailabilityChanged).not.toHaveBeenCalled();
+  });
+
+  it("leaves the indicator clear when the build is ahead of the repository", async () => {
+    const onAvailabilityChanged = vi.fn();
+    const isAncestor = vi.fn(async () => false);
+    const coordinator = createUpdateCheckCoordinator({
+      clearTimeout: vi.fn(),
+      fetchLatestSha: vi.fn(async () => latestSha),
+      getBuildSha: vi.fn(async () => builtSha),
+      isAncestor,
+      now: () => 0,
+      onAvailabilityChanged,
+      reportError: vi.fn(),
+      setTimeout: vi.fn(() => 1 as ReturnType<typeof setTimeout>),
+    });
+
+    await coordinator.checkNow();
+
+    expect(isAncestor).toHaveBeenCalledWith(builtSha, latestSha);
     expect(onAvailabilityChanged).not.toHaveBeenCalled();
   });
 
@@ -101,6 +123,7 @@ describe("update check coordinator", () => {
       clearTimeout: vi.fn(),
       fetchLatestSha: vi.fn().mockRejectedValue(new Error("offline")),
       getBuildSha: vi.fn(async () => builtSha),
+      isAncestor: vi.fn(async () => true),
       now: () => 0,
       onAvailabilityChanged,
       reportError,
@@ -119,6 +142,7 @@ describe("update check coordinator", () => {
       clearTimeout: vi.fn(),
       fetchLatestSha: vi.fn(async () => latestSha),
       getBuildSha: vi.fn(async () => "unknown"),
+      isAncestor: vi.fn(async () => true),
       now: () => 0,
       onAvailabilityChanged,
       reportError: vi.fn(),
