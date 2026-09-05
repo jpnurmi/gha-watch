@@ -1319,6 +1319,8 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-window-state",
  "tauri-winrt-notification 0.8.1",
+ "windows 0.62.2",
+ "zbus",
 ]
 
 [[package]]

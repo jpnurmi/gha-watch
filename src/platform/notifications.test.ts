@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import type { WatchNotification } from "../app/watchNotification";
 import {
   clearDesktopNotifications,
@@ -8,6 +9,8 @@ import {
   type DesktopNotificationAction,
   type DesktopNotificationDeps,
 } from "./notifications";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 function notification(overrides: Partial<WatchNotification> = {}): WatchNotification {
   return {
@@ -173,8 +176,7 @@ describe("sendDesktopNotification", () => {
   });
 
   it("clears delivered native notifications", async () => {
-    const cancelAllNotifications = vi.fn(async () => {});
-    const removeAllActiveNotifications = vi.fn(async () => {});
+    const clearNotifications = vi.fn(async () => {});
     const deps: DesktopNotificationDeps = {
       async isPermissionGranted() {
         return true;
@@ -183,15 +185,27 @@ describe("sendDesktopNotification", () => {
         return "denied";
       },
       async showNotification() {},
-      cancelAllNotifications,
-      removeAllActiveNotifications,
+      clearNotifications,
     };
 
     await sendDesktopNotification(notification(), deps);
     await sendDesktopNotification(notification({ watchId: "jpnurmi/gha/job/789" }), deps);
     await clearDesktopNotifications(deps);
 
-    expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
-    expect(removeAllActiveNotifications).toHaveBeenCalledTimes(1);
+    expect(clearNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it("invokes the registered native clearing command", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
+    await clearDesktopNotifications();
+
+    expect(invoke).toHaveBeenLastCalledWith("clear_desktop_notifications");
+  });
+
+  it("propagates native clearing failures", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error("desktop service unavailable"));
+
+    await expect(clearDesktopNotifications()).rejects.toThrow("desktop service unavailable");
   });
 });
