@@ -326,6 +326,46 @@ describe("settings sync", () => {
       },
     ]);
   });
+
+  it.each(["repository", "triage"])("retries a failed %s edit against existing remote state", async (edit) => {
+    const baseline = toSyncedState(localState);
+    let storedState = baseline;
+    let offline = true;
+    const remote: SettingsRemote = {
+      load: async () => storedState,
+      async save(state) {
+        if (offline) {
+          throw new Error("offline");
+        }
+        storedState = state;
+      },
+    };
+    const sync = createSettingsSync(remote);
+    sync.acknowledge(baseline);
+    const edited: SyncedState = edit === "repository"
+      ? {
+        ...baseline,
+        settings: {
+          ...baseline.settings,
+          watchedRepos: [
+            ...baseline.settings.watchedRepos,
+            { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+          ],
+        },
+      }
+      : { ...baseline, watches: [watch("2", "done")] };
+
+    await expect(sync.push(edited)).rejects.toThrow("offline");
+    await expect(sync.sync(edited)).rejects.toThrow("offline");
+    storedState = { ...storedState, watches: [...storedState.watches, watch("3", "saved")] };
+    offline = false;
+
+    const recovered = await sync.sync(edited);
+
+    expect(recovered.settings).toEqual(edited.settings);
+    expect(recovered.watches).toEqual([...edited.watches, watch("3", "saved")]);
+    expect(storedState).toEqual(toSyncedState(recovered));
+  });
 });
 
 describe("settings sync helpers", () => {

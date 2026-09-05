@@ -61,8 +61,8 @@ export function createSettingsSync(remote: SettingsRemote): SettingsSync {
 
     sync(localState) {
       return enqueue(async () => {
-        previousLocalState = toSyncedState(localState);
         await flushPendingState();
+        previousLocalState = toSyncedState(localState);
         const remoteState = await remote.load();
 
         if (remoteState) {
