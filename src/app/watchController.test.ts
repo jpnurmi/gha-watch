@@ -3,7 +3,7 @@ import {
   branchPatternWildcardLimit,
   createWatchController,
   getWorkflowRunSubscriptionMatch,
-  workflowDiscoveryMaxLookbackMs,
+  workflowDiscoveryWindowMs,
   workflowDiscoveryOverlapMs,
   type WatchControllerDeps,
 } from "./watchController";
@@ -1269,14 +1269,14 @@ describe("watchController", () => {
     expect(discoverySaves).toEqual([]);
   });
 
-  it("limits catch-up requests for stalled discovery cursors", async () => {
+  it("covers an offline gap in bounded chronological windows", async () => {
     const now = new Date("2026-08-12T10:02:00Z");
     const watchedRepo: WatchedRepo = {
       owner: "getsentry",
       repo: "sentry",
       defaultBranchWorkflowNames: ["CI"],
     };
-    const { deps, workflowRunFetches } = createDeps([]);
+    const { deps, workflowRunFetches, discoverySaves } = createDeps([]);
     const controller = createWatchController(
       { ...deps, now: () => now },
       [],
@@ -1286,10 +1286,18 @@ describe("watchController", () => {
 
     await controller.syncWorkflowSubscriptions([watchedRepo]);
 
-    expect(workflowRunFetches[0]).toMatchObject({
-      createdAfter: new Date(now.getTime() - workflowDiscoveryMaxLookbackMs).toISOString(),
-      createdBefore: now.toISOString(),
+    expect(workflowRunFetches[0].createdAfter).toBe("2026-08-01T09:55:00.000Z");
+    expect(workflowRunFetches.at(-1)?.createdBefore).toBe(now.toISOString());
+    expect(workflowRunFetches.length).toBeGreaterThan(1);
+    workflowRunFetches.forEach((request, index) => {
+      expect(Date.parse(request.createdBefore) - Date.parse(request.createdAfter))
+        .toBeLessThanOrEqual(workflowDiscoveryWindowMs);
+      if (index > 0) {
+        expect(request.createdAfter).toBe(workflowRunFetches[index - 1].createdBefore);
+      }
     });
+    expect(discoverySaves.map((state) => state.repositories["getsentry/sentry"].lastScannedAt))
+      .toEqual(workflowRunFetches.map((request) => request.createdBefore));
   });
 
   it("uses the bounded lookback for an invalid discovery cursor", async () => {
@@ -1312,7 +1320,7 @@ describe("watchController", () => {
     await controller.syncWorkflowSubscriptions([watchedRepo]);
 
     expect(workflowRunFetches[0].createdAfter).toBe(
-      new Date(now.getTime() - workflowDiscoveryMaxLookbackMs).toISOString(),
+      new Date(now.getTime() - workflowDiscoveryWindowMs).toISOString(),
     );
   });
 
@@ -1334,7 +1342,7 @@ describe("watchController", () => {
     await controller.syncWorkflowSubscriptions([watchedRepo]);
 
     expect(workflowRunFetches[0].createdAfter).toBe(
-      new Date(now.getTime() - workflowDiscoveryMaxLookbackMs).toISOString(),
+      new Date(now.getTime() - workflowDiscoveryWindowMs).toISOString(),
     );
   });
 
@@ -4119,5 +4127,44 @@ describe("watchController", () => {
       label: "Updated pull request",
       metadata: { prTitle: "Updated pull request" },
     });
+  });
+});
+
+describe("catch-up windows", () => {
+  it("resumes a failed window without losing older runs or repeating notifications", async () => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"],
+    };
+    const now = new Date("2026-08-15T10:00:00Z");
+    const { deps, discoverySaves, notificationRecords, workflowRunFetches } = createDeps([]);
+    const oldRun = completedWorkflowRun();
+    let fail = true;
+    deps.fetchWorkflowRunsSince = async (target, createdAfter, createdBefore) => {
+      workflowRunFetches.push({ target, createdAfter, createdBefore });
+      if (fail && Date.parse(createdAfter) > Date.parse(oldRun.createdAt)) {
+        throw new Error("later window failed");
+      }
+      return Date.parse(createdAfter) <= Date.parse(oldRun.createdAt)
+        && Date.parse(createdBefore) >= Date.parse(oldRun.createdAt) ? [oldRun] : [];
+    };
+    const controller = createWatchController(
+      { ...deps, now: () => now }, [], [], discoveryState("2026-08-12T10:00:00Z", [], watchedRepo),
+    );
+
+    await expect(controller.syncWorkflowSubscriptions([watchedRepo])).resolves.toMatchObject({ status: "failed" });
+    expect(controller.getWatches().map((watch) => watch.id)).toEqual(["getsentry/sentry/run/900"]);
+    expect(notificationRecords).toHaveLength(1);
+    expect(discoverySaves).toHaveLength(1);
+    const checkpoint = discoverySaves[0].repositories["getsentry/sentry"].lastScannedAt;
+    expect(Date.parse(checkpoint)).toBeLessThan(now.getTime());
+    const requestsBeforeRetry = workflowRunFetches.length;
+    fail = false;
+
+    await expect(controller.syncWorkflowSubscriptions([watchedRepo])).resolves.toMatchObject({ status: "successful" });
+
+    expect(workflowRunFetches[requestsBeforeRetry].createdAfter)
+      .toBe(new Date(Date.parse(checkpoint) - workflowDiscoveryOverlapMs).toISOString());
+    expect(discoverySaves.at(-1)?.repositories["getsentry/sentry"].lastScannedAt).toBe(now.toISOString());
+    expect(notificationRecords).toHaveLength(1);
   });
 });

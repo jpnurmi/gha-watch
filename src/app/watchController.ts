@@ -162,7 +162,7 @@ export type WatchPollOptions = {
 };
 
 export const workflowDiscoveryOverlapMs = 5 * 60 * 1_000;
-export const workflowDiscoveryMaxLookbackMs = 24 * 60 * 60 * 1_000;
+export const workflowDiscoveryWindowMs = 24 * 60 * 60 * 1_000;
 export const branchPatternWildcardLimit = 16;
 
 const branchPatternCacheLimit = 256;
@@ -1073,101 +1073,112 @@ export function createWatchController(
     }
 
     const parsedLastScannedAt = Date.parse(lastScannedAt);
-    const maximumLookbackAt = scanStartedAt.getTime() - workflowDiscoveryMaxLookbackMs;
+    const maximumLookbackAt = scanStartedAt.getTime() - workflowDiscoveryWindowMs;
     const validLastScannedAt = Number.isFinite(parsedLastScannedAt)
       && parsedLastScannedAt <= scanStartedAt.getTime();
-    const scanFrom = new Date(validLastScannedAt
-      ? Math.max(parsedLastScannedAt - workflowDiscoveryOverlapMs, maximumLookbackAt)
+    let scanFrom = new Date(validLastScannedAt
+      ? parsedLastScannedAt - workflowDiscoveryOverlapMs
       : maximumLookbackAt);
-    const fetchedRuns = await trackRequest(deps.fetchWorkflowRunsSince(
-      watchedRepo,
-      scanFrom.toISOString(),
-      scanStartedAt.toISOString(),
-    ));
-    const runs = [...new Map(fetchedRuns.map((run) => [run.runId, run])).values()]
-      .sort(compareWorkflowRunCreation);
-    const cursor = workflowDiscoveryState.repositories[getWorkflowDiscoveryRepositoryKey(watchedRepo)];
-    const alreadyProcessed = new Set(cursor?.recentRunIds ?? []);
-    const baselineTimestamp = cursor?.baselineAt ? Date.parse(cursor.baselineAt) : undefined;
-    const unprocessedRuns = runs.filter((run) => {
-      if (alreadyProcessed.has(run.runId)) {
-        return false;
-      }
-
-      if (
-        baselineTimestamp !== undefined &&
-        Date.parse(run.createdAt) < Math.floor(baselineTimestamp / 1_000) * 1_000
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-    const referencedPullRequests = await resolveCatchUpPullRequests(
-      watchedRepo,
-      unprocessedRuns,
-      options.openPullRequests,
-    );
-    const pullRequestRuns = new Map<string, {
-      pullRequest: OpenPullRequest;
-      runs: WorkflowRunSummary[];
-    }>();
-
-    for (const run of unprocessedRuns) {
-      const match = getWorkflowRunSubscriptionMatch(watchedRepo, run, {
-        ...options,
-        openPullRequests: referencedPullRequests,
-      });
-
-      if (match?.kind === "pull-request") {
-        const existing = pullRequestRuns.get(match.pullRequest.number);
-
-        if (existing) {
-          existing.runs.push(run);
-        } else {
-          pullRequestRuns.set(match.pullRequest.number, {
-            pullRequest: match.pullRequest,
-            runs: [run],
-          });
+    while (scanFrom.getTime() < scanStartedAt.getTime()) {
+      const scanUntil = new Date(Math.min(
+        scanFrom.getTime() + workflowDiscoveryWindowMs,
+        scanStartedAt.getTime(),
+      ));
+      const fetchedRuns = await trackRequest(deps.fetchWorkflowRunsSince(
+        watchedRepo,
+        scanFrom.toISOString(),
+        scanUntil.toISOString(),
+      ));
+      const runs = [...new Map(fetchedRuns.map((run) => [run.runId, run])).values()]
+        .sort(compareWorkflowRunCreation);
+      const cursor = workflowDiscoveryState.repositories[getWorkflowDiscoveryRepositoryKey(watchedRepo)];
+      const alreadyProcessed = new Set(cursor?.recentRunIds ?? []);
+      const baselineTimestamp = cursor?.baselineAt ? Date.parse(cursor.baselineAt) : undefined;
+      const unprocessedRuns = runs.filter((run) => {
+        if (alreadyProcessed.has(run.runId)) {
+          return false;
         }
-      } else if (match && run.status === "completed") {
+
+        if (
+          baselineTimestamp !== undefined &&
+          Date.parse(run.createdAt) < Math.floor(baselineTimestamp / 1_000) * 1_000
+        ) {
+          return false;
+        }
+
+        return true;
+      });
+      const referencedPullRequests = await resolveCatchUpPullRequests(
+        watchedRepo,
+        unprocessedRuns,
+        options.openPullRequests,
+      );
+      const pullRequestRuns = new Map<string, {
+        pullRequest: OpenPullRequest;
+        runs: WorkflowRunSummary[];
+      }>();
+
+      for (const run of unprocessedRuns) {
+        const match = getWorkflowRunSubscriptionMatch(watchedRepo, run, {
+          ...options,
+          openPullRequests: referencedPullRequests,
+        });
+
+        if (match?.kind === "pull-request") {
+          const existing = pullRequestRuns.get(match.pullRequest.number);
+
+          if (existing) {
+            existing.runs.push(run);
+          } else {
+            pullRequestRuns.set(match.pullRequest.number, {
+              pullRequest: match.pullRequest,
+              runs: [run],
+            });
+          }
+        } else if (match && run.status === "completed") {
+          await captureWatchPollFailure(
+            baselineFailures,
+            addCompletedSubscribedWorkflowRun(
+              watchedRepo,
+              run,
+              scanStartedAt,
+              notificationFailures,
+            ),
+          );
+        } else if (match) {
+          await captureWatchPollFailure(
+            baselineFailures,
+            addSubscribedWorkflowRun(watchedRepo, run),
+          );
+        }
+      }
+
+      for (const { pullRequest, runs: matchedRuns } of pullRequestRuns.values()) {
         await captureWatchPollFailure(
           baselineFailures,
-          addCompletedSubscribedWorkflowRun(
+          addCatchUpSubscribedPullRequest(
             watchedRepo,
-            run,
+            pullRequest,
+            matchedRuns,
             scanStartedAt,
             notificationFailures,
           ),
         );
-      } else if (match) {
-        await captureWatchPollFailure(
-          baselineFailures,
-          addSubscribedWorkflowRun(watchedRepo, run),
-        );
       }
-    }
 
-    for (const { pullRequest, runs: matchedRuns } of pullRequestRuns.values()) {
-      await captureWatchPollFailure(
-        baselineFailures,
-        addCatchUpSubscribedPullRequest(
+      if (advanceDiscoveryCursor && baselineFailures.length === 0) {
+        await updateDiscoveryState((state) => setWorkflowDiscoveryCursor(
+          state,
           watchedRepo,
-          pullRequest,
-          matchedRuns,
-          scanStartedAt,
-          notificationFailures,
-        ),
-      );
-    }
+          scanUntil,
+          runs.map((run) => run.runId).reverse(),
+        ));
+      }
 
-    if (advanceDiscoveryCursor && baselineFailures.length === 0) {
-      await updateDiscoveryState((state) => setWorkflowDiscoveryCursor(
-        state,
-        watchedRepo,
-        scanStartedAt,
-        runs.map((run) => run.runId).reverse(),
-      ));
+      if (baselineFailures.length > 0) {
+        return;
+      }
+      scanFrom = scanUntil;
     }
   }
 
