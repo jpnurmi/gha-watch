@@ -3,13 +3,21 @@ import rustSource from "../../src-tauri/src/main.rs?raw";
 
 describe("Windows notification configuration", () => {
   it("uses WinRT activation callbacks and buttons", () => {
-    expect(rustSource).toContain("Toast::new(&app_id)");
-    expect(rustSource).toContain(".on_activated(move |native_action|");
-    expect(rustSource).toContain("toast.add_button(&action.label, action.id.native_id())");
+    expect(rustSource).toContain("ToastNotification::CreateToastNotification(&document)");
+    expect(rustSource).toContain("toast.Activated(");
+    expect(rustSource).toContain("value.cast::<ToastActivatedEventArgs>()");
+    expect(rustSource).toContain("windows_notification_xml(&notification)");
   });
 
   it("shows the app for notification body activation", () => {
-    expect(rustSource).toContain("None => show_main_window(&activation_app, None)");
+    expect(rustSource).toContain("show_main_window(&activation_app, None)");
     expect(rustSource).toContain("emit_desktop_notification_action(");
+  });
+
+  it("scopes notification clearing to the app's group", () => {
+    expect(rustSource).toContain("toast.SetGroup(&HSTRING::from(WINDOWS_NOTIFICATION_GROUP))");
+    expect(rustSource).toContain("history.RemoveGroupWithId(");
+    expect(rustSource).not.toContain("history.ClearWithId(");
+    expect(rustSource).toMatch(/generate_handler!\[[\s\S]*?\bclear_desktop_notifications\b/);
   });
 });
