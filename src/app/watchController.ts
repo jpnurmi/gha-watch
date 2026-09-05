@@ -373,6 +373,9 @@ export function createWatchController(
   const metadataHydratedWatchIds = new Set<string>();
   const repositoryIconRefreshes = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
+  const watchReads = new Map<string, number>();
+  const rerunningWatchIds = new Set<string>();
+  let nextWatchRead = 0;
 
   if (watches !== normalizedWatches) {
     const retainedIds = new Set(watches.map((watch) => watch.id));
@@ -420,9 +423,26 @@ export function createWatchController(
   }
 
   function setWatches(nextWatches: WatchRecord[]): void {
+    const nextById = new Map(nextWatches.map((watch) => [watch.id, watch]));
+    for (const watch of watches) {
+      const next = nextById.get(watch.id);
+      if (!next || next.lastState !== watch.lastState || getWatchTriageState(next) !== getWatchTriageState(watch)) {
+        watchReads.delete(watch.id);
+      }
+    }
     watches = nextWatches;
     watchPersistence.write(watches);
     emitChange();
+  }
+
+  function beginWatchRead(id: string): number {
+    const read = ++nextWatchRead;
+    watchReads.set(id, read);
+    return read;
+  }
+
+  function isCurrentWatchRead(id: string, read: number): boolean {
+    return watchReads.get(id) === read && !rerunningWatchIds.has(id);
   }
 
   function setWatchesWithDonePruning(nextWatches: WatchRecord[], now = getNow()): void {
@@ -553,8 +573,12 @@ export function createWatchController(
       return undefined;
     }
 
+    const read = beginWatchRead(id);
     try {
       const snapshot = prefetchedSnapshot ?? await deps.fetchState(target, { force });
+      if (!isCurrentWatchRead(id, read)) {
+        return undefined;
+      }
       let watch = existingWatch;
       updateWatch(id, (current) => {
         watch = withBaselineSnapshot(current, snapshot);
@@ -562,6 +586,9 @@ export function createWatchController(
       });
       return { watch };
     } catch (error) {
+      if (!isCurrentWatchRead(id, read)) {
+        return undefined;
+      }
       const failure = createWatchPollFailure(id, error);
       let watch = existingWatch;
       updateWatch(id, (current) => {
@@ -699,15 +726,17 @@ export function createWatchController(
         !watch.target.prNumber &&
         !metadataHydratedWatchIds.has(watch.id),
     );
+    const reads = new Map(watchesMissingMetadata.map((watch) => [watch.id, beginWatchRead(watch.id)]));
 
     const results = await mapWithConcurrency(
       watchesMissingMetadata,
       pollConcurrency,
-      async (watch): Promise<SettledWatchSnapshot> => {
+      async (watch): Promise<SettledWatchSnapshot & { read: number }> => {
+        const read = reads.get(watch.id)!;
         try {
-          return { watch, snapshot: await deps.fetchState(watch.target) };
+          return { watch, read, snapshot: await deps.fetchState(watch.target) };
         } catch (error) {
-          return { watch, failure: createWatchPollFailure(watch.id, error) };
+          return { watch, read, failure: createWatchPollFailure(watch.id, error) };
         }
       },
     );
@@ -716,6 +745,9 @@ export function createWatchController(
     const failures: WatchMetadataFailure[] = [];
 
     for (const result of results) {
+      if (!isCurrentWatchRead(result.watch.id, result.read)) {
+        continue;
+      }
       if ("failure" in result) {
         watchFailures.set(result.watch.id, result.failure);
         failures.push({
@@ -1832,7 +1864,14 @@ export function createWatchController(
         return;
       }
 
-      await deps.rerun(watch.target, mode);
+      watchReads.delete(id);
+      rerunningWatchIds.add(id);
+      try {
+        await deps.rerun(watch.target, mode);
+      } finally {
+        watchReads.delete(id);
+        rerunningWatchIds.delete(id);
+      }
       const rerunAt = getNow();
       const queuedState = { status: "queued", conclusion: null };
       const reactivated = setWatchesTriageState(watches, [id], "inbox", rerunAt);
@@ -1954,12 +1993,13 @@ export function createWatchController(
           ) &&
           (!watchIdSet || watchIdSet.has(watch.id)),
       );
+      const reads = new Map(polledWatches.map((watch) => [watch.id, beginWatchRead(watch.id)]));
 
       const metadataRefresh = !pollOptions.includeInactive && !watchIdSet
         ? await hydrateLegacyWatchMetadata(triageState)
         : emptyMetadataRefreshResult();
 
-      const rowNotifications: WatchNotification[] = [];
+      const rowNotifications: Array<{ notification: WatchNotification; status: string }> = [];
       const successfulWatchIds = [...metadataRefresh.successfulWatchIds];
       const watchFailures: WatchPollFailure[] = [];
       const metadataFailures = [...metadataRefresh.failures];
@@ -1967,15 +2007,17 @@ export function createWatchController(
       const fetchResults = await mapWithConcurrency(
         polledWatches,
         pollConcurrency,
-        async (watch): Promise<SettledWatchSnapshot> => {
+        async (watch): Promise<SettledWatchSnapshot & { read: number }> => {
+          const read = reads.get(watch.id)!;
           try {
             return {
               watch,
+              read,
               snapshot: prefetchedWatchSnapshots.get(watch.id) ??
                 await deps.fetchState(watch.target, { force: pollOptions.includeInactive }),
             };
           } catch (error) {
-            return { watch, failure: createWatchPollFailure(watch.id, error) };
+            return { watch, read, failure: createWatchPollFailure(watch.id, error) };
           }
         },
       );
@@ -1984,7 +2026,7 @@ export function createWatchController(
       const nextWatches = watches.map((current) => {
         const result = resultsByWatchId.get(current.id);
 
-        if (!result) {
+        if (!result || !isCurrentWatchRead(current.id, result.read)) {
           return current;
         }
 
@@ -2007,7 +2049,7 @@ export function createWatchController(
           ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
         };
         const status = formatWatchState(nextState);
-        const transition = getStatusTransition(watch.lastState, nextState);
+        const transition = getStatusTransition(current.lastState, nextState);
         const nextWatch = {
           ...current,
           target: withSnapshotPrNumber(current.target, snapshot.prNumber),
@@ -2024,7 +2066,7 @@ export function createWatchController(
         };
 
         if (transition.notify && shouldSendWatchNotification(nextWatch)) {
-          rowNotifications.push(createWatchNotification(nextWatch, notificationTime));
+          rowNotifications.push({ notification: createWatchNotification(nextWatch, notificationTime), status });
         }
 
         return nextWatch;
@@ -2048,7 +2090,11 @@ export function createWatchController(
       metadataFailures.push(...pullRequestRefresh.failures);
 
       if (!deps.notificationsPaused?.()) {
-        for (const notification of rowNotifications) {
+        for (const { notification, status } of rowNotifications) {
+          const current = watches.find((watch) => watch.id === notification.watchId);
+          if (!current || current.status !== status || !shouldSendWatchNotification(current) || rerunningWatchIds.has(current.id)) {
+            continue;
+          }
           try {
             await deps.notify(notification);
           } catch (error) {
