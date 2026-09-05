@@ -1185,6 +1185,7 @@ function renderWorkflowTargetEditor(
           <input
             class="workflow-target-pattern-input"
             name="pattern"
+            data-draft-key="${escapeHtml(`${group.owner}/${group.repo}/${menuState.targetEditor}`)}"
             maxlength="255"
             placeholder="${menuState.targetEditor === "include" ? "release/*" : "release/experimental/*"}"
             aria-label="Branch pattern"
