@@ -386,6 +386,10 @@ function mergeWatchedRepos(previous: WatchedRepo[], local: WatchedRepo[], remote
             remoteTarget.workflowNames,
           ),
         }),
+        (previousTarget, remoteTarget) => {
+          const workflowNames = mergeKeys(previousTarget?.workflowNames ?? [], [], remoteTarget.workflowNames);
+          return workflowNames.length ? { ...remoteTarget, workflowNames } : undefined;
+        },
       ),
     };
   });
@@ -397,6 +401,7 @@ function mergeEntries<T>(
   remote: T[],
   key: (entry: T) => string,
   merge: (previous: T | undefined, local: T, remote: T) => T,
+  remove?: (previous: T | undefined, remote: T) => T | undefined,
 ): T[] {
   const before = new Map(previous.map((entry) => [key(entry), entry]));
   const edited = new Map(local.map((entry) => [key(entry), entry]));
@@ -409,7 +414,13 @@ function mergeEntries<T>(
       continue;
     }
     if (localEntry === undefined) {
-      merged.delete(id);
+      const remoteEntry = merged.get(id);
+      const remaining = remoteEntry === undefined ? undefined : remove?.(previousEntry, remoteEntry);
+      if (remaining === undefined) {
+        merged.delete(id);
+      } else {
+        merged.set(id, remaining);
+      }
       continue;
     }
     const remoteEntry = merged.get(id);

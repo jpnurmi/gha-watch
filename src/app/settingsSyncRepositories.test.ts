@@ -111,6 +111,23 @@ describe("repository settings sync", () => {
     expect(mergeSyncedStates(baseline, local, remote).settings.repoOrder)
       .toEqual(["getsentry/relay", "getsentry/sentry", "getsentry/seer"]);
   });
+
+  it.each(["target", "repository"])("preserves remote workflow additions after local %s removal", (removal) => {
+    const baseline = { ...first, workflowTargets: [{ kind: "default" as const, workflowNames: ["CI"] }] };
+    const local = removal === "target" ? [first] : [];
+    const remote = {
+      ...baseline,
+      workflowTargets: [{ kind: "default" as const, workflowNames: ["CI", "Lint"] }],
+    };
+
+    expect(mergeSyncedStates(state([baseline]), state(local), state([remote])).settings.watchedRepos)
+      .toEqual([{
+        owner: first.owner,
+        repo: first.repo,
+        ...(removal === "target" ? { pullRequestScope: first.pullRequestScope } : {}),
+        workflowTargets: [{ kind: "default", workflowNames: ["Lint"] }],
+      }]);
+  });
 });
 
 
