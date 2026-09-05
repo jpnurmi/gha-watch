@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WatchRecord, WatchTriageState } from "../domain/watches";
 import type { SettingsRemote, SyncedState } from "../platform/settingsGist";
 import {
@@ -60,6 +60,15 @@ const remoteState: SyncedState = {
   },
   watches: [watch("2", "done"), watch("3", "saved")],
 };
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("settings sync", () => {
   it("uses the whole remote state while preserving local icon caches", async () => {
