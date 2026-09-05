@@ -9,7 +9,12 @@ import {
   getWatchTriageState,
   type WatchRecord,
 } from "../domain/watches";
-import { getWatchedRepoKey, type WatchedRepo } from "../domain/watchedRepos";
+import {
+  getWatchedRepoKey,
+  getWatchedWorkflowTargetKey,
+  type WatchedRepo,
+  type WatchedWorkflowTarget,
+} from "../domain/watchedRepos";
 import type { SettingsRemote, SyncedState } from "../platform/settingsGist";
 
 export type SettingsSync = {
@@ -109,17 +114,17 @@ export function mergeSyncedStates(
 
   return toSyncedState({
     settings: {
-      watchedRepos: mergeChangedValue(
+      watchedRepos: mergeWatchedRepos(
         previous.settings.watchedRepos,
         local.settings.watchedRepos,
         remote.settings.watchedRepos,
       ),
-      repoOrder: mergeChangedValue(
+      repoOrder: mergeOrderedKeys(
         previous.settings.repoOrder,
         local.settings.repoOrder,
         remote.settings.repoOrder,
       ),
-      dismissedPullRequests: mergeChangedValue(
+      dismissedPullRequests: mergeKeys(
         previous.settings.dismissedPullRequests,
         local.settings.dismissedPullRequests,
         remote.settings.dismissedPullRequests,
@@ -353,4 +358,95 @@ function getSyncedTriageState(watch: WatchRecord | undefined): "saved" | "done" 
 
 function statesEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function mergeWatchedRepos(previous: WatchedRepo[], local: WatchedRepo[], remote: WatchedRepo[]): WatchedRepo[] {
+  const before = new Map(previous.map((repo) => [getWatchedRepoKey(repo).toLowerCase(), repo]));
+  const edited = new Map(local.map((repo) => [getWatchedRepoKey(repo).toLowerCase(), repo]));
+  const current = new Map(remote.map((repo) => [getWatchedRepoKey(repo).toLowerCase(), repo]));
+  return [...new Set([...current.keys(), ...edited.keys()])].map((key) => {
+    const previousRepo = before.get(key);
+    const localRepo = edited.get(key);
+    const remoteRepo = current.get(key);
+    const identity = remoteRepo ?? localRepo!;
+    return {
+      owner: identity.owner,
+      repo: identity.repo,
+      pullRequestScope: mergeChangedValue(previousRepo?.pullRequestScope, localRepo?.pullRequestScope, remoteRepo?.pullRequestScope),
+      workflowTargets: mergeEntries(
+        previousRepo?.workflowTargets ?? [],
+        localRepo?.workflowTargets ?? [],
+        remoteRepo?.workflowTargets ?? [],
+        getWatchedWorkflowTargetKey,
+        (previousTarget: WatchedWorkflowTarget | undefined, localTarget, remoteTarget) => ({
+          ...remoteTarget,
+          workflowNames: mergeKeys(
+            previousTarget?.workflowNames ?? [],
+            localTarget.workflowNames,
+            remoteTarget.workflowNames,
+          ),
+        }),
+        (previousTarget, remoteTarget) => {
+          const workflowNames = mergeKeys(previousTarget?.workflowNames ?? [], [], remoteTarget.workflowNames);
+          return workflowNames.length ? { ...remoteTarget, workflowNames } : undefined;
+        },
+      ),
+    };
+  });
+}
+
+function mergeEntries<T>(
+  previous: T[],
+  local: T[],
+  remote: T[],
+  key: (entry: T) => string,
+  merge: (previous: T | undefined, local: T, remote: T) => T,
+  remove?: (previous: T | undefined, remote: T) => T | undefined,
+): T[] {
+  const before = new Map(previous.map((entry) => [key(entry), entry]));
+  const edited = new Map(local.map((entry) => [key(entry), entry]));
+  const merged = new Map(remote.map((entry) => [key(entry), entry]));
+
+  for (const id of new Set([...before.keys(), ...edited.keys()])) {
+    const previousEntry = before.get(id);
+    const localEntry = edited.get(id);
+    if (statesEqual(previousEntry, localEntry)) {
+      continue;
+    }
+    if (localEntry === undefined) {
+      const remoteEntry = merged.get(id);
+      const remaining = remoteEntry === undefined ? undefined : remove?.(previousEntry, remoteEntry);
+      if (remaining === undefined) {
+        merged.delete(id);
+      } else {
+        merged.set(id, remaining);
+      }
+      continue;
+    }
+    const remoteEntry = merged.get(id);
+    merged.set(id, remoteEntry === undefined ? localEntry : merge(previousEntry, localEntry, remoteEntry));
+  }
+
+  return [...merged.values()];
+}
+
+function mergeKeys(previous: string[], local: string[], remote: string[]): string[] {
+  const before = new Set(previous);
+  const edited = new Set(local);
+  const removed = new Set(previous.filter((key) => !edited.has(key)));
+  return [...new Set([
+    ...remote.filter((key) => !removed.has(key)),
+    ...local.filter((key) => !before.has(key)),
+  ])];
+}
+
+function mergeOrderedKeys(previous: string[], local: string[], remote: string[]): string[] {
+  previous = previous.map((key) => key.toLowerCase());
+  local = local.map((key) => key.toLowerCase());
+  remote = remote.map((key) => key.toLowerCase());
+  const merged = mergeKeys(previous, local, remote);
+  const reordered = !statesEqual(previous, local);
+  return reordered
+    ? [...local.filter((key) => merged.includes(key)), ...merged.filter((key) => !local.includes(key))]
+    : merged;
 }
