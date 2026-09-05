@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WatchRecord, WatchTriageState } from "../domain/watches";
 import type { SettingsRemote, SyncedState } from "../platform/settingsGist";
 import {
@@ -60,6 +60,15 @@ const remoteState: SyncedState = {
   },
   watches: [watch("2", "done"), watch("3", "saved")],
 };
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("settings sync", () => {
   it("uses the whole remote state while preserving local icon caches", async () => {
@@ -325,6 +334,46 @@ describe("settings sync", () => {
         clearedAt: "2026-08-10T00:00:00.000Z",
       },
     ]);
+  });
+
+  it.each(["repository", "triage"])("retries a failed %s edit against existing remote state", async (edit) => {
+    const baseline = toSyncedState(localState);
+    let storedState = baseline;
+    let offline = true;
+    const remote: SettingsRemote = {
+      load: async () => storedState,
+      async save(state) {
+        if (offline) {
+          throw new Error("offline");
+        }
+        storedState = state;
+      },
+    };
+    const sync = createSettingsSync(remote);
+    sync.acknowledge(baseline);
+    const edited: SyncedState = edit === "repository"
+      ? {
+        ...baseline,
+        settings: {
+          ...baseline.settings,
+          watchedRepos: [
+            ...baseline.settings.watchedRepos,
+            { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+          ],
+        },
+      }
+      : { ...baseline, watches: [watch("2", "done")] };
+
+    await expect(sync.push(edited)).rejects.toThrow("offline");
+    await expect(sync.sync(edited)).rejects.toThrow("offline");
+    storedState = { ...storedState, watches: [...storedState.watches, watch("3", "saved")] };
+    offline = false;
+
+    const recovered = await sync.sync(edited);
+
+    expect(recovered.settings).toEqual(edited.settings);
+    expect(recovered.watches).toEqual([...edited.watches, watch("3", "saved")]);
+    expect(storedState).toEqual(toSyncedState(recovered));
   });
 });
 
