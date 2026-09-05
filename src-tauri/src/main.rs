@@ -24,11 +24,22 @@ use tauri::{LogicalPosition, Monitor, PhysicalRect, PhysicalSize};
 #[cfg(target_os = "linux")]
 use tauri_plugin_window_state::{AppHandleExt as _, WindowExt as _};
 #[cfg(windows)]
-use tauri_winrt_notification::{Duration as ToastDuration, Scenario as ToastScenario, Toast};
+use tauri_winrt_notification::Toast;
+#[cfg(windows)]
+use windows::{
+    core::{Interface, HSTRING},
+    Data::Xml::Dom::XmlDocument,
+    Foundation::TypedEventHandler,
+    UI::Notifications::{ToastActivatedEventArgs, ToastNotification, ToastNotificationManager},
+};
 
 const DESKTOP_NOTIFICATION_ACTION_EVENT: &str = "desktop-notification-action";
 #[cfg(target_os = "linux")]
 static SUPPORTS_CUSTOM_NOTIFICATION_ACTIONS: OnceLock<bool> = OnceLock::new();
+#[cfg(target_os = "linux")]
+static ACTIVE_NOTIFICATIONS: OnceLock<Mutex<HashSet<u32>>> = OnceLock::new();
+#[cfg(windows)]
+const WINDOWS_NOTIFICATION_GROUP: &str = "gha-watch";
 #[cfg(target_os = "macos")]
 const MACOS_POPUP_CORNER_RADIUS: f64 = 12.0;
 #[cfg(target_os = "linux")]
@@ -159,6 +170,11 @@ fn show_desktop_notification(
     show_clickable_notification(app, notification)
 }
 
+#[tauri::command]
+fn clear_desktop_notifications(app: AppHandle) -> Result<(), String> {
+    clear_native_notifications(&app)
+}
+
 fn validate_desktop_notification(notification: &DesktopNotification) -> Result<(), String> {
     if notification.watch_id.trim().is_empty()
         || notification.watch_id.trim() != notification.watch_id
@@ -222,7 +238,7 @@ impl DesktopNotificationActionId {
         }
     }
 
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(any(target_os = "linux", windows, test))]
     fn native_id(self) -> &'static str {
         match self {
             Self::Open => "open",
@@ -377,6 +393,12 @@ fn show_clickable_notification(
     }
 
     let handle = native.show().map_err(|error| error.to_string())?;
+    let id = handle.id();
+    ACTIVE_NOTIFICATIONS
+        .get_or_init(Mutex::default)
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(id);
     std::thread::spawn(move || {
         handle.wait_for_action(|action| {
             if action == "default" {
@@ -397,6 +419,9 @@ fn show_clickable_notification(
                 emit_desktop_notification_action(&app, &notification, action_id);
             }
         });
+        if let Ok(mut active) = ACTIVE_NOTIFICATIONS.get_or_init(Mutex::default).lock() {
+            active.remove(&id);
+        }
     });
 
     Ok(())
@@ -409,54 +434,162 @@ fn show_clickable_notification(
 ) -> Result<(), String> {
     // WinRT supports only short or long durations, not millisecond timeouts.
     let _requested_timeout_ms = notification.timeout_ms;
-    let app_id = if tauri::is_dev() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_TAG: AtomicU64 = AtomicU64::new(1);
+
+    let show = || -> windows::core::Result<()> {
+        let document = XmlDocument::new()?;
+        document.LoadXml(&HSTRING::from(windows_notification_xml(&notification)))?;
+        let toast = ToastNotification::CreateToastNotification(&document)?;
+        toast.SetGroup(&HSTRING::from(WINDOWS_NOTIFICATION_GROUP))?;
+        toast.SetTag(&HSTRING::from(format!(
+            "{:016x}",
+            NEXT_TAG.fetch_add(1, Ordering::Relaxed)
+        )))?;
+        let activation_app = app.clone();
+        let activation_notification = notification.clone();
+        toast.Activated(&TypedEventHandler::<
+            ToastNotification,
+            windows::core::IInspectable,
+        >::new(move |_, args| {
+            let action = args
+                .as_ref()
+                .and_then(|value| value.cast::<ToastActivatedEventArgs>().ok())
+                .and_then(|value| value.Arguments().ok())
+                .map(|value| value.to_string())
+                .filter(|value| !value.is_empty());
+            if let Some(native_action) = action {
+                if let Some(action) = DesktopNotificationActionId::from_native_id(&native_action)
+                    .filter(|action| {
+                        activation_notification
+                            .actions
+                            .iter()
+                            .any(|registered| registered.id == *action)
+                    })
+                {
+                    emit_desktop_notification_action(
+                        &activation_app,
+                        &activation_notification,
+                        action,
+                    );
+                }
+            } else {
+                show_main_window(&activation_app, None);
+            }
+            Ok(())
+        }))?;
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(
+            windows_notification_app_id(&app),
+        ))?
+        .Show(&toast)
+    };
+    show().map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn windows_notification_app_id(app: &AppHandle) -> String {
+    if tauri::is_dev() {
         Toast::POWERSHELL_APP_ID.to_string()
     } else {
         app.config().identifier.clone()
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_notification_xml(notification: &DesktopNotification) -> String {
+    fn escape(value: &str) -> String {
+        value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    }
+
+    let attributes = if notification.persistent {
+        "duration=\"long\" scenario=\"reminder\""
+    } else {
+        "duration=\"short\""
     };
-    let activation_notification = notification.clone();
-    let activation_app = app.clone();
-    let mut toast = Toast::new(&app_id)
-        .title(&notification.title)
-        .text1(&notification.body)
-        .duration(if notification.persistent {
-            ToastDuration::Long
-        } else {
-            ToastDuration::Short
+    let actions = notification
+        .actions
+        .iter()
+        .map(|action| {
+            format!(
+                "<action content=\"{}\" arguments=\"{}\" activationType=\"foreground\"/>",
+                escape(&action.label),
+                action.id.native_id(),
+            )
         })
-        .on_activated(move |native_action| {
-            match native_action.as_deref() {
-                Some(native_action) => {
-                    if let Some(action) = DesktopNotificationActionId::from_native_id(native_action)
-                        .filter(|action| {
-                            activation_notification
-                                .actions
-                                .iter()
-                                .any(|registered| registered.id == *action)
-                        })
-                    {
-                        emit_desktop_notification_action(
-                            &activation_app,
-                            &activation_notification,
-                            action,
-                        );
-                    }
-                }
-                None => show_main_window(&activation_app, None),
-            }
+        .collect::<String>();
+    format!(
+        "<toast {attributes}><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual><actions>{actions}</actions></toast>",
+        escape(&notification.title), escape(&notification.body),
+    )
+}
 
-            Ok(())
-        });
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+fn clear_native_notifications(_app: &AppHandle) -> Result<(), String> {
+    objc2_foundation::NSUserNotificationCenter::defaultUserNotificationCenter()
+        .removeAllDeliveredNotifications();
+    Ok(())
+}
 
-    if notification.persistent {
-        toast = toast.scenario(ToastScenario::Reminder);
+#[cfg(target_os = "linux")]
+fn clear_native_notifications(_app: &AppHandle) -> Result<(), String> {
+    let mut active = ACTIVE_NOTIFICATIONS
+        .get_or_init(Mutex::default)
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if active.is_empty() {
+        return Ok(());
     }
+    let connection = zbus::blocking::Connection::session().map_err(|error| error.to_string())?;
+    close_active_notifications(&mut active, |id| {
+        connection
+            .call_method(
+                Some("org.freedesktop.Notifications"),
+                "/org/freedesktop/Notifications",
+                Some("org.freedesktop.Notifications"),
+                "CloseNotification",
+                &id,
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
+}
 
-    for action in &notification.actions {
-        toast = toast.add_button(&action.label, action.id.native_id());
+#[cfg(any(target_os = "linux", test))]
+fn close_active_notifications(
+    active: &mut HashSet<u32>,
+    mut close: impl FnMut(u32) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    active.retain(|id| match close(*id) {
+        Ok(()) => false,
+        Err(error) => {
+            failures.push(error);
+            true
+        }
+    });
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
     }
+}
 
-    toast.show().map_err(|error| error.to_string())
+#[cfg(windows)]
+fn clear_native_notifications(app: &AppHandle) -> Result<(), String> {
+    ToastNotificationManager::History()
+        .and_then(|history| {
+            history.RemoveGroupWithId(
+                &HSTRING::from(WINDOWS_NOTIFICATION_GROUP),
+                &HSTRING::from(windows_notification_app_id(app)),
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn tray_icon_for_status(status: &str, has_unseen_changes: bool) -> Result<Image<'static>, String> {
@@ -1162,7 +1295,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_build_sha,
             set_tray_indicator,
-            show_desktop_notification
+            show_desktop_notification,
+            clear_desktop_notifications
         ])
         .on_window_event(|window, event| match event {
             #[cfg(target_os = "linux")]
@@ -1455,5 +1589,52 @@ mod tests {
         notification.url = "https://github.com.evil.example/getsentry/sentry".to_string();
 
         assert!(validate_desktop_notification(&notification).is_err());
+    }
+}
+
+#[cfg(test)]
+mod notification_lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn keeps_failed_dismissals_for_retry() {
+        let mut active = HashSet::from([1, 2, 3]);
+        let mut attempted = HashSet::new();
+        let result = close_active_notifications(&mut active, |id| {
+            attempted.insert(id);
+            if id == 2 {
+                Err("service unavailable".to_string())
+            } else {
+                Ok(())
+            }
+        });
+
+        assert_eq!(result, Err("service unavailable".to_string()));
+        assert_eq!(attempted, HashSet::from([1, 2, 3]));
+        assert_eq!(active, HashSet::from([2]));
+        assert!(close_active_notifications(&mut active, |_| Ok(())).is_ok());
+        assert!(active.is_empty());
+    }
+
+    #[test]
+    fn escapes_toast_text_and_action_attributes() {
+        let notification = DesktopNotification {
+            watch_id: "run/1".to_string(),
+            title: "<CI> & tests".to_string(),
+            body: "\"quoted\" 'text'".to_string(),
+            url: String::new(),
+            persistent: true,
+            timeout_ms: None,
+            actions: vec![DesktopNotificationActionDefinition {
+                id: DesktopNotificationActionId::Open,
+                label: "Open <CI>".to_string(),
+            }],
+        };
+
+        let xml = windows_notification_xml(&notification);
+        assert!(xml.contains("<text>&lt;CI&gt; &amp; tests</text>"));
+        assert!(xml.contains("<text>&quot;quoted&quot; &apos;text&apos;</text>"));
+        assert!(xml.contains("content=\"Open &lt;CI&gt;\" arguments=\"open\""));
+        assert!(xml.contains("scenario=\"reminder\""));
     }
 }

@@ -1,9 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  cancelAll,
   isPermissionGranted,
-  removeAllActive,
   requestPermission,
 } from "@tauri-apps/plugin-notification";
 import type { DesktopNotificationActionId, WatchNotification } from "../app/watchNotification";
@@ -19,8 +17,7 @@ export type DesktopNotificationDeps = {
   requestPermission(): Promise<NotificationPermission>;
   showNotification(notification: WatchNotification): Promise<void>;
   listenToNotificationActions?(listener: (payload: unknown) => void): Promise<() => void>;
-  cancelAllNotifications?(): Promise<void>;
-  removeAllActiveNotifications?(): Promise<void>;
+  clearNotifications?(): Promise<void>;
 };
 
 const notificationActionEvent = "desktop-notification-action";
@@ -45,8 +42,9 @@ const desktopNotificationDeps: DesktopNotificationDeps = {
       listener(event.payload);
     });
   },
-  cancelAllNotifications: cancelAll,
-  removeAllActiveNotifications: removeAllActive,
+  async clearNotifications() {
+    await invoke("clear_desktop_notifications");
+  },
 };
 
 export async function sendDesktopNotification(
@@ -70,10 +68,10 @@ export async function sendDesktopNotification(
 export async function clearDesktopNotifications(
   deps: DesktopNotificationDeps = desktopNotificationDeps,
 ): Promise<void> {
-  await Promise.allSettled([
-    deps.cancelAllNotifications?.(),
-    deps.removeAllActiveNotifications?.(),
-  ]);
+  if (!deps.clearNotifications) {
+    throw new Error("Desktop notification clearing is unavailable.");
+  }
+  await deps.clearNotifications();
 }
 
 export async function listenForDesktopNotificationActions(
