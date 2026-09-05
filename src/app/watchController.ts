@@ -51,6 +51,7 @@ import type {
 import { NotificationPermissionDeniedError } from "../platform/notifications";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
 import { isDeemphasizedPullRequest } from "./viewModel";
+import { createPersistenceQueue } from "./persistenceQueue";
 
 export type WatchControllerDeps = {
   fetchState(target: WatchTarget, options?: WatchStateFetchOptions): Promise<WatchSnapshot>;
@@ -366,6 +367,8 @@ export function createWatchController(
   let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
   let workflowDiscoveryState = initialWorkflowDiscoveryState;
   let discoveryStateUpdate = Promise.resolve();
+  const watchPersistence = createPersistenceQueue(deps.save);
+  const suppressionPersistence = createPersistenceQueue(deps.saveSuppressions);
   const metadataHydratedWatchIds = new Set<string>();
   const repositoryIconRefreshes = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
@@ -379,11 +382,11 @@ export function createWatchController(
   }
 
   if (normalizedDoneAt || watches !== normalizedWatches) {
-    void deps.save(watches);
+    watchPersistence.write(watches);
   }
 
   if (suppressions !== initialSuppressions) {
-    void deps.saveSuppressions(suppressions);
+    suppressionPersistence.write(suppressions);
   }
 
   function getNow(): Date {
@@ -417,7 +420,7 @@ export function createWatchController(
 
   function setWatches(nextWatches: WatchRecord[]): void {
     watches = nextWatches;
-    void deps.save(watches);
+    watchPersistence.write(watches);
     emitChange();
   }
 
@@ -441,7 +444,7 @@ export function createWatchController(
     }
 
     suppressions = nextSuppressions;
-    void deps.saveSuppressions(suppressions);
+    suppressionPersistence.write(suppressions);
   }
 
   async function updateDiscoveryState(
@@ -454,6 +457,7 @@ export function createWatchController(
         return;
       }
 
+      await Promise.all([watchPersistence.flush(), suppressionPersistence.flush()]);
       await deps.saveWorkflowDiscoveryState?.(nextState);
       workflowDiscoveryState = nextState;
     });

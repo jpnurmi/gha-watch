@@ -4168,3 +4168,77 @@ describe("catch-up windows", () => {
     expect(notificationRecords).toHaveLength(1);
   });
 });
+
+describe("discovery persistence", () => {
+  it.each(["watches", "suppressions"])("retains the cursor until failed %s writes recover", async (kind) => {
+    const watchedRepo: WatchedRepo = {
+      owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"],
+    };
+    const { deps, discoverySaves, notificationRecords } = createDeps([]);
+    const now = new Date("2026-08-12T10:02:00Z");
+    let offline = true;
+    let storedWatches: WatchRecord[] = [];
+    let storedSuppressions: WatchSuppression[] = [];
+    deps.save = async (watches) => {
+      if (kind === "watches" && offline) {
+        throw new Error("storage unavailable");
+      }
+      storedWatches = watches;
+    };
+    deps.saveSuppressions = async (suppressions) => {
+      if (kind === "suppressions" && offline) {
+        throw new Error("storage unavailable");
+      }
+      storedSuppressions = suppressions;
+    };
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun()];
+    const controller = createWatchController(
+      { ...deps, now: () => now }, [], [], discoveryState(),
+    );
+    const suppression = { id: "getsentry/sentry/run/999", clearedAt: now.toISOString() };
+    controller.replaceSyncedWatches([], [suppression]);
+
+    await expect(controller.syncWorkflowSubscriptions([watchedRepo])).resolves.toMatchObject({
+      status: "failed", failures: [{ message: "storage unavailable" }],
+    });
+    expect(discoverySaves).toEqual([]);
+    if (kind === "watches") {
+      expect(storedWatches).toEqual([]);
+    } else {
+      expect(storedSuppressions).toEqual([]);
+    }
+    offline = false;
+
+    await expect(controller.syncWorkflowSubscriptions([watchedRepo])).resolves.toMatchObject({ status: "successful" });
+
+    expect(storedWatches.map((watch) => watch.id)).toEqual(["getsentry/sentry/run/900"]);
+    expect(storedSuppressions).toEqual([suppression]);
+    expect(discoverySaves.at(-1)?.repositories["getsentry/sentry"].recentRunIds).toEqual(["900"]);
+    expect(notificationRecords).toHaveLength(1);
+  });
+
+  it("waits for durable watches before writing the cursor", async () => {
+    const { deps, discoverySaves } = createDeps([]);
+    let release!: () => void;
+    let started!: () => void;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    deps.save = async () => {
+      started();
+      await blocked;
+    };
+    deps.fetchWorkflowRunsSince = async () => [completedWorkflowRun()];
+    const controller = createWatchController(
+      { ...deps, now: () => new Date("2026-08-12T10:02:00Z") }, [], [], discoveryState(),
+    );
+
+    const sync = controller.syncWorkflowSubscriptions([
+      { owner: "getsentry", repo: "sentry", defaultBranchWorkflowNames: ["CI"] },
+    ]);
+    await writing;
+    expect(discoverySaves).toEqual([]);
+    release();
+    await expect(sync).resolves.toMatchObject({ status: "successful" });
+    expect(discoverySaves).toHaveLength(1);
+  });
+});
