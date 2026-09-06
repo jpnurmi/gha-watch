@@ -1,21 +1,25 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
+import { renderAddForm } from "../ui/addPanel";
+const mainSource = renderAddForm({ status: "loaded", loadedAt: 0, pullRequests: [] }, [{
+  owner: "owner", repo: "repo", number: "1", title: "Fix tests", isDraft: false,
+  url: "https://github.com/owner/repo/pull/1",
+}]);
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("pull request discovery UI", () => {
   it("opens suggested pull request titles on GitHub without submitting the add form", () => {
     expect(mainSource).toMatch(
-      /class="watch-title-link add-discovery-pr-title"\s+type="button"\s+data-action="open-github-url"\s+data-url="\$\{escapeHtml\(pullRequest\.url\)\}"/,
+      /class="watch-title-link add-discovery-pr-title"\s+type="button"\s+data-action="open-github-url"\s+data-url="https:\/\/github.com\/owner\/repo\/pull\/1"/,
     );
-    expect(mainSource).toContain('class="watch-title-text">${renderTitleMarkup(pullRequest.title)}');
+    expect(mainSource).toContain('class="watch-title-text">Fix tests');
   });
 
   it("uses the main view's pull request presentation", () => {
-    expect(mainSource).toContain('renderPrStateIcon(prState, "add-discovery-pr-icon")');
+    expect(mainSource).toContain('class="add-discovery-pr-icon pr-state-icon pr-state-icon-ready"');
     expect(mainSource).toContain('class="watch-label add-discovery-label"');
-    expect(mainSource).toContain('class="watch-title-reference">#${escapeHtml(pullRequest.number)}');
+    expect(mainSource).toContain('class="watch-title-reference">#1');
     expect(mainSource).toContain('class="watch-meta add-discovery-meta"');
   });
 
