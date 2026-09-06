@@ -1,7 +1,6 @@
-export type PopupRenderRoot = {
-  innerHTML: string;
-  querySelector<E extends Element = Element>(selector: string): E | null;
-};
+import { reconcileHtml } from "../ui/reconcile";
+
+export type PopupRenderRoot = HTMLElement;
 
 type PopupScrollPosition = {
   discoveryListTop?: number;
@@ -24,7 +23,7 @@ export function replacePopupHtmlPreservingScroll(root: PopupRenderRoot, html: st
     state: captureInputState(root, selector),
   }));
 
-  root.innerHTML = html;
+  reconcileHtml(root, html);
 
   restorePopupScrollPosition(root, scrollPosition);
   for (const { selector, state } of inputStates) {
