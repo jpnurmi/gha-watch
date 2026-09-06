@@ -1,3 +1,4 @@
+import { getRepositoryKey } from "../domain/identity";
 import { isDoneCandidate, isDeemphasizedPullRequest, getWatchDisplayLabel, canRerun, canRerunFailed } from "../domain/watchPolicy";
 export { canRerun, canRerunFailed, isDeemphasizedPullRequest } from "../domain/watchPolicy";
 import type { WatchedRepo } from "../domain/watchedRepos";
@@ -358,10 +359,10 @@ function orderGroups(groups: WatchGroupViewModel[], repoOrder: string[]): WatchG
     return groups;
   }
 
-  const orderByRepo = new Map(repoOrder.map((repoLabel, index) => [repoLabel, index]));
+  const orderByRepo = new Map(repoOrder.map((repoLabel, index) => [repoLabel.toLowerCase(), index]));
 
   return groups
-    .map((group, index) => ({ group, index, order: orderByRepo.get(group.repoLabel) }))
+    .map((group, index) => ({ group, index, order: orderByRepo.get(group.repoLabel.toLowerCase()) }))
     .sort((left, right) => {
       if (left.order === undefined && right.order === undefined) {
         return left.index - right.index;
@@ -401,7 +402,7 @@ function createWatchGroup(
 }
 
 function getRepoLabel(repo: Pick<WatchedRepo, "owner" | "repo">): string {
-  return `${repo.owner}/${repo.repo}`;
+  return getRepositoryKey(repo);
 }
 
 function getTimingText(watch: WatchRecord, tone: RowTone, now: Date): string | undefined {

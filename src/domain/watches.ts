@@ -1,3 +1,4 @@
+import { getRepositoryKey } from "./identity";
 import type { PrWatchTarget, RunWatchTarget, WatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
 
@@ -51,14 +52,14 @@ export type WatchDropPosition = "before" | "after";
 
 export function getWatchId(target: WatchTarget): string {
   if (target.kind === "pr") {
-    return `${target.owner}/${target.repo}/pull/${target.prNumber}`;
+    return `${getRepositoryKey(target)}/pull/${target.prNumber}`;
   }
 
   if (target.kind === "run") {
-    return `${target.owner}/${target.repo}/run/${target.runId}`;
+    return `${getRepositoryKey(target)}/run/${target.runId}`;
   }
 
-  return `${target.owner}/${target.repo}/job/${target.jobId}`;
+  return `${getRepositoryKey(target)}/job/${target.jobId}`;
 }
 
 export function getWatchLabel(target: WatchTarget): string {
@@ -380,7 +381,7 @@ function allIdsAreInRepo(ids: Set<string>, repoWatches: WatchRecord[]): boolean 
 }
 
 function isSameWatchRepo(left: WatchRecord, right: WatchRecord): boolean {
-  return left.target.owner === right.target.owner && left.target.repo === right.target.repo;
+  return getRepositoryKey(left.target) === getRepositoryKey(right.target);
 }
 
 function watchIdsAreEqual(left: WatchRecord[], right: WatchRecord[]): boolean {

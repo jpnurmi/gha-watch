@@ -1,3 +1,4 @@
+import { getRepositoryKey } from "./identity";
 export type WatchedRepo = {
   owner: string;
   repo: string;
@@ -40,6 +41,14 @@ export function normalizeWatchedRepos(value: unknown): WatchedRepo[] {
     const key = getWatchedRepoKey(watchedRepo);
 
     if (seen.has(key)) {
+      const index = watchedRepos.findIndex((repo) => getWatchedRepoKey(repo) === key);
+      const previous = watchedRepos[index];
+      watchedRepos[index] = normalizeWatchedRepo({
+        ...previous,
+        pullRequestScope: previous.pullRequestScope === "all" || watchedRepo.pullRequestScope === "all"
+          ? "all" : previous.pullRequestScope ?? watchedRepo.pullRequestScope,
+        workflowTargets: [...(previous.workflowTargets ?? []), ...(watchedRepo.workflowTargets ?? [])],
+      })!;
       continue;
     }
 
@@ -226,7 +235,7 @@ export function getWatchedPullRequestScope(repo: WatchedRepo): WatchedPullReques
 }
 
 export function getWatchedRepoKey(repo: Pick<WatchedRepo, "owner" | "repo">): string {
-  return `${repo.owner}/${repo.repo}`;
+  return getRepositoryKey(repo);
 }
 
 function normalizeWatchedRepo(value: unknown): WatchedRepo | undefined {

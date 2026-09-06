@@ -1,3 +1,4 @@
+import { canonicalWatchId } from "./identity";
 import { isWatchRetentionExpired } from "./watches";
 
 export type WatchSuppression = {
@@ -62,7 +63,7 @@ export function isWatchSuppressed(
   suppressions: WatchSuppression[],
   id: string,
 ): boolean {
-  return suppressions.some((suppression) => suppression.id === id);
+  return suppressions.some((suppression) => canonicalWatchId(suppression.id) === canonicalWatchId(id));
 }
 
 function isWatchSuppression(value: unknown): value is WatchSuppression {
