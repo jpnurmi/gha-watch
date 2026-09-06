@@ -1,3 +1,5 @@
+import { createEventDelegate } from "./ui/events";
+import { createCoalescedEffect } from "./app/coalescedEffect";
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import { renderWatch } from "./ui/watchRow";
 import { renderAddForm, type PullRequestDiscoveryState } from "./ui/addPanel";
@@ -315,6 +317,9 @@ const polling = createAdaptivePollingCoordinator({
   },
   setTimeout: window.setTimeout.bind(window),
 });
+const on = createEventDelegate(app);
+const render = createCoalescedEffect(renderNow, (callback) => window.requestAnimationFrame(callback));
+
 const session = createApplicationSession<WatchTriageState>({
   sync: settingsSync,
   enabled: !isDemoMode,
@@ -397,13 +402,14 @@ const handleDesktopNotificationAction = createDesktopNotificationActionHandler({
 });
 void desktopNotificationActionQueue.start(handleDesktopNotificationAction);
 
-controller.subscribe(() => {
+controller.subscribe(createCoalescedEffect(() => {
   render();
   void updateTrayIndicator();
   void refreshListedRepositoryCiStatuses();
   polling.scheduleNext();
-});
+}));
 
+bindEvents();
 render();
 void updateTrayIndicator();
 void refreshAutoStartState();
@@ -531,7 +537,7 @@ function renderFreshnessIndicator(): string {
   </span>`;
 }
 
-function render(): void {
+function renderNow(): void {
   const allWatches = controller.getWatches();
   const watchViewCounts = getWatchViewCounts(allWatches);
   const watches = allWatches.filter((watch) => getWatchTriageState(watch) === currentWatchView);
@@ -610,7 +616,6 @@ function render(): void {
     </section>
   `);
 
-  bindEvents();
   void resizePopupToContent();
 }
 
@@ -1025,400 +1030,317 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
 }
 
 function bindEvents(): void {
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-add"]')) {
-    button.addEventListener("click", () => {
-      const wasAdding = isAdding && currentWatchView === "inbox";
-      currentWatchView = "inbox";
-      isAdding = !wasAdding;
-      isClearMenuOpen = false;
-      addError = undefined;
+  on("click", '[data-action="toggle-add"]', (_event, _button: HTMLButtonElement) => {
+    const wasAdding = isAdding && currentWatchView === "inbox";
+    currentWatchView = "inbox";
+    isAdding = !wasAdding;
+    isClearMenuOpen = false;
+    addError = undefined;
+    render();
+
+    if (isAdding) {
+      void discoverAuthoredPullRequests();
+    }
+  });
+
+  on("click", '[data-action="select-watch-view"]', (_event, button: HTMLButtonElement) => {
+    const view = parseWatchTriageState(button.dataset.watchView);
+
+    if (!view || view === currentWatchView) {
+      return;
+    }
+
+    currentWatchView = view;
+    isAdding = false;
+    isClearMenuOpen = false;
+    pendingWatchAction = undefined;
+    activeWorkflowRunMenu = undefined;
+    pullRequestMenu = undefined;
+    repositoryWatchMenu = undefined;
+    repoCiStatusMenu = undefined;
+    render();
+  });
+
+  on("submit", '[data-role="add-form"]', (event, form: HTMLFormElement) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const url = String(formData.get("url") || "");
+    void addWatch(url);
+  });
+
+  on("click", '[data-action="close-add"]', (_event) => {
+    isAdding = false;
+    addError = undefined;
+    render();
+  });
+
+  on("click", '[data-action="retry-pr-discovery"]', (_event) => {
+    void discoverAuthoredPullRequests(true);
+  });
+
+  on("click", '[data-action="add-discovered-pr"]', (_event, button: HTMLButtonElement) => {
+    const pullRequest = findDiscoveredPullRequest(button.dataset.prId);
+
+    if (pullRequest) {
+      void addDiscoveredPullRequest(pullRequest);
+    }
+  });
+
+  on("click", '[data-action="dismiss-discovered-pr"]', (_event, button: HTMLButtonElement) => {
+    const pullRequest = findDiscoveredPullRequest(button.dataset.prId);
+
+    if (pullRequest) {
+      void dismissDiscoveredPullRequest(pullRequest);
+    }
+  });
+
+  on("click", '[data-action="toggle-clear-menu"]', (_event) => {
+    isClearMenuOpen = !isClearMenuOpen;
+    render();
+  });
+
+  on("click", '[data-action="toggle-autostart"]', (_event) => {
+    void toggleAutoStart();
+  });
+
+  on("click", '[data-action="refresh"]', (_event) => {
+    void refreshSettingsAndStatuses(currentWatchView);
+  });
+
+  on("click", '[data-action="open-github-url"]', (event, button: HTMLButtonElement) => {
+    event.preventDefault();
+    const ids = getWatchReorderRowIds(button);
+
+    for (const id of ids) {
+      controller.markSeen(id);
+    }
+
+    queueSyncedStateUploadForWatchIds(ids);
+
+    if (button.dataset.url) {
+      void openExternalUrl(button.dataset.url);
+    }
+  });
+
+  on("click", '[data-action="toggle-group"]', (_event, button: HTMLButtonElement) => {
+    const repoLabel = button.dataset.repo;
+
+    if (repoLabel) {
+      toggleRepoGroup(repoLabel);
+    }
+  });
+
+  on("click", '[data-action="toggle-repo-ci-status"]', (event, button: HTMLButtonElement) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    toggleRepoCiStatusMenu(button.dataset.repo || "");
+  });
+
+  on("click", '[data-action="open-repo-ci-workflow"]', (event, button: HTMLButtonElement) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    repoCiStatusMenu = undefined;
+
+    if (button.dataset.url) {
+      void openExternalUrl(button.dataset.url);
+    }
+  });
+
+  on("click", '[data-action="done-finished"]', (_event) => {
+    isClearMenuOpen = false;
+    controller.markFinishedDone(currentWatchView);
+    queueSyncedStateUpload();
+  });
+
+  on("click", '[data-action="done-all"]', (_event) => {
+    isClearMenuOpen = false;
+    controller.markAllDone(currentWatchView);
+    queueSyncedStateUpload();
+  });
+
+  on("click", '[data-action="clear-done"]', (_event) => {
+    isClearMenuOpen = false;
+    controller.clearDone(
+      controller.getWatches()
+        .filter((watch) => getWatchTriageState(watch) === "done")
+        .map((watch) => watch.id),
+    );
+    queueSyncedStateUpload();
+  });
+
+  on("click", '[data-action="toggle-watched-pull-request-scope"]', (_event, button: HTMLButtonElement) => {
+    togglePullRequestWatches({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+    }, getPullRequestWatchScope(button.dataset.scope));
+  });
+
+  on("click", '[data-action="toggle-active-workflows"]', (_event, button: HTMLButtonElement) => {
+    void toggleActiveWorkflowRuns({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+    });
+  });
+
+  on("click", '[data-action="toggle-repository-watches"]', (_event, button: HTMLButtonElement) => {
+    void toggleRepositoryWatchMenu({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+    });
+  });
+
+  on("click", '[data-action="toggle-workflow-subscription"]', (_event, button: HTMLButtonElement) => {
+    toggleWorkflowSubscription({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+      workflowName: button.dataset.workflow || "",
+      targetKey: button.dataset.target || "",
+    });
+  });
+
+  on("click", '[data-action="toggle-workflow-target-editor"]', (_event) => {
+    if (repositoryWatchMenu?.status !== "loaded") {
+      return;
+    }
+
+    repositoryWatchMenu = {
+      ...repositoryWatchMenu,
+      targetEditor: repositoryWatchMenu.targetEditor ? undefined : "menu",
+    };
+    render();
+  });
+
+  on("click", '[data-action="add-workflow-target"]', (_event, button: HTMLButtonElement) => {
+    const kind = getWorkflowTargetKind(button.dataset.kind);
+
+    if (!kind || repositoryWatchMenu?.status !== "loaded") {
+      return;
+    }
+
+    if (kind === "include" || kind === "exclude") {
+      repositoryWatchMenu = { ...repositoryWatchMenu, targetEditor: kind };
       render();
+      return;
+    }
 
-      if (isAdding) {
-        void discoverAuthoredPullRequests();
-      }
+    addWorkflowTarget({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+    }, kind);
+  });
+
+  on("submit", '[data-action="add-workflow-pattern"]', (event, form: HTMLFormElement) => {
+    event.preventDefault();
+    const kind = getWorkflowTargetKind(form.dataset.kind);
+    const pattern = new FormData(form).get("pattern");
+    const group = repositoryWatchMenu?.repoKey.split("/");
+
+    if (
+      (kind !== "include" && kind !== "exclude") ||
+      typeof pattern !== "string" ||
+      !pattern.trim() ||
+      !group ||
+      group.length !== 2
+    ) {
+      return;
+    }
+
+    addWorkflowTarget({ owner: group[0], repo: group[1] }, kind, pattern.trim());
+  });
+
+  on("click", '[data-action="select-workflow-target"]', (_event, button: HTMLButtonElement) => {
+    if (repositoryWatchMenu?.status !== "loaded") {
+      return;
+    }
+
+    repositoryWatchMenu = {
+      ...repositoryWatchMenu,
+      selectedTargetKey: button.dataset.target,
+      targetEditor: undefined,
+    };
+    render();
+  });
+
+  on("click", '[data-action="remove-workflow-target"]', (_event, button: HTMLButtonElement) => {
+    removeWorkflowTarget({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+    }, button.dataset.target || "");
+  });
+
+  on("click", '[data-action="toggle-repo-prs"]', (_event, button: HTMLButtonElement) => {
+    void togglePullRequests({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
     });
-  }
+  });
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="select-watch-view"]')) {
-    button.addEventListener("click", () => {
-      const view = parseWatchTriageState(button.dataset.watchView);
-
-      if (!view || view === currentWatchView) {
-        return;
-      }
-
-      currentWatchView = view;
-      isAdding = false;
-      isClearMenuOpen = false;
-      pendingWatchAction = undefined;
-      activeWorkflowRunMenu = undefined;
-      pullRequestMenu = undefined;
-      repositoryWatchMenu = undefined;
-      repoCiStatusMenu = undefined;
-      render();
+  on("click", '[data-action="watch-active-workflow"]', (_event, button: HTMLButtonElement) => {
+    void watchActiveWorkflowRun({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+      runId: button.dataset.run || "",
+      url: button.dataset.url || "",
     });
-  }
+  });
 
-  app.querySelector<HTMLFormElement>('[data-role="add-form"]')?.addEventListener(
-    "submit",
-    (event) => {
-      event.preventDefault();
-      const form = event.currentTarget as HTMLFormElement;
-      const formData = new FormData(form);
-      const url = String(formData.get("url") || "");
-      void addWatch(url);
-    },
-  );
-
-  app.querySelector<HTMLButtonElement>('[data-action="close-add"]')?.addEventListener(
-    "click",
-    () => {
-      isAdding = false;
-      addError = undefined;
-      render();
-    },
-  );
-
-  app.querySelector<HTMLButtonElement>('[data-action="retry-pr-discovery"]')?.addEventListener(
-    "click",
-    () => {
-      void discoverAuthoredPullRequests(true);
-    },
-  );
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="add-discovered-pr"]')) {
-    button.addEventListener("click", () => {
-      const pullRequest = findDiscoveredPullRequest(button.dataset.prId);
-
-      if (pullRequest) {
-        void addDiscoveredPullRequest(pullRequest);
-      }
+  on("click", '[data-action="watch-repo-pr"]', (_event, button: HTMLButtonElement) => {
+    void watchPullRequest({
+      owner: button.dataset.owner || "",
+      repo: button.dataset.repo || "",
+      prNumber: button.dataset.pr || "",
     });
-  }
+  });
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="dismiss-discovered-pr"]')) {
-    button.addEventListener("click", () => {
-      const pullRequest = findDiscoveredPullRequest(button.dataset.prId);
+  on("click", '[data-action="arm-rerun"]', (_event, button: HTMLButtonElement) => {
+    armWatchAction(button.dataset.id || "", "rerun");
+  });
 
-      if (pullRequest) {
-        void dismissDiscoveredPullRequest(pullRequest);
-      }
-    });
-  }
+  on("click", '[data-action^="rerun-"]', (_event, button: HTMLButtonElement) => {
+    const mode = getWatchRerunMode(button.dataset.action);
 
-  app.querySelector<HTMLButtonElement>('[data-action="toggle-clear-menu"]')?.addEventListener(
-    "click",
-    () => {
-      isClearMenuOpen = !isClearMenuOpen;
-      render();
-    },
-  );
+    if (mode) {
+      void confirmRerun(button.dataset.id || "", mode);
+    }
+  });
 
-  app.querySelector<HTMLButtonElement>('[data-action="toggle-autostart"]')?.addEventListener(
-    "click",
-    () => {
-      void toggleAutoStart();
-    },
-  );
+  on("click", '[data-action="triage-watch"]', (event, button: HTMLButtonElement) => {
+    event.preventDefault();
+    event.stopPropagation();
 
-  app.querySelector<HTMLButtonElement>('[data-action="refresh"]')?.addEventListener(
-    "click",
-    () => {
-      void refreshSettingsAndStatuses(currentWatchView);
-    },
-  );
+    const triageState = parseWatchTriageState(button.dataset.triageState);
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open-github-url"]')) {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      const ids = getWatchReorderRowIds(button);
-
-      for (const id of ids) {
-        controller.markSeen(id);
-      }
-
-      queueSyncedStateUploadForWatchIds(ids);
-
-      if (button.dataset.url) {
-        void openExternalUrl(button.dataset.url);
-      }
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-group"]')) {
-    button.addEventListener("click", () => {
-      const repoLabel = button.dataset.repo;
-
-      if (repoLabel) {
-        toggleRepoGroup(repoLabel);
-      }
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repo-ci-status"]')) {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      toggleRepoCiStatusMenu(button.dataset.repo || "");
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open-repo-ci-workflow"]')) {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      repoCiStatusMenu = undefined;
-
-      if (button.dataset.url) {
-        void openExternalUrl(button.dataset.url);
-      }
-    });
-  }
-
-  app.querySelector<HTMLButtonElement>('[data-action="done-finished"]')?.addEventListener(
-    "click",
-    () => {
-      isClearMenuOpen = false;
-      controller.markFinishedDone(currentWatchView);
+    if (triageState) {
+      controller.setTriageState(getWatchReorderRowIds(button), triageState);
       queueSyncedStateUpload();
-    },
-  );
+    }
+  });
 
-  app.querySelector<HTMLButtonElement>('[data-action="done-all"]')?.addEventListener(
-    "click",
-    () => {
-      isClearMenuOpen = false;
-      controller.markAllDone(currentWatchView);
-      queueSyncedStateUpload();
-    },
-  );
+  on("click", '[data-action="clear-done-watch"]', (event, button: HTMLButtonElement) => {
+    event.preventDefault();
+    event.stopPropagation();
+    controller.clearDone(getWatchReorderRowIds(button));
+    queueSyncedStateUpload();
+  });
 
-  app.querySelector<HTMLButtonElement>('[data-action="clear-done"]')?.addEventListener(
-    "click",
-    () => {
-      isClearMenuOpen = false;
-      controller.clearDone(
-        controller.getWatches()
-          .filter((watch) => getWatchTriageState(watch) === "done")
-          .map((watch) => watch.id),
-      );
-      queueSyncedStateUpload();
-    },
-  );
+  on("click", '[data-action="mark-seen"]', (event, button: HTMLButtonElement) => {
+    event.preventDefault();
+    event.stopPropagation();
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-watched-pull-request-scope"]')) {
-    button.addEventListener("click", () => {
-      togglePullRequestWatches({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-      }, getPullRequestWatchScope(button.dataset.scope));
-    });
-  }
+    const ids = getClickedUnseenWatchIds(controller.getWatches(), button.dataset.id, getWatchReorderRowIds(button));
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-active-workflows"]')) {
-    button.addEventListener("click", () => {
-      void toggleActiveWorkflowRuns({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-      });
-    });
-  }
+    for (const id of ids) {
+      controller.markSeen(id);
+    }
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repository-watches"]')) {
-    button.addEventListener("click", () => {
-      void toggleRepositoryWatchMenu({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-      });
-    });
-  }
+    queueSyncedStateUploadForWatchIds(ids);
+  });
 
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-workflow-subscription"]')) {
-    button.addEventListener("click", () => {
-      toggleWorkflowSubscription({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-        workflowName: button.dataset.workflow || "",
-        targetKey: button.dataset.target || "",
-      });
-    });
-  }
-
-  app.querySelector<HTMLButtonElement>('[data-action="toggle-workflow-target-editor"]')?.addEventListener(
-    "click",
-    () => {
-      if (repositoryWatchMenu?.status !== "loaded") {
-        return;
-      }
-
-      repositoryWatchMenu = {
-        ...repositoryWatchMenu,
-        targetEditor: repositoryWatchMenu.targetEditor ? undefined : "menu",
-      };
-      render();
-    },
-  );
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="add-workflow-target"]')) {
-    button.addEventListener("click", () => {
-      const kind = getWorkflowTargetKind(button.dataset.kind);
-
-      if (!kind || repositoryWatchMenu?.status !== "loaded") {
-        return;
-      }
-
-      if (kind === "include" || kind === "exclude") {
-        repositoryWatchMenu = { ...repositoryWatchMenu, targetEditor: kind };
-        render();
-        return;
-      }
-
-      addWorkflowTarget({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-      }, kind);
-    });
-  }
-
-  app.querySelector<HTMLFormElement>('[data-action="add-workflow-pattern"]')?.addEventListener(
-    "submit",
-    (event) => {
-      event.preventDefault();
-      const form = event.currentTarget as HTMLFormElement;
-      const kind = getWorkflowTargetKind(form.dataset.kind);
-      const pattern = new FormData(form).get("pattern");
-      const group = repositoryWatchMenu?.repoKey.split("/");
-
-      if (
-        (kind !== "include" && kind !== "exclude") ||
-        typeof pattern !== "string" ||
-        !pattern.trim() ||
-        !group ||
-        group.length !== 2
-      ) {
-        return;
-      }
-
-      addWorkflowTarget({ owner: group[0], repo: group[1] }, kind, pattern.trim());
-    },
-  );
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="select-workflow-target"]')) {
-    button.addEventListener("click", () => {
-      if (repositoryWatchMenu?.status !== "loaded") {
-        return;
-      }
-
-      repositoryWatchMenu = {
-        ...repositoryWatchMenu,
-        selectedTargetKey: button.dataset.target,
-        targetEditor: undefined,
-      };
-      render();
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="remove-workflow-target"]')) {
-    button.addEventListener("click", () => {
-      removeWorkflowTarget({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-      }, button.dataset.target || "");
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-repo-prs"]')) {
-    button.addEventListener("click", () => {
-      void togglePullRequests({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-      });
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="watch-active-workflow"]')) {
-    button.addEventListener("click", () => {
-      void watchActiveWorkflowRun({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-        runId: button.dataset.run || "",
-        url: button.dataset.url || "",
-      });
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="watch-repo-pr"]')) {
-    button.addEventListener("click", () => {
-      void watchPullRequest({
-        owner: button.dataset.owner || "",
-        repo: button.dataset.repo || "",
-        prNumber: button.dataset.pr || "",
-      });
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="arm-rerun"]')) {
-    button.addEventListener("click", () => {
-      armWatchAction(button.dataset.id || "", "rerun");
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action^="rerun-"]')) {
-    button.addEventListener("click", () => {
-      const mode = getWatchRerunMode(button.dataset.action);
-
-      if (mode) {
-        void confirmRerun(button.dataset.id || "", mode);
-      }
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="triage-watch"]')) {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const triageState = parseWatchTriageState(button.dataset.triageState);
-
-      if (triageState) {
-        controller.setTriageState(getWatchReorderRowIds(button), triageState);
-        queueSyncedStateUpload();
-      }
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="clear-done-watch"]')) {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      controller.clearDone(getWatchReorderRowIds(button));
-      queueSyncedStateUpload();
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="mark-seen"]')) {
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      const ids = getClickedUnseenWatchIds(controller.getWatches(), button.dataset.id, getWatchReorderRowIds(button));
-
-      for (const id of ids) {
-        controller.markSeen(id);
-      }
-
-      queueSyncedStateUploadForWatchIds(ids);
-    });
-  }
-
-  for (const row of app.querySelectorAll<HTMLElement>(".watch")) {
-    row.addEventListener("mouseleave", () => {
-      dismissWatchActionOnRowLeave(row.dataset.id);
-    });
-  }
+  on("mouseleave", ".watch", (_event, row: HTMLElement) => {
+    dismissWatchActionOnRowLeave(row.dataset.id);
+  });
 
   bindRepoReorderEvents();
   bindWatchReorderEvents();
@@ -1477,65 +1399,61 @@ function renderCheckIcon(): string {
 }
 
 function bindRepoReorderEvents(): void {
-  for (const header of app.querySelectorAll<HTMLElement>(".watch-group-header")) {
-    header.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) {
-        return;
-      }
+  on("pointerdown", ".watch-group-header", (event, header: HTMLElement) => {
+    if (event.button !== 0) {
+      return;
+    }
 
-      const repoKey = getRepoHeaderPressKey(header, event);
+    const repoKey = getRepoHeaderPressKey(header, event);
 
-      if (!repoKey || getVisibleRepoOrder().length < 2) {
-        return;
-      }
+    if (!repoKey || getVisibleRepoOrder().length < 2) {
+      return;
+    }
 
-      cancelRepoPointerDrag();
-      cancelWatchPointerDrag();
-      repoPressState = {
-        sourceKey: repoKey,
-        startX: event.clientX,
-        startY: event.clientY,
-        timeoutId: window.setTimeout(() => {
-          startRepoPointerDrag(repoKey);
-        }, repoReorderLongPressMs),
-      };
-      document.addEventListener("pointermove", updateRepoPointerDrag);
-      document.addEventListener("pointerup", finishRepoPointerDrag, { once: true });
-      document.addEventListener("pointercancel", cancelRepoPointerDrag, { once: true });
-    });
-  }
+    cancelRepoPointerDrag();
+    cancelWatchPointerDrag();
+    repoPressState = {
+      sourceKey: repoKey,
+      startX: event.clientX,
+      startY: event.clientY,
+      timeoutId: window.setTimeout(() => {
+        startRepoPointerDrag(repoKey);
+      }, repoReorderLongPressMs),
+    };
+    document.addEventListener("pointermove", updateRepoPointerDrag);
+    document.addEventListener("pointerup", finishRepoPointerDrag, { once: true });
+    document.addEventListener("pointercancel", cancelRepoPointerDrag, { once: true });
+  });
 }
 
 function bindWatchReorderEvents(): void {
-  for (const row of app.querySelectorAll<HTMLElement>(".watch[data-id]")) {
-    row.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) {
-        return;
-      }
+  on("pointerdown", ".watch[data-id]", (event, row: HTMLElement) => {
+    if (event.button !== 0) {
+      return;
+    }
 
-      const target = getWatchRowPressTarget(row, event);
+    const target = getWatchRowPressTarget(row, event);
 
-      if (!target || getVisibleWatchReorderOrder(target.key).length < 2) {
-        return;
-      }
+    if (!target || getVisibleWatchReorderOrder(target.key).length < 2) {
+      return;
+    }
 
-      cancelWatchPointerDrag();
-      cancelRepoPointerDrag();
-      watchPressState = {
-        repoKey: target.repoKey,
-        sourceKey: target.key,
-        sourceIds: target.rowIds,
-        startX: event.clientX,
-        startY: event.clientY,
-        timeoutId: window.setTimeout(() => {
-          startWatchPointerDrag(target.repoKey, target.key, target.rowIds);
-        }, repoReorderLongPressMs),
-      };
-      document.addEventListener("pointermove", updateWatchPointerDrag);
-      document.addEventListener("pointerup", finishWatchPointerDrag, { once: true });
-      document.addEventListener("pointercancel", cancelWatchPointerDrag, { once: true });
-    });
-  }
+    cancelWatchPointerDrag();
+    cancelRepoPointerDrag();
+    watchPressState = {
+      repoKey: target.repoKey,
+      sourceKey: target.key,
+      sourceIds: target.rowIds,
+      startX: event.clientX,
+      startY: event.clientY,
+      timeoutId: window.setTimeout(() => {
+        startWatchPointerDrag(target.repoKey, target.key, target.rowIds);
+      }, repoReorderLongPressMs),
+    };
+    document.addEventListener("pointermove", updateWatchPointerDrag);
+    document.addEventListener("pointerup", finishWatchPointerDrag, { once: true });
+    document.addEventListener("pointercancel", cancelWatchPointerDrag, { once: true });
+  });
 
 
 }
