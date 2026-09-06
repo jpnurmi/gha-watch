@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatWatchState, getStatusTransition, isTerminalStatus } from "./status";
+import { formatWatchState, getStatusTransition, shouldPollWatch } from "./status";
 
 describe("formatWatchState", () => {
   it("keeps active failed-child states distinct from plain in-progress states", () => {
@@ -89,19 +89,19 @@ describe("getStatusTransition", () => {
   });
 });
 
-describe("isTerminalStatus", () => {
-  it("treats successful completions as terminal", () => {
-    expect(isTerminalStatus({ status: "completed", conclusion: "success" })).toBe(true);
+describe("shouldPollWatch", () => {
+  it("stops polling successful completions", () => {
+    expect(shouldPollWatch({ status: "completed", conclusion: "success" })).toBe(false);
   });
 
   it.each(["failure", "cancelled", "skipped", null])(
     "keeps completed %s states active",
     (conclusion) => {
-      expect(isTerminalStatus({ status: "completed", conclusion })).toBe(false);
+      expect(shouldPollWatch({ status: "completed", conclusion })).toBe(true);
     },
   );
 
   it("keeps non-completed statuses active", () => {
-    expect(isTerminalStatus({ status: "in_progress", conclusion: null })).toBe(false);
+    expect(shouldPollWatch({ status: "in_progress", conclusion: null })).toBe(true);
   });
 });

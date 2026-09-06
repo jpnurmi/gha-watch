@@ -12,7 +12,7 @@ import {
   type WorkflowDiscoveryState,
 } from "../domain/workflowDiscovery";
 import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, WatchTarget } from "../domain/githubUrl";
-import { formatWatchState, getStatusTransition, isTerminalStatus } from "../domain/status";
+import { formatWatchState, getStatusTransition, shouldPollWatch } from "../domain/status";
 import {
   addWatchSuppressions,
   clearExpiredWatchSuppressions,
@@ -38,7 +38,7 @@ import {
   type WatchRecord,
   type WatchTriageState,
 } from "../domain/watches";
-import type { RerunMode, WatchSnapshot, WatchStateFetchOptions } from "../platform/gh";
+import type { RerunMode, WatchSnapshot, WatchStateFetchOptions } from "./githubPort";
 import type {
   ActiveWorkflowRun,
   OpenPullRequest,
@@ -46,10 +46,10 @@ import type {
   PullRequestDetails,
   WorkflowRunSummary,
   WorkflowDefinition,
-} from "../platform/gh";
-import { NotificationPermissionDeniedError } from "../platform/notifications";
+} from "./githubPort";
+import { NotificationPermissionDeniedError } from "./notificationPort";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
-import { isDeemphasizedPullRequest } from "./viewModel";
+import { isDeemphasizedPullRequest } from "../domain/watchPolicy";
 import { createPersistenceQueue } from "./persistenceQueue";
 
 export type WatchControllerDeps = {
@@ -796,7 +796,7 @@ export function createWatchController(
         lastSeenStatus: current.lastSeenStatus ?? current.status,
         lastState: nextState,
         timing: snapshot.timing,
-        active: !isTerminalStatus(nextState),
+        active: shouldPollWatch(nextState),
         error: undefined,
         errorKind: undefined,
         errorAt: undefined,
@@ -1337,7 +1337,7 @@ export function createWatchController(
       lastSeenStatus: snapshot.terminal ? "in_progress" : status,
       lastState: snapshot.state,
       timing: snapshot.timing,
-      active: !isTerminalStatus(snapshot.state),
+      active: shouldPollWatch(snapshot.state),
       error: undefined,
       errorKind: undefined,
       errorAt: undefined,
@@ -1411,7 +1411,7 @@ export function createWatchController(
       lastSeenStatus: "in_progress",
       lastState: state,
       timing,
-      active: !isTerminalStatus(state),
+      active: shouldPollWatch(state),
       error: undefined,
       errorKind: undefined,
       errorAt: undefined,
@@ -2058,7 +2058,7 @@ export function createWatchController(
           lastSeenStatus: current.lastSeenStatus ?? current.status,
           lastState: nextState,
           timing: mergePolledTiming(current, snapshot),
-          active: !isTerminalStatus(nextState),
+          active: shouldPollWatch(nextState),
           error: undefined,
           errorKind: undefined,
           errorAt: undefined,
@@ -2259,7 +2259,7 @@ function withBaselineSnapshot(watch: WatchRecord, snapshot: WatchSnapshot): Watc
       ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
     },
     timing: snapshot.timing,
-    active: !isTerminalStatus(snapshot),
+    active: shouldPollWatch(snapshot),
     error: undefined,
     errorKind: undefined,
     errorAt: undefined,

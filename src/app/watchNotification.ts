@@ -1,5 +1,5 @@
 import { type WatchRecord } from "../domain/watches";
-import { createPopupViewModel } from "./viewModel";
+import { createWatchRowViewModel } from "./viewModel";
 
 export type DesktopNotificationActionId =
   | "open"
@@ -32,7 +32,7 @@ export function createWatchNotification(
   watch: WatchRecord,
   now = new Date(),
 ): WatchNotification {
-  const row = createPopupViewModel([watch], now).rows[0];
+  const row = createWatchRowViewModel(watch, now);
   const repoLabel = getNotificationRepoLabel(watch);
   const lines = [
     repoLabel,
