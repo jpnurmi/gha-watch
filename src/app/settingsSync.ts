@@ -23,9 +23,16 @@ export type SettingsSync = {
   sync(localState: SyncedState): Promise<SyncedState>;
 };
 
-export function createSettingsSync(remote: SettingsRemote): SettingsSync {
-  let pendingState: SyncedState | undefined;
-  let previousLocalState: SyncedState | undefined;
+export type PendingSettingsSync = { pending: SyncedState; baseline?: SyncedState };
+export type SettingsSyncJournal = {
+  load(): PendingSettingsSync | undefined;
+  save(state: PendingSettingsSync | undefined): void;
+};
+
+export function createSettingsSync(remote: SettingsRemote, journal?: SettingsSyncJournal): SettingsSync {
+  const restored = journal?.load();
+  let pendingState = restored?.pending;
+  let previousLocalState = restored?.baseline;
   let queue = Promise.resolve();
 
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -34,8 +41,13 @@ export function createSettingsSync(remote: SettingsRemote): SettingsSync {
     return result;
   }
 
+  function persistPendingState(): void {
+    journal?.save(pendingState ? { pending: pendingState, baseline: previousLocalState } : undefined);
+  }
+
   async function flushPendingState(): Promise<void> {
     while (pendingState) {
+      persistPendingState();
       const nextState = pendingState;
       const remoteState = await remote.load();
       const mergedState = previousLocalState && remoteState
@@ -51,16 +63,19 @@ export function createSettingsSync(remote: SettingsRemote): SettingsSync {
       if (pendingState === nextState) {
         pendingState = undefined;
       }
+      persistPendingState();
     }
   }
 
   return {
     acknowledge(state) {
+      if (pendingState) return;
       previousLocalState = toSyncedState(state);
     },
 
-    push(state) {
+    async push(state) {
       pendingState = toSyncedState(state);
+      persistPendingState();
       return enqueue(flushPendingState);
     },
 
