@@ -14,7 +14,6 @@ import type { WatchedRepo } from "../domain/watchedRepos";
 import type { WatchSuppression } from "../domain/watchSuppressions";
 import { getWatchId, type WatchRecord } from "../domain/watches";
 import {
-  emptyWorkflowDiscoveryState,
   getWorkflowDiscoverySubscriptionFingerprint,
   type WorkflowDiscoveryState,
 } from "../domain/workflowDiscovery";
