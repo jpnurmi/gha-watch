@@ -17,7 +17,7 @@ describe("dismissPopupUi", () => {
 
   it("hides the popup before opening external links", () => {
     expect(mainSource).toMatch(
-      /async function openExternalUrl\(url: string\): Promise<void> \{\s*await hideMainWindow\(\);\s*await openUrl\(url\);\s*\}/,
+      /async function openExternalUrl\(url: string\): Promise<void> \{\s*await hideMainWindow\(\);\s*await invokeDesktop\("open_github_url", \{ url \}\);\s*\}/,
     );
     expect(mainSource).not.toContain("void openUrl(");
   });

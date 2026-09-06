@@ -8,7 +8,7 @@ import {
   createDesktopNotificationActionHandler,
   createDesktopNotificationActionQueue,
 } from "./app/desktopNotificationActions";
-import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot } from "./app/dragGlyph";
+import { renderDragGripIcon, renderWatchLeadingSlot } from "./app/dragGlyph";
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
 import { getRefreshHealth } from "./app/refreshHealth";
@@ -60,7 +60,6 @@ import {
   type RowTone,
   type WatchGroupViewModel,
   type WatchRowViewModel,
-  type WatchTreeNodeViewModel,
 } from "./app/viewModel";
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
@@ -143,7 +142,6 @@ import { setTrayIndicator } from "./platform/tray";
 import "./styles.css";
 
 const rerunRefreshDelayMs = 1_000;
-const treeIndentStepPx = 26;
 const updateRepository = { owner: "jpnurmi", repo: "gha-watch" } as const;
 const appRoot = document.querySelector<HTMLDivElement>("#app");
 document.documentElement.dataset.platform = getUiPlatform(navigator.userAgent);
@@ -882,7 +880,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
 }
 
 function renderWatchGroupItem(item: WatchGroupViewModel["items"][number]): string {
-  return item.kind === "tree" ? renderWatchTreeNode(item.node, 0) : renderWatch(item.row, 0);
+  return renderWatch(item.row);
 }
 
 function renderRepoCiStatus(group: WatchGroupViewModel): string {
@@ -980,7 +978,7 @@ function renderRepoGroupChevron(
 ): string {
   return `
     <button
-      class="watch-tree-chevron watch-group-toggle-chevron"
+      class="watch-group-toggle-chevron"
       type="button"
       data-action="toggle-group"
       data-repo="${escapeHtml(getWatchedRepoKey(group))}"
@@ -1575,162 +1573,7 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
   `;
 }
 
-function renderWatchTreeNode(node: WatchTreeNodeViewModel, depth: number): string {
-  const hasVisibleChildren = node.children.length > 0 || node.rows.length > 0;
-  const isCollapsed = hasVisibleChildren && collapsedGroups.has(node.id);
-  const hasActions = node.rowIds.length > 0;
-  const children = !hasVisibleChildren || isCollapsed
-    ? ""
-    : `
-      <ul class="watch-tree-children">
-        ${node.children.map((child) => renderWatchTreeNode(child, depth + 1)).join("")}
-        ${node.rows.map((row) => renderWatch(row, depth + 1)).join("")}
-      </ul>
-    `;
-
-  return `
-    <li
-      class="watch-tree-node watch-tree-node-${node.kind}${isCollapsed ? " is-collapsed" : ""}"
-      data-tree-node="${escapeHtml(node.id)}"
-      data-reorder-key="${escapeHtml(node.id)}"
-      data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
-      style="--tree-indent: ${depth * treeIndentStepPx}px;"
-    >
-      <div class="watch-tree-header is-${node.tone}${hasActions ? " has-actions" : ""}">
-        ${renderWatchTreeChevron(node, hasVisibleChildren, isCollapsed)}
-        ${renderWatchTreeLeading(node, depth, isCollapsed)}
-        <div class="watch-tree-main">
-          <span class="watch-label">
-            ${renderWatchTitleLink(node.label, [node.referenceLabel], node.url, node.rowIds)}
-          </span>
-          ${renderWatchTreeMetadata(node)}
-        </div>
-        ${renderWatchTreeActions(node)}
-      </div>
-      ${children}
-    </li>
-  `;
-}
-
-function renderWatchTreeLeading(
-  node: WatchTreeNodeViewModel,
-  depth: number,
-  isCollapsed: boolean,
-): string {
-  const className = `watch-tree-leading${depth === 0 ? " is-top-level" : ""}`;
-  const showUnseenIndicator = shouldShowWatchTreeUnseenIndicator(node, isCollapsed);
-  const leadingSlot = renderWatchTreeLeadingSlot(
-    renderWatchTreeLeadingIcon(node),
-    showUnseenIndicator ? renderUnseenDot() : "",
-  );
-
-  if (showUnseenIndicator) {
-    return `
-      <button
-        class="${className}"
-        type="button"
-        data-action="mark-seen"
-        data-row-ids="${escapeHtml(node.rowIds.join("\n"))}"
-        title="Mark seen"
-        aria-label="Mark ${escapeHtml(node.label)} seen"
-      >
-        ${leadingSlot}
-      </button>
-    `;
-  }
-
-  return `<span class="${className}" aria-hidden="true">${leadingSlot}</span>`;
-}
-
-function shouldShowWatchTreeUnseenIndicator(node: WatchTreeNodeViewModel, isCollapsed: boolean): boolean {
-  if (!node.unseenStatusChange) {
-    return false;
-  }
-
-  const hasVisibleChildren = node.children.length > 0 || node.rows.length > 0;
-
-  return isCollapsed || !hasVisibleChildren || !hasVisibleUnseenDescendantIndicator(node);
-}
-
-function hasVisibleUnseenDescendantIndicator(node: WatchTreeNodeViewModel): boolean {
-  if (node.rows.some((row) => row.unseenStatusChange)) {
-    return true;
-  }
-
-  return node.children.some((child) => {
-    const childHasVisibleChildren = child.children.length > 0 || child.rows.length > 0;
-    const childIsCollapsed = childHasVisibleChildren && collapsedGroups.has(child.id);
-
-    return shouldShowWatchTreeUnseenIndicator(child, childIsCollapsed) ||
-      (!childIsCollapsed && hasVisibleUnseenDescendantIndicator(child));
-  });
-}
-
-function renderWatchTreeChevron(
-  node: WatchTreeNodeViewModel,
-  hasVisibleChildren: boolean,
-  isCollapsed: boolean,
-): string {
-  if (!hasVisibleChildren) {
-    return `<span class="watch-tree-chevron-spacer" aria-hidden="true"></span>`;
-  }
-
-  return `
-    <button
-      class="watch-tree-chevron"
-      type="button"
-      data-action="toggle-tree-node"
-      data-tree-node="${escapeHtml(node.id)}"
-      title="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(node.label)}"
-      aria-label="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(node.label)}"
-      aria-expanded="${isCollapsed ? "false" : "true"}"
-    >
-      ${renderChevronIcon(isCollapsed)}
-    </button>
-  `;
-}
-
-function renderWatchTreeLeadingIcon(node: WatchTreeNodeViewModel): string {
-  if (node.kind === "pull-request" && node.prState) {
-    return renderPrStateIcon(node.prState, "watch-tree-leading-icon");
-  }
-
-  return renderWatchSubjectIcon("workflow", "watch-tree-leading-icon");
-}
-
-function renderWatchTreeMetadata(node: WatchTreeNodeViewModel): string {
-  const statusLink = node.url
-    ? {
-        url: getWatchActionsUrl(node.kind, node.url),
-        rowIds: node.rowIds,
-        label: node.label,
-      }
-    : undefined;
-  const items = [
-    renderWorkflowStatusIcon(node.id, node.tone, node.statusLabel, node.hasFailedChildren, statusLink),
-  ];
-  const detail = [node.timingText, node.detailLabel].filter((item): item is string => Boolean(item)).join(" · ");
-
-  if (detail) {
-    items.push(`<span class="watch-meta-text">${escapeHtml(detail)}</span>`);
-  }
-
-  return renderWatchMetadataContent(items, node.branchName);
-}
-
-function renderWatchTreeActions(node: WatchTreeNodeViewModel): string {
-  if (node.rowIds.length === 0) {
-    return "";
-  }
-
-  return `
-    <div class="watch-tree-actions">
-      ${renderTriageButtons(currentWatchView, node.rowIds, "watch-tree-action-button", node.label, node.doneCandidate)}
-    </div>
-  `;
-}
-
-function renderWatch(row: WatchRowViewModel, depth = 0): string {
+function renderWatch(row: WatchRowViewModel): string {
   const hasConfirmation = pendingWatchAction?.id === row.id;
   const hasActions = true;
   const hasDoneCandidate = row.triageState !== "done" && row.doneCandidate;
@@ -1741,7 +1584,6 @@ function renderWatch(row: WatchRowViewModel, depth = 0): string {
       data-id="${escapeHtml(row.id)}"
       data-reorder-key="${escapeHtml(row.id)}"
       data-row-ids="${escapeHtml(row.id)}"
-      style="--watch-indent: ${depth * treeIndentStepPx}px;"
     >
       ${renderLeadingIcon(row)}
       <div class="watch-main">
@@ -2133,7 +1975,7 @@ function bindEvents(): void {
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open-github-url"]')) {
     button.addEventListener("click", (event) => {
       event.preventDefault();
-      const ids = getTreeNodeRowIds(button);
+      const ids = getWatchReorderRowIds(button);
 
       for (const id of ids) {
         controller.markSeen(id);
@@ -2175,16 +2017,6 @@ function bindEvents(): void {
 
       if (button.dataset.url) {
         void openExternalUrl(button.dataset.url);
-      }
-    });
-  }
-
-  for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="toggle-tree-node"]')) {
-    button.addEventListener("click", () => {
-      const nodeId = button.dataset.treeNode;
-
-      if (nodeId) {
-        toggleTreeNode(nodeId);
       }
     });
   }
@@ -2395,7 +2227,7 @@ function bindEvents(): void {
       const triageState = parseWatchTriageState(button.dataset.triageState);
 
       if (triageState) {
-        controller.setTriageState(getTreeNodeRowIds(button), triageState);
+        controller.setTriageState(getWatchReorderRowIds(button), triageState);
         queueSyncedStateUpload();
       }
     });
@@ -2405,7 +2237,7 @@ function bindEvents(): void {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      controller.clearDone(getTreeNodeRowIds(button));
+      controller.clearDone(getWatchReorderRowIds(button));
       queueSyncedStateUpload();
     });
   }
@@ -2415,7 +2247,7 @@ function bindEvents(): void {
       event.preventDefault();
       event.stopPropagation();
 
-      const ids = getClickedUnseenWatchIds(controller.getWatches(), button.dataset.id, getTreeNodeRowIds(button));
+      const ids = getClickedUnseenWatchIds(controller.getWatches(), button.dataset.id, getWatchReorderRowIds(button));
 
       for (const id of ids) {
         controller.markSeen(id);
@@ -2548,35 +2380,7 @@ function bindWatchReorderEvents(): void {
     });
   }
 
-  for (const header of app.querySelectorAll<HTMLElement>(".watch-tree-header")) {
-    header.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) {
-        return;
-      }
 
-      const target = getWatchTreePressTarget(header, event);
-
-      if (!target || getVisibleWatchReorderOrder(target.key).length < 2) {
-        return;
-      }
-
-      cancelWatchPointerDrag();
-      cancelRepoPointerDrag();
-      watchPressState = {
-        repoKey: target.repoKey,
-        sourceKey: target.key,
-        sourceIds: target.rowIds,
-        startX: event.clientX,
-        startY: event.clientY,
-        timeoutId: window.setTimeout(() => {
-          startWatchPointerDrag(target.repoKey, target.key, target.rowIds);
-        }, repoReorderLongPressMs),
-      };
-      document.addEventListener("pointermove", updateWatchPointerDrag);
-      document.addEventListener("pointerup", finishWatchPointerDrag, { once: true });
-      document.addEventListener("pointercancel", cancelWatchPointerDrag, { once: true });
-    });
-  }
 }
 
 function getRepoHeaderPressKey(header: HTMLElement, event: Event): string | undefined {
@@ -2610,26 +2414,6 @@ function getWatchRowPressTarget(
   return key && repoKey && rowIds.length > 0 ? { repoKey, key, rowIds } : undefined;
 }
 
-function getWatchTreePressTarget(
-  header: HTMLElement,
-  event: Event,
-): WatchReorderTarget | undefined {
-  if (!(event.target instanceof Element)) {
-    return undefined;
-  }
-
-  if (event.target.closest('.watch-tree-actions, .watch-tree-chevron, [data-action="mark-seen"], [data-action="open-github-url"]')) {
-    return undefined;
-  }
-
-  const node = header.closest<HTMLElement>(".watch-tree-node[data-reorder-key]");
-  const key = node?.dataset.reorderKey;
-  const rowIds = node ? getWatchReorderRowIds(node) : [];
-  const repoKey = header.closest<HTMLElement>(".watch-group[data-repo]")?.dataset.repo;
-
-  return key && repoKey && rowIds.length > 0 ? { repoKey, key, rowIds } : undefined;
-}
-
 function getWatchReorderRowIds(element: HTMLElement): string[] {
   return (element.dataset.rowIds || "")
     .split("\n")
@@ -2642,23 +2426,6 @@ function toggleRepoGroup(repoLabel: string): void {
   isClearMenuOpen = false;
   repoCiStatusMenu = undefined;
   render();
-}
-
-function toggleTreeNode(nodeId: string): void {
-  collapsedGroups.toggle(nodeId);
-  isClearMenuOpen = false;
-  activeWorkflowRunMenu = undefined;
-  pullRequestMenu = undefined;
-  repositoryWatchMenu = undefined;
-  repoCiStatusMenu = undefined;
-  render();
-}
-
-function getTreeNodeRowIds(button: HTMLButtonElement): string[] {
-  return (button.dataset.rowIds || "")
-    .split("\n")
-    .map((rowId) => rowId.trim())
-    .filter((rowId) => rowId.length > 0);
 }
 
 function parseWatchTriageState(value: string | undefined): WatchTriageState | undefined {
@@ -2919,9 +2686,6 @@ function clearWatchDropIndicators(): void {
     rowElement.classList.remove("is-row-drop-before", "is-row-drop-after");
   }
 
-  for (const treeElement of app.querySelectorAll(".watch-tree-node")) {
-    treeElement.classList.remove("is-row-drop-before", "is-row-drop-after");
-  }
 }
 
 function clearRepoDragStateClasses(): void {
@@ -2935,7 +2699,7 @@ function clearRepoDragStateClasses(): void {
 function clearWatchDragStateClasses(): void {
   app.querySelector(".watch-list")?.classList.remove("is-reordering-runs");
 
-  for (const groupList of app.querySelectorAll(".watch-group-list, .watch-tree-children")) {
+  for (const groupList of app.querySelectorAll(".watch-group-list")) {
     groupList.classList.remove("is-reordering-runs");
   }
 
@@ -2943,9 +2707,6 @@ function clearWatchDragStateClasses(): void {
     rowElement.classList.remove("is-row-dragging", "is-row-drop-before", "is-row-drop-after");
   }
 
-  for (const treeElement of app.querySelectorAll(".watch-tree-node")) {
-    treeElement.classList.remove("is-row-dragging", "is-row-drop-before", "is-row-drop-after");
-  }
 }
 
 function reorderRepos(sourceKey: string, targetKey: string, position: RepoDropPosition): void {
