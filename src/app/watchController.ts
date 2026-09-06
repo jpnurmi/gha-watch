@@ -164,6 +164,7 @@ export type WatchPollOptions = {
 
 export const workflowDiscoveryOverlapMs = 5 * 60 * 1_000;
 export const workflowDiscoveryWindowMs = 24 * 60 * 60 * 1_000;
+export const workflowDiscoveryWindowLimit = 7;
 export const branchPatternWildcardLimit = 16;
 
 const branchPatternCacheLimit = 256;
@@ -1083,7 +1084,7 @@ export function createWatchController(
     let scanFrom = new Date(validLastScannedAt
       ? parsedLastScannedAt - workflowDiscoveryOverlapMs
       : maximumLookbackAt);
-    while (scanFrom.getTime() < scanStartedAt.getTime()) {
+    for (let window = 0; window < workflowDiscoveryWindowLimit && scanFrom.getTime() < scanStartedAt.getTime(); window++) {
       const scanUntil = new Date(Math.min(
         scanFrom.getTime() + workflowDiscoveryWindowMs,
         scanStartedAt.getTime(),

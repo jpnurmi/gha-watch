@@ -70,7 +70,7 @@ When a pull-request or workflow subscription is enabled for a repository, GHA Wa
 
 Later polls scan runs created since the repository's last successful scan, including completed runs and their referenced pull requests. This catches PRs that open and close entirely while the app is offline. A five-minute overlap protects polling and persistence boundaries; stable GitHub run IDs prevent duplicate watches and notifications. Caught-up results remain unseen in Inbox even when the popup is focused and desktop notifications are paused.
 
-Catch-up is device-local and is not included in Gist sync. Catch-up processes the full offline gap in chronological windows of up to 24 hours and 1,000 workflow runs per repository. The cursor advances after each completed window. If that run limit is exceeded or any page fails, GHA Watch retains the last completed window’s cursor and retries the remaining interval on the next poll.
+Catch-up is device-local and is not included in Gist sync. For each repository, catch-up processes the full offline gap in chronological windows, each covering up to 24 hours and containing up to 1,000 workflow runs. Each poll processes at most seven windows per repository and leaves any remaining interval for later polls. The cursor advances after each completed window. If that window’s run limit is exceeded or any page fails, GHA Watch retains the last completed window’s cursor and retries the remaining interval on the next poll.
 
 ## Development
 
