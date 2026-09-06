@@ -30,4 +30,15 @@ describe("createAuthenticatedUserLoginProvider", () => {
     await expect(getLogin()).resolves.toBe("octocat");
     expect(fetches).toBe(2);
   });
+
+  it("refreshes the account after the cache expires", async () => {
+    let now = 0;
+    let login = "first";
+    const getLogin = createAuthenticatedUserLoginProvider(async () => login, () => now);
+    expect(await getLogin()).toBe("first");
+    login = "second";
+    now = 60_000;
+    expect(await getLogin()).toBe("second");
+  });
+
 });

@@ -30,7 +30,7 @@ describe("Windows packaging configuration", () => {
   it("allows common Windows GitHub CLI install paths", () => {
     const shellPermission = capabilities.permissions
       .filter((permission) => typeof permission !== "string")
-      .find((permission) => permission.identifier === "shell:allow-execute");
+      .find((permission) => permission.identifier === "shell:allow-spawn");
     const commands = shellPermission?.allow.map((entry) => entry.cmd) ?? [];
 
     expect(commands).toContain("C:\\Program Files\\GitHub CLI\\gh.exe");
