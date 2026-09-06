@@ -129,4 +129,3 @@ function formatDiscoveredPullRequestDate(value: string | undefined): string | un
     day: "numeric",
   });
 }
-

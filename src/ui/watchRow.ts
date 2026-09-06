@@ -199,4 +199,3 @@ function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean, p
     </div>
   `;
 }
-
