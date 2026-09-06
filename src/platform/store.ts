@@ -1,3 +1,4 @@
+import { decodeStoredWatches, encodeStoredWatches } from "../domain/watchDocument";
 import { decodeWatchRecords } from "../domain/watchRecords";
 import { defaultAppSettings, normalizeAppSettings, type AppSettings } from "../domain/settings";
 import {
@@ -6,7 +7,6 @@ import {
 } from "../domain/watchSuppressions";
 import type { WatchRecord } from "../domain/watches";
 import {
-  emptyWorkflowDiscoveryState,
   normalizeWorkflowDiscoveryState,
   type WorkflowDiscoveryState,
 } from "../domain/workflowDiscovery";
@@ -16,61 +16,74 @@ const watchSuppressionsStorageKey = "gha-watch:watch-suppressions";
 const settingsStorageKey = "gha-watch:settings";
 const workflowDiscoveryStorageKey = "gha-watch:workflow-discovery";
 
-export function loadWatches(): WatchRecord[] {
-  const rawWatches = localStorage.getItem(watchesStorageKey);
+const stateStorageKey = "gha-watch:state";
 
-  if (!rawWatches) {
-    return [];
-  }
+type LocalState = {
+  watches: WatchRecord[];
+  suppressions: WatchSuppression[];
+  discovery: WorkflowDiscoveryState;
+};
 
+function readJson(key: string): unknown {
+  const raw = localStorage.getItem(key);
+  if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(rawWatches);
-    return decodeWatchRecords(parsed);
+    return JSON.parse(raw);
   } catch {
-    return [];
+    console.warn(`Could not read stored state: ${key}`);
+    return undefined;
   }
+}
+
+function loadState(now = new Date()): LocalState {
+  const stored = readJson(stateStorageKey);
+  if (stored && typeof stored === "object") {
+    const document = stored as Record<string, unknown>;
+    if (document.version !== 1) throw new Error("Unsupported local state version.");
+    return {
+      watches: decodeStoredWatches(document.watches),
+      suppressions: normalizeWatchSuppressions(document.suppressions),
+      discovery: normalizeWorkflowDiscoveryState(document.discovery, now),
+    };
+  }
+  return {
+    watches: decodeWatchRecords(readJson(watchesStorageKey)),
+    suppressions: normalizeWatchSuppressions(readJson(watchSuppressionsStorageKey)),
+    discovery: normalizeWorkflowDiscoveryState(readJson(workflowDiscoveryStorageKey), now),
+  };
+}
+
+function saveState(state: LocalState): void {
+  localStorage.setItem(stateStorageKey, JSON.stringify({
+    version: 1,
+    watches: encodeStoredWatches(state.watches),
+    suppressions: state.suppressions,
+    discovery: state.discovery,
+  }));
+}
+
+export function loadWatches(): WatchRecord[] {
+  return loadState().watches;
 }
 
 export async function saveWatches(watches: WatchRecord[]): Promise<void> {
-  localStorage.setItem(watchesStorageKey, JSON.stringify(watches));
+  saveState({ ...loadState(), watches });
 }
 
 export function loadWatchSuppressions(): WatchSuppression[] {
-  const rawSuppressions = localStorage.getItem(watchSuppressionsStorageKey);
-
-  if (!rawSuppressions) {
-    return [];
-  }
-
-  try {
-    return normalizeWatchSuppressions(JSON.parse(rawSuppressions));
-  } catch {
-    return [];
-  }
+  return loadState().suppressions;
 }
 
-export async function saveWatchSuppressions(
-  suppressions: WatchSuppression[],
-): Promise<void> {
-  localStorage.setItem(watchSuppressionsStorageKey, JSON.stringify(suppressions));
+export async function saveWatchSuppressions(suppressions: WatchSuppression[]): Promise<void> {
+  saveState({ ...loadState(), suppressions });
 }
 
 export function loadWorkflowDiscoveryState(now = new Date()): WorkflowDiscoveryState {
-  const rawState = localStorage.getItem(workflowDiscoveryStorageKey);
-
-  if (!rawState) {
-    return emptyWorkflowDiscoveryState;
-  }
-
-  try {
-    return normalizeWorkflowDiscoveryState(JSON.parse(rawState), now);
-  } catch {
-    return emptyWorkflowDiscoveryState;
-  }
+  return loadState(now).discovery;
 }
 
-export async function saveWorkflowDiscoveryState(state: WorkflowDiscoveryState): Promise<void> {
-  localStorage.setItem(workflowDiscoveryStorageKey, JSON.stringify(state));
+export async function saveWorkflowDiscoveryState(discovery: WorkflowDiscoveryState): Promise<void> {
+  saveState({ ...loadState(), discovery });
 }
 
 export function loadSettings(): AppSettings {
