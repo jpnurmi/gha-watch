@@ -11,7 +11,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Watch a workflow run URL, a specific job URL, or a pull request URL.
 - Live pull request watches follow the latest PR head and show the current workflow runs.
 - Track pull requests as draft, ready, merged, or closed using GitHub's lifecycle icons and colors.
-- Group watches by repository, pull request, and workflow with collapsible tree sections.
+- Group flat watch rows by repository with collapsible repository sections.
 - Watch repositories so they stay visible after their watches are cleared.
 - Configure pull request watches and workflow branch rules from the repository eye menu.
 - Target workflow runs on the default branch, your own manual dispatches, every branch, or case-sensitive include/exclude patterns such as `release/*`.
