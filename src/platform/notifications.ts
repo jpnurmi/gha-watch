@@ -1,6 +1,6 @@
 import { NotificationPermissionDeniedError } from "../app/notificationPort";
 export { NotificationPermissionDeniedError } from "../app/notificationPort";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeDesktop } from "./desktop";
 import { listen } from "@tauri-apps/api/event";
 import {
   isPermissionGranted,
@@ -29,7 +29,7 @@ const desktopNotificationDeps: DesktopNotificationDeps = {
   isPermissionGranted,
   requestPermission,
   async showNotification(notification) {
-    await invoke("show_desktop_notification", { notification });
+    await invokeDesktop("show_desktop_notification", { notification });
   },
   async listenToNotificationActions(listener) {
     return listen<unknown>(notificationActionEvent, (event) => {
@@ -37,7 +37,7 @@ const desktopNotificationDeps: DesktopNotificationDeps = {
     });
   },
   async clearNotifications() {
-    await invoke("clear_desktop_notifications");
+    await invokeDesktop("clear_desktop_notifications");
   },
 };
 
