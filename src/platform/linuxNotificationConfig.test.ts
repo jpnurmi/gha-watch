@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import rustSource from "../../src-tauri/src/main.rs?raw";
+import rustSource from "../../src-tauri/src/notifications.rs?raw";
 
 describe("Linux notification configuration", () => {
   it("shows the app for the default click and routes supported native actions", () => {

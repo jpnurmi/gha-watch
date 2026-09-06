@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import plist from "../../src-tauri/Info.plist?raw";
-import rustSource from "../../src-tauri/src/main.rs?raw";
+import rustSource from "../../src-tauri/src/notifications.rs?raw";
 
 describe("macOS notification configuration", () => {
   it("requests alert-style notifications in the app bundle", () => {
