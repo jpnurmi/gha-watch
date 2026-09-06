@@ -76,6 +76,9 @@ jobs:
       - name: Check Rust lints
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 
+      - name: Test Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
   vitest:
     name: Vitest
     runs-on: ubuntu-24.04
