@@ -65,7 +65,11 @@ function decodeWatchRecord(value: unknown): WatchRecord | undefined {
   if (isRecord(value.metadata)) {
     watch.metadata = {};
     for (const key of ["prTitle", "prUpdatedAt", "workflowName", "runTitle", "runNumber", "jobName", "branchName", "commitSha"] as const) {
-      if (typeof value.metadata[key] === "string") watch.metadata[key] = value.metadata[key];
+      if (key === "prUpdatedAt") {
+        if (isTimestamp(value.metadata[key])) watch.metadata[key] = value.metadata[key];
+      } else if (typeof value.metadata[key] === "string") {
+        watch.metadata[key] = value.metadata[key];
+      }
     }
   }
   if (isRecord(value.timing)) {
