@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
-const rustSource = readFileSync(new URL("../../src-tauri/src/main.rs", import.meta.url), "utf8");
+const rustSource = ["main", "window"].map((name) =>
+  readFileSync(new URL(`../../src-tauri/src/${name}.rs`, import.meta.url), "utf8"),
+).join("\n");
 const cargoToml = readFileSync(new URL("../../src-tauri/Cargo.toml", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
