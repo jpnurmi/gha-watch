@@ -1,9 +1,10 @@
+import { decodeWatchRecords } from "../domain/watchRecords";
 import { normalizeAppSettings, type AppSettings } from "../domain/settings";
 import {
   normalizeWatchSuppressions,
   type WatchSuppression,
 } from "../domain/watchSuppressions";
-import { getWatchId, getWatchTriageState, type WatchRecord } from "../domain/watches";
+import { getWatchTriageState, type WatchRecord } from "../domain/watches";
 import { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "./gh";
 
 const gistDescription = "GHA Watch synced settings";
@@ -166,49 +167,10 @@ export function parseSettingsDocument(content: string): LoadedSyncedState {
 }
 
 export function normalizeSyncedWatches(value: unknown): WatchRecord[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const watches: WatchRecord[] = [];
-  const seen = new Set<string>();
-
-  for (const item of value) {
-    if (!isRecord(item) || !isWatchTarget(item.target)) {
-      continue;
-    }
-
-    const triageState = getWatchTriageState(item as WatchRecord);
-    const id = getWatchId(item.target);
-
-    if (
-      (triageState !== "saved" && triageState !== "done") ||
-      item.id !== id ||
-      seen.has(id) ||
-      typeof item.label !== "string" ||
-      typeof item.status !== "string" ||
-      typeof item.active !== "boolean"
-    ) {
-      continue;
-    }
-
-    seen.add(id);
-    watches.push({
-      ...(item as WatchRecord),
-      id,
-      target: item.target,
-      label: item.label,
-      status: item.status,
-      lastState: isRecord(item.lastState) ? item.lastState as WatchRecord["lastState"] : undefined,
-      triageState,
-      active: item.active,
-      error: typeof item.error === "string" ? item.error : undefined,
-      errorKind: item.errorKind === "transient" ? item.errorKind : undefined,
-      errorAt: typeof item.errorAt === "string" ? item.errorAt : undefined,
-    });
-  }
-
-  return watches;
+  return decodeWatchRecords(value).filter((watch) => {
+    const triageState = getWatchTriageState(watch);
+    return triageState === "saved" || triageState === "done";
+  });
 }
 
 function normalizeGistPages(value: unknown): GistResponse[] {
@@ -254,29 +216,4 @@ function assertSuccessfulResult(result: ShellResult): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function isWatchTarget(value: unknown): value is WatchRecord["target"] {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const hasBase =
-    typeof value.owner === "string" &&
-    typeof value.repo === "string" &&
-    typeof value.url === "string";
-
-  if (!hasBase) {
-    return false;
-  }
-
-  if (value.kind === "run") {
-    return typeof value.runId === "string";
-  }
-
-  if (value.kind === "job") {
-    return typeof value.jobId === "string";
-  }
-
-  return value.kind === "pr" && typeof value.prNumber === "string";
 }
