@@ -1,3 +1,4 @@
+import { createSettingsJournal } from "./platform/settingsJournal";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
@@ -200,7 +201,7 @@ let lastRefreshFailed = false;
 let lastRefreshDegraded = false;
 let settings = loadSettings();
 let syncedStateRevision = 0;
-const settingsSync = createSettingsSync(createSettingsGistRemote());
+const settingsSync = createSettingsSync(createSettingsGistRemote(), createSettingsJournal());
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
 const repoCiStatusUpdatedAt = new Map<string, number>();
