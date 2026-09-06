@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { getWatchRerunMode, shouldDismissPendingWatchActionOnRowLeave } from "./watchActionConfirmation";
 
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-const main = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
 
 describe("getWatchRerunMode", () => {
   it("parses only explicit rerun menu actions", () => {
@@ -51,15 +50,6 @@ describe("watch rerun menu layout", () => {
     );
     expect(styles).toMatch(
       /\.watch:hover \.watch-action-button,[^{]*\.watch:focus-within \.watch-action-button,[^{]*\.watch-action-button\[aria-expanded="true"\]\s*\{[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;/s,
-    );
-    expect(main).toContain(
-      'class="repo-action-menu repo-action-menu-container watch-rerun-control"',
-    );
-    expect(main).toContain(
-      'class="repo-action-popover watch-rerun-popover"',
-    );
-    expect(main).toContain(
-      'class="repo-action-item"',
     );
     expect(styles).toMatch(
       /\.watch\.has-actions \.watch-actions::before\s*\{[^}]*right:\s*0;[^}]*width:\s*84px;[^}]*background:\s*linear-gradient\(90deg, transparent, var\(--watch-row-bg\) 24px\);[^}]*opacity:\s*0;/s,

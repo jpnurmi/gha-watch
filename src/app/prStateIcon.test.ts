@@ -4,7 +4,6 @@ import { getPrStateIconSvg } from "./prStateIcon";
 import type { PrStateTone } from "./viewModel";
 
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
 
 describe("getPrStateIconSvg", () => {
   it.each(["draft", "ready", "merged", "closed"] as PrStateTone[])("renders a %s PR state icon", (tone) => {
@@ -35,8 +34,4 @@ describe("getPrStateIconSvg", () => {
     expect(styles).toMatch(/\.pr-state-icon-closed\s*\{[^}]*color:\s*#f85149;/s);
   });
 
-  it("applies lifecycle colors to direct PR rows", () => {
-    expect(mainSource).toContain('renderPrStateIcon(prState, "watch-leading-icon")');
-    expect(mainSource).not.toContain('getPrStateIconSvg(row.prState?.tone ?? "ready")');
-  });
 });

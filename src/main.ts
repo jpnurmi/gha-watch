@@ -1,14 +1,17 @@
+import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
+import { renderWatch } from "./ui/watchRow";
+import { renderAddForm, type PullRequestDiscoveryState } from "./ui/addPanel";
+import { renderRepositorySettings, type RepositoryWatchMenuState } from "./ui/repositorySettings";
+import { escapeHtml, renderBranchBadge, renderChevronIcon, renderTriageButtons } from "./ui/markup";
 import { createSettingsJournal } from "./platform/settingsJournal";
 import { invokeDesktop } from "./platform/desktop";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createAdaptivePollingCoordinator } from "./app/adaptivePolling";
 import { createCollapsedGroups } from "./app/collapsedGroups";
 import {
   createDesktopNotificationActionHandler,
   createDesktopNotificationActionQueue,
 } from "./app/desktopNotificationActions";
-import { renderDragGripIcon, renderWatchLeadingSlot } from "./app/dragGlyph";
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
 import { getRefreshHealth } from "./app/refreshHealth";
@@ -24,7 +27,6 @@ import { dismissPopupUi } from "./app/popupDismissal";
 import { getPopupBodySections, type PopupBodySection } from "./app/popupLayout";
 import { replacePopupHtmlPreservingScroll } from "./app/popupScroll";
 import { calculatePopupHeight, popupMinHeight, popupWidth } from "./app/popupSize";
-import { getPrStateIconSvg } from "./app/prStateIcon";
 import {
   getPullRequestDiscoveryId,
   getUnwatchedPullRequests,
@@ -34,7 +36,6 @@ import {
   didRepoReorderPressMove,
   repoReorderLongPressMs,
 } from "./app/repoReorderInteraction";
-import { getStatusIconSvg } from "./app/statusIcon";
 import { renderTitleMarkup } from "./app/titleMarkup";
 import { createWatchController, type WatchPollResult } from "./app/watchController";
 import {
@@ -43,8 +44,7 @@ import {
   type PendingWatchAction,
 } from "./app/watchActionConfirmation";
 import { getClickedUnseenWatchIds } from "./app/watchSeenAction";
-import { getRepositoryUrl, getWatchActionsUrl } from "./app/watchLinks";
-import { getWatchTriageActions } from "./app/watchTriage";
+import { getRepositoryUrl } from "./app/watchLinks";
 import {
   formatWatchViewCount,
   getWatchViewAriaLabel,
@@ -57,17 +57,13 @@ import {
   createPopupViewModel,
   type RepoCiStatusViewModel,
   type RepoCiWorkflowStatusViewModel,
-  type RowTone,
   type WatchGroupViewModel,
-  type WatchRowViewModel,
 } from "./app/viewModel";
-import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import type { WatchNotification } from "./app/watchNotification";
 import { createSettingsSync } from "./app/settingsSync";
 import {
   addWatchedWorkflowTarget,
   addWatchedRepo,
-  getWatchedPullRequestScope,
   getWatchedRepoKey,
   getWatchedWorkflowTargetKey,
   isWatchedRepo,
@@ -77,7 +73,6 @@ import {
   updateWatchedRepoIcon,
   type WatchedPullRequestScope,
   type WatchedRepo,
-  type WatchedWorkflowTarget,
   type WatchedWorkflowTargetKind,
 } from "./domain/watchedRepos";
 import {
@@ -267,36 +262,9 @@ type PullRequestMenuState =
       error: string;
     };
 
-type RepositoryWatchMenuState =
-  | {
-      repoKey: string;
-      status: "loading";
-      userLogin?: string;
-    }
-  | {
-      repoKey: string;
-      status: "loaded";
-      defaultBranch: string;
-      userLogin: string;
-      workflows: WorkflowDefinition[];
-      selectedTargetKey?: string;
-      targetEditor?: "menu" | "include" | "exclude";
-    }
-  | {
-      repoKey: string;
-      status: "error";
-      error: string;
-      userLogin?: string;
-    };
-
 type RepoCiStatusMenuState = {
   repoKey: string;
 };
-
-type PullRequestDiscoveryState =
-  | { status: "idle" | "loading" }
-  | { status: "loaded"; pullRequests: AuthoredOpenPullRequest[]; loadedAt: number }
-  | { status: "error"; error: string };
 
 const desktopNotificationActionQueue = createDesktopNotificationActionQueue((error) => {
   console.error("Could not process a desktop notification action.", error);
@@ -651,7 +619,7 @@ function renderPopupBodySection(
   viewModel: ReturnType<typeof createPopupViewModel>,
 ): string {
   if (section === "add-form") {
-    return renderAddForm();
+    return renderAddForm(pullRequestDiscovery, getDiscoveredUnwatchedPullRequests(), addError);
   }
 
   return renderWatchList(viewModel);
@@ -720,125 +688,6 @@ function renderWatchViewSwitcher(counts: WatchViewCounts): string {
   `;
 }
 
-function renderAddForm(): string {
-  const pullRequests = getDiscoveredUnwatchedPullRequests();
-
-  return `
-    <form class="add-form" data-role="add-form">
-      <div class="add-discovery-header">
-        <span class="add-discovery-title">Unwatched PRs</span>
-        <button class="add-form-dismiss" type="button" data-action="close-add" title="Cancel" aria-label="Cancel adding">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
-          </svg>
-        </button>
-      </div>
-      ${renderPullRequestDiscovery(pullRequests)}
-      <div class="add-manual-entry">
-        <div class="add-field">
-          <input
-            name="url"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="owner/repo#1234"
-            aria-label="GitHub repository, Actions URL, or pull request slug"
-            aria-describedby="add-form-hint"
-          />
-          <div class="add-field-actions">
-            <button class="add-form-submit" type="submit">Add</button>
-          </div>
-        </div>
-        <p class="form-hint" id="add-form-hint">or https://github.com/OWNER/REPO/actions/runs/RUN_ID</p>
-        ${addError ? `<p class="form-error">${escapeHtml(addError)}</p>` : ""}
-      </div>
-    </form>
-  `;
-}
-
-function renderPullRequestDiscovery(pullRequests: AuthoredOpenPullRequest[]): string {
-  if (pullRequestDiscovery.status === "idle" || pullRequestDiscovery.status === "loading") {
-    return `<p class="add-discovery-status">Finding PRs…</p>`;
-  }
-
-  if (pullRequestDiscovery.status === "error") {
-    return `
-      <div class="add-discovery-status add-discovery-error">
-        <span title="${escapeHtml(pullRequestDiscovery.error)}">Couldn’t find PRs</span>
-        <button type="button" data-action="retry-pr-discovery">Retry</button>
-      </div>
-    `;
-  }
-
-  if (pullRequests.length === 0) {
-    return `<p class="add-discovery-status">No unwatched PRs</p>`;
-  }
-
-  return `
-    <ul class="add-discovery-list">
-      ${pullRequests.map((pullRequest) => {
-        const id = getPullRequestDiscoveryId(pullRequest);
-        const updated = formatDiscoveredPullRequestDate(pullRequest.updatedAt);
-        const prState = pullRequest.isDraft
-          ? { label: "Draft", tone: "draft" as const }
-          : { label: "Ready", tone: "ready" as const };
-
-        return `
-        <li class="add-discovery-item">
-          <span class="add-discovery-leading" aria-hidden="true">
-            ${renderPrStateIcon(prState, "add-discovery-pr-icon")}
-          </span>
-          <span class="add-discovery-details">
-            <span class="watch-label add-discovery-label">
-              <button
-                class="watch-title-link add-discovery-pr-title"
-                type="button"
-                data-action="open-github-url"
-                data-url="${escapeHtml(pullRequest.url)}"
-                title="Open on GitHub"
-                aria-label="Open ${escapeHtml(pullRequest.title)} on GitHub"
-              ><span class="watch-title-text">${renderTitleMarkup(pullRequest.title)}</span></button>
-              <span class="watch-title-reference">#${escapeHtml(pullRequest.number)}</span>
-            </span>
-            <span class="watch-meta add-discovery-meta">
-              <span class="watch-meta-text">${escapeHtml(`${pullRequest.owner}/${pullRequest.repo}`)}${updated ? ` · Updated ${escapeHtml(updated)}` : ""}</span>
-            </span>
-          </span>
-          <button
-            class="add-discovery-add"
-            type="button"
-            data-action="add-discovered-pr"
-            data-pr-id="${escapeHtml(id)}"
-            title="Add pull request"
-            aria-label="Add ${escapeHtml(`${pullRequest.owner}/${pullRequest.repo} pull request ${pullRequest.number}`)}"
-          >+</button>
-          <button
-            class="add-discovery-dismiss"
-            type="button"
-            data-action="dismiss-discovered-pr"
-            data-pr-id="${escapeHtml(id)}"
-            title="Dismiss suggestion"
-            aria-label="Dismiss ${escapeHtml(`${pullRequest.owner}/${pullRequest.repo} pull request ${pullRequest.number}`)}"
-          >×</button>
-        </li>
-      `;
-      }).join("")}
-    </ul>
-  `;
-}
-
-function formatDiscoveredPullRequestDate(value: string | undefined): string | undefined {
-  if (!value || !Number.isFinite(Date.parse(value))) {
-    return undefined;
-  }
-
-  return new Date(value).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
 function renderWatchGroup(group: WatchGroupViewModel): string {
   const actions = getRepoHeaderActions({
     userCollapsed: collapsedGroups.has(getWatchedRepoKey(group)),
@@ -852,7 +701,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
     >
       <div class="watch-group-header">
         ${renderRepoGroupChevron(group, isCollapsed)}
-        ${renderRepositoryWatchMenu(group)}
+        ${renderRepositorySettings(group, { currentWatchView, repositoryWatchMenu, watchedRepos: settings.watchedRepos, renderRepoIcon })}
         <span class="watch-group-meta">
           <button
             class="watch-group-link"
@@ -880,7 +729,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
 }
 
 function renderWatchGroupItem(item: WatchGroupViewModel["items"][number]): string {
-  return renderWatch(item.row);
+  return renderWatch(item.row, pendingWatchAction);
 }
 
 function renderRepoCiStatus(group: WatchGroupViewModel): string {
@@ -1005,394 +854,6 @@ function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderA
   `;
 }
 
-function renderRepositoryWatchMenu(group: WatchGroupViewModel): string {
-  if (currentWatchView !== "inbox") {
-    return `
-      <span class="watch-group-watch is-static" aria-hidden="true">
-        <span class="watch-group-icon">
-          ${renderRepoIcon(group)}
-        </span>
-        <span class="watch-group-drag-glyph">
-          ${renderDragGripIcon()}
-        </span>
-      </span>
-    `;
-  }
-
-  const repoKey = getWatchedRepoKey(group);
-  const menuState = repositoryWatchMenu?.repoKey === repoKey ? repositoryWatchMenu : undefined;
-
-  return `
-    <div class="repo-action-menu watch-group-watch-menu">
-      <button
-        class="watch-group-watch${group.watched ? " is-watched" : ""}"
-        type="button"
-        data-action="toggle-repository-watches"
-        data-owner="${escapeHtml(group.owner)}"
-        data-repo="${escapeHtml(group.repo)}"
-        title="Watches"
-        aria-label="Watches for ${escapeHtml(group.repoLabel)}"
-        aria-haspopup="menu"
-        aria-expanded="${menuState ? "true" : "false"}"
-      >
-        <span class="watch-group-icon" aria-hidden="true">
-          ${renderRepoIcon(group)}
-        </span>
-        <span class="watch-group-watch-glyph" aria-hidden="true">
-          ${renderEyeIcon(group.watched)}
-        </span>
-        <span class="watch-group-drag-glyph" aria-hidden="true">
-          ${renderDragGripIcon()}
-        </span>
-      </button>
-      ${menuState ? renderRepositoryWatchPopover(group, menuState) : ""}
-    </div>
-  `;
-}
-
-function renderEyeIcon(watched: boolean): string {
-  return `
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d="M1.5 8s2.3-3.75 6.5-3.75S14.5 8 14.5 8 12.2 11.75 8 11.75 1.5 8 1.5 8Z"
-        fill="none"
-        stroke="currentColor"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        stroke-width="1.4"
-      />
-      <circle cx="8" cy="8" r="1.9" fill="${watched ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.2"/>
-    </svg>
-  `;
-}
-
-function renderChevronIcon(collapsed: boolean): string {
-  const path = collapsed ? "m6 3.75 4.25 4.25L6 12.25" : "m3.75 6 4.25 4.25L12.25 6";
-
-  return `
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="${path}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-    </svg>
-  `;
-}
-
-function renderRepositoryWatchPopover(
-  group: WatchGroupViewModel,
-  menuState: RepositoryWatchMenuState,
-): string {
-  let workflowContent: string;
-
-  if (menuState.status === "loading") {
-    workflowContent = `<div class="repo-action-status">Loading workflows...</div>`;
-  } else if (menuState.status === "error") {
-    workflowContent = `<div class="repo-action-status is-error">${escapeHtml(menuState.error)}</div>`;
-  } else {
-    const workflows = getWorkflowSubscriptionMenuWorkflows(group, menuState.workflows);
-    workflowContent = workflows.length > 0
-      ? renderWorkflowTargetingEditor(group, menuState, workflows)
-      : `<div class="repo-action-status">No workflows</div>`;
-  }
-
-  return `
-    <div class="repo-action-popover repository-watch-popover" role="menu">
-      ${renderPullRequestWatchItem(group, menuState.userLogin)}
-      ${workflowContent}
-    </div>
-  `;
-}
-
-function renderPullRequestWatchItem(group: WatchGroupViewModel, userLogin: string | undefined): string {
-  const watchedRepo = findWatchedRepo(group);
-  const selectedScope = watchedRepo ? getWatchedPullRequestScope(watchedRepo) : undefined;
-  const displayLabel = userLogin?.trim() || "…";
-
-  return `
-    <div class="repository-watch-item pull-request-watch-item" role="none">
-      <span class="repo-action-title">Pull requests</span>
-      <span class="repository-watch-segmented" role="group" aria-label="Pull request watches">
-        ${renderPullRequestWatchScope(group, "all", "all", selectedScope)}
-        ${renderPullRequestWatchScope(group, "user", displayLabel, selectedScope)}
-      </span>
-    </div>
-  `;
-}
-
-function renderPullRequestWatchScope(
-  group: WatchGroupViewModel,
-  scope: WatchedPullRequestScope,
-  displayLabel: string,
-  selectedScope: WatchedPullRequestScope | undefined,
-): string {
-  const checked = scope === selectedScope;
-  const subject = scope === "all" ? "all pull requests" : `pull requests by ${displayLabel}`;
-
-  return `
-    <button
-      class="repository-watch-segment repository-watch-segment-${scope}${checked ? " is-selected" : ""}"
-      type="button"
-      role="menuitemcheckbox"
-      aria-checked="${checked ? "true" : "false"}"
-      data-action="toggle-watched-pull-request-scope"
-      data-owner="${escapeHtml(group.owner)}"
-      data-repo="${escapeHtml(group.repo)}"
-      data-scope="${scope}"
-      title="${checked ? "Stop watching" : "Watch"} ${escapeHtml(subject)}"
-      aria-label="${checked ? "Stop watching" : "Watch"} ${escapeHtml(subject)} in ${escapeHtml(group.repoLabel)}"
-    >
-      ${escapeHtml(displayLabel)}
-    </button>
-  `;
-}
-
-function renderWorkflowTargetingEditor(
-  group: WatchGroupViewModel,
-  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
-  workflows: WorkflowDefinition[],
-): string {
-  const targets = findWatchedRepo(group)?.workflowTargets ?? [];
-  const selectedTargetKey = getSelectedWorkflowTargetKey(menuState, targets);
-  const selectedTarget = targets.find(
-    (target) => getWatchedWorkflowTargetKey(target) === selectedTargetKey,
-  );
-
-  return `
-    <section class="workflow-targeting" aria-label="Workflow branches">
-      <div class="workflow-targeting-header">
-        <span class="repo-action-title">Branches</span>
-        <button
-          class="workflow-target-add"
-          type="button"
-          data-action="toggle-workflow-target-editor"
-          aria-expanded="${menuState.targetEditor ? "true" : "false"}"
-          aria-label="Add branch rule"
-        >${renderWorkflowTargetAddIcon()}</button>
-      </div>
-      ${renderWorkflowTargetEditor(group, menuState, targets)}
-      <div class="workflow-target-list" role="list">
-        ${targets.length > 0
-          ? targets.map((target) => renderWorkflowTarget(group, target, menuState, selectedTargetKey)).join("")
-          : `<div class="workflow-target-empty">Add a branch rule to watch workflows.</div>`}
-      </div>
-      ${selectedTarget
-        ? `<div class="workflow-target-workflows">
-            <div class="workflow-target-workflows-title">Workflows for ${escapeHtml(getWorkflowTargetLabel(selectedTarget, menuState))}</div>
-            ${workflows.map((workflow) => renderWorkflowTargetWorkflow(group, selectedTarget, workflow)).join("")}
-          </div>`
-        : ""}
-    </section>
-  `;
-}
-
-function renderWorkflowTargetEditor(
-  group: WatchGroupViewModel,
-  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
-  targets: WatchedWorkflowTarget[],
-): string {
-  if (!menuState.targetEditor) {
-    return "";
-  }
-
-  if (menuState.targetEditor === "include" || menuState.targetEditor === "exclude") {
-    return `
-      <form class="workflow-target-pattern-form" data-action="add-workflow-pattern" data-kind="${menuState.targetEditor}">
-        <div class="add-field workflow-target-pattern-field">
-          <input
-            class="workflow-target-pattern-input"
-            name="pattern"
-            data-draft-key="${escapeHtml(`${group.owner}/${group.repo}/${menuState.targetEditor}`)}"
-            maxlength="255"
-            placeholder="${menuState.targetEditor === "include" ? "release/*" : "release/experimental/*"}"
-            aria-label="Branch pattern"
-            autocomplete="off"
-            autofocus
-          />
-          <div class="add-field-actions">
-            <button class="add-form-submit" type="submit">Add</button>
-          </div>
-        </div>
-      </form>
-    `;
-  }
-
-  const existingKinds = new Set(targets.map((target) => target.kind));
-
-  return `
-    <div class="workflow-target-add-menu" role="menu">
-      ${renderAddWorkflowTargetAction(group, "default", "Include default branch", existingKinds.has("default"))}
-      ${renderAddWorkflowTargetAction(group, "own", "Include own branches", existingKinds.has("own"))}
-      ${renderAddWorkflowTargetAction(group, "all", "Include all branches", existingKinds.has("all"))}
-      <div class="workflow-target-add-divider"></div>
-      ${renderAddWorkflowTargetAction(group, "include", "Include by pattern", false)}
-      ${renderAddWorkflowTargetAction(group, "exclude", "Exclude by pattern", false)}
-    </div>
-  `;
-}
-
-function renderAddWorkflowTargetAction(
-  group: WatchGroupViewModel,
-  kind: WatchedWorkflowTargetKind,
-  label: string,
-  disabled: boolean,
-): string {
-  return `
-    <button
-      type="button"
-      role="menuitem"
-      data-action="add-workflow-target"
-      data-owner="${escapeHtml(group.owner)}"
-      data-repo="${escapeHtml(group.repo)}"
-      data-kind="${kind}"
-      ${disabled ? "disabled" : ""}
-    >${renderWorkflowTargetSign(kind === "exclude")}<span>${label}</span></button>
-  `;
-}
-
-function renderWorkflowTarget(
-  group: WatchGroupViewModel,
-  target: WatchedWorkflowTarget,
-  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
-  selectedTargetKey: string | undefined,
-): string {
-  const targetKey = getWatchedWorkflowTargetKey(target);
-  const selected = targetKey === selectedTargetKey;
-  const label = getWorkflowTargetLabel(target, menuState);
-
-  return `
-    <div class="workflow-target-row${selected ? " is-selected" : ""}" role="listitem">
-      <button
-        class="workflow-target-select"
-        type="button"
-        data-action="select-workflow-target"
-        data-target="${escapeHtml(targetKey)}"
-        aria-pressed="${selected ? "true" : "false"}"
-      >
-        ${renderWorkflowTargetSign(target.kind === "exclude")}
-        <span class="workflow-target-label">${escapeHtml(label)}</span>
-      </button>
-      <button
-        class="workflow-target-remove"
-        type="button"
-        data-action="remove-workflow-target"
-        data-owner="${escapeHtml(group.owner)}"
-        data-repo="${escapeHtml(group.repo)}"
-        data-target="${escapeHtml(targetKey)}"
-        aria-label="Remove ${escapeHtml(label)}"
-      >${renderWorkflowTargetRemoveIcon()}</button>
-    </div>
-  `;
-}
-
-function renderWorkflowTargetWorkflow(
-  group: WatchGroupViewModel,
-  target: WatchedWorkflowTarget,
-  workflow: WorkflowDefinition,
-): string {
-  const checked = target.workflowNames.includes(workflow.name);
-
-  return `
-    <button
-      class="workflow-target-workflow${checked ? " is-selected" : ""}"
-      type="button"
-      role="checkbox"
-      aria-checked="${checked ? "true" : "false"}"
-      data-action="toggle-workflow-subscription"
-      data-owner="${escapeHtml(group.owner)}"
-      data-repo="${escapeHtml(group.repo)}"
-      data-workflow="${escapeHtml(workflow.name)}"
-      data-target="${escapeHtml(getWatchedWorkflowTargetKey(target))}"
-    ><span class="workflow-target-checkbox" aria-hidden="true">${checked ? renderWorkflowTargetCheckIcon() : ""}</span><span title="${escapeHtml(workflow.name)}">${escapeHtml(workflow.name)}</span></button>
-  `;
-}
-
-function renderWorkflowTargetSign(exclude: boolean): string {
-  return `
-    <svg class="workflow-target-sign is-${exclude ? "exclude" : "include"}" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <path d="${exclude ? "M5 8h6" : "M5 8h6M8 5v6"}" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
-    </svg>
-  `;
-}
-
-function renderWorkflowTargetAddIcon(): string {
-  return `
-    <svg class="workflow-target-add-icon" viewBox="0 0 12 12" aria-hidden="true">
-      <path d="M6 2.5v7M2.5 6h7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
-    </svg>
-  `;
-}
-
-function renderWorkflowTargetRemoveIcon(): string {
-  return `
-    <svg class="workflow-target-remove-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
-    </svg>
-  `;
-}
-
-function renderWorkflowTargetCheckIcon(): string {
-  return `
-    <svg viewBox="0 0 12 12" aria-hidden="true">
-      <path d="m2.5 6 2.25 2.25 4.75-4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
-    </svg>
-  `;
-}
-
-function getSelectedWorkflowTargetKey(
-  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
-  targets: WatchedWorkflowTarget[],
-): string | undefined {
-  return targets.some((target) => getWatchedWorkflowTargetKey(target) === menuState.selectedTargetKey)
-    ? menuState.selectedTargetKey
-    : targets[0] ? getWatchedWorkflowTargetKey(targets[0]) : undefined;
-}
-
-function getWorkflowTargetLabel(
-  target: WatchedWorkflowTarget,
-  menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
-): string {
-  switch (target.kind) {
-    case "default":
-      return `Default · ${menuState.defaultBranch.trim() || "default branch"}`;
-    case "own":
-      return `Own · ${menuState.userLogin.trim() || "authenticated user"}`;
-    case "all":
-      return "All branches";
-    case "include":
-      return target.pattern ?? "Include pattern";
-    case "exclude":
-      return target.pattern ?? "Exclude pattern";
-  }
-}
-
-function getWorkflowSubscriptionMenuWorkflows(
-  group: WatchGroupViewModel,
-  workflows: WorkflowDefinition[],
-): WorkflowDefinition[] {
-  const watchedRepo = findWatchedRepo(group);
-  const workflowNames = new Set(workflows.map((workflow) => workflow.name));
-  const missingSelectedWorkflows = (watchedRepo?.workflowTargets ?? [])
-    .flatMap((target) => target.workflowNames)
-    .filter((workflowName) => {
-      if (workflowNames.has(workflowName)) {
-        return false;
-      }
-
-      workflowNames.add(workflowName);
-      return true;
-    })
-    .map((workflowName) => ({
-      name: workflowName,
-      path: "",
-    }));
-
-  return [...workflows, ...missingSelectedWorkflows];
-}
-
-function findWatchedRepo(repo: Pick<WatchedRepo, "owner" | "repo">): WatchedRepo | undefined {
-  const repoKey = getWatchedRepoKey(repo);
-  return settings.watchedRepos.find((watchedRepo) => getWatchedRepoKey(watchedRepo) === repoKey);
-}
-
 function renderActiveWorkflowRunMenu(group: WatchGroupViewModel): string {
   const repoKey = getWatchedRepoKey(group);
   const menuState = activeWorkflowRunMenu?.repoKey === repoKey ? activeWorkflowRunMenu : undefined;
@@ -1470,16 +931,6 @@ function renderActiveWorkflowRunItem(group: WatchGroupViewModel, run: ActiveWork
 function getActiveWorkflowRunTitle(run: ActiveWorkflowRun): string {
   const title = `${run.title}${run.runNumber ? ` #${run.runNumber}` : ""}`;
   return run.branchName ? `${title} · ${run.branchName}` : title;
-}
-
-function renderBranchBadge(branchName: string | undefined): string {
-  const cleanBranchName = branchName?.trim();
-
-  if (!cleanBranchName) {
-    return "";
-  }
-
-  return `<span class="watch-branch-badge" title="${escapeHtml(cleanBranchName)}">${escapeHtml(cleanBranchName)}</span>`;
 }
 
 function formatWorkflowRunStatus(status: string): string {
@@ -1570,300 +1021,6 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
     <svg viewBox="0 0 24 24">
       <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C16.3 4.6 17.3 5 17.3 5c.7 1.7.3 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3Z" fill="currentColor"/>
     </svg>
-  `;
-}
-
-function renderWatch(row: WatchRowViewModel): string {
-  const hasConfirmation = pendingWatchAction?.id === row.id;
-  const hasActions = true;
-  const hasDoneCandidate = row.triageState !== "done" && row.doneCandidate;
-
-  return `
-    <li
-      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.deemphasized ? " is-deemphasized" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${hasDoneCandidate ? " has-done-candidate" : ""}${hasConfirmation ? " has-confirmation" : ""}"
-      data-id="${escapeHtml(row.id)}"
-      data-reorder-key="${escapeHtml(row.id)}"
-      data-row-ids="${escapeHtml(row.id)}"
-    >
-      ${renderLeadingIcon(row)}
-      <div class="watch-main">
-        <span class="watch-label">
-          ${renderWatchTitleLink(
-            row.label,
-            [row.referenceLabel, row.pullRequestReferenceLabel],
-            row.url,
-            [row.id],
-          )}
-        </span>
-        ${renderMetadata(row)}
-      </div>
-      ${renderWatchActions(row, hasDoneCandidate)}
-    </li>
-  `;
-}
-
-function renderLeadingIcon(row: WatchRowViewModel): string {
-  const markSeenOverlay = row.unseenStatusChange ? renderWatchSeenOverlay(row) : "";
-
-  if (row.subject === "pull-request") {
-    const prState = row.prState ?? { label: "Ready", tone: "ready" as const };
-    return renderWatchLeadingSlot(renderPrStateIcon(prState, "watch-leading-icon"), markSeenOverlay);
-  }
-
-  if (row.subject === "job") {
-    return renderWatchLeadingSlot(renderWatchSubjectIcon("job"), markSeenOverlay);
-  }
-
-  return renderWatchLeadingSlot(renderWatchSubjectIcon("workflow"), markSeenOverlay);
-}
-
-function renderWatchSeenOverlay(row: WatchRowViewModel): string {
-  return `
-    <button class="watch-leading-seen-button" type="button" data-action="mark-seen" data-id="${escapeHtml(row.id)}" title="Mark seen" aria-label="Mark ${escapeHtml(row.label)} seen">
-      ${renderUnseenDot()}
-    </button>
-  `;
-}
-
-function renderUnseenDot(): string {
-  return `<span class="unseen-dot" aria-hidden="true"></span>`;
-}
-
-function renderMetadata(row: WatchRowViewModel): string {
-  const items: string[] = [];
-
-  items.push(renderWorkflowStatus(row));
-
-  const detail = getMetadataDetail(row);
-
-  if (detail) {
-    items.push(`<span class="watch-meta-text">${escapeHtml(detail)}</span>`);
-  }
-
-  return renderWatchMetadataContent(items, row.branchName);
-}
-
-function renderWatchMetadataContent(items: string[], branchName: string | undefined): string {
-  const content = items.join(renderMetaSeparator()) + renderBranchBadge(branchName);
-
-  return `<span class="watch-meta${branchName ? " has-branch-badge" : ""}">${content}</span>`;
-}
-
-function renderMetaSeparator(): string {
-  return `<span class="watch-meta-separator">·</span>`;
-}
-
-function renderWorkflowStatus(row: WatchRowViewModel): string {
-  return renderWorkflowStatusIcon(row.id, row.tone, row.statusLabel, row.hasFailedChildren, {
-    url: getWatchActionsUrl(row.subject, row.url),
-    rowIds: [row.id],
-    label: row.label,
-  });
-}
-
-function renderWorkflowStatusIcon(
-  id: string,
-  tone: RowTone,
-  statusLabel: string,
-  hasFailedChildren = false,
-  link?: { url: string; rowIds: string[]; label: string },
-): string {
-  const className = `watch-workflow-status status-icon-${tone}${hasFailedChildren ? " has-failed-children" : ""}`;
-  const content = `${getStatusIconSvg(tone, `${id}-workflow`)}<span>${escapeHtml(statusLabel)}</span>`;
-
-  if (!link) {
-    return `<span class="${className}">${content}</span>`;
-  }
-
-  return `
-    <button
-      class="${className}"
-      type="button"
-      data-action="open-github-url"
-      data-url="${escapeHtml(link.url)}"
-      data-row-ids="${escapeHtml(link.rowIds.join("\n"))}"
-      title="Open Actions status"
-      aria-label="Open Actions status for ${escapeHtml(link.label)}"
-    >
-      ${content}
-    </button>
-  `;
-}
-
-function renderWatchTitleLink(
-  label: string,
-  referenceLabels: Array<string | undefined>,
-  url: string | undefined,
-  rowIds: string[],
-): string {
-  const references = referenceLabels
-    .filter((reference): reference is string => Boolean(reference))
-    .map((reference) => `<span class="watch-title-reference">${escapeHtml(reference)}</span>`)
-    .join("");
-  const content = `
-    <span class="watch-title-text" title="${escapeHtml(label)}">${renderTitleMarkup(label)}</span>
-    ${references}
-  `;
-
-  if (!url) {
-    return `<span class="watch-title-cluster">${content}</span>`;
-  }
-
-  return `
-    <button
-      class="watch-title-cluster watch-title-link"
-      type="button"
-      data-action="open-github-url"
-      data-url="${escapeHtml(url)}"
-      data-row-ids="${escapeHtml(rowIds.join("\n"))}"
-      aria-label="Open ${escapeHtml(label)} on GitHub"
-    >
-      ${content}
-    </button>
-  `;
-}
-
-function getMetadataDetail(row: WatchRowViewModel): string | undefined {
-  if (row.timingText) {
-    return row.timingText;
-  }
-
-  return row.tone === "error" ? row.description : undefined;
-}
-
-function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean): string {
-  const rerunMenuOpen = pendingWatchAction?.id === row.id;
-
-  return `
-    <div class="watch-actions">
-      ${
-        row.canRerun
-          ? `<span class="repo-action-menu repo-action-menu-container watch-rerun-control">
-              <button class="watch-action-button rerun-button" type="button" data-action="arm-rerun" data-id="${escapeHtml(row.id)}" title="Re-run" aria-label="Re-run ${escapeHtml(row.label)}" aria-haspopup="menu" aria-expanded="${rerunMenuOpen ? "true" : "false"}">
-                ${getRerunActionIconSvg()}
-              </button>
-              ${
-                rerunMenuOpen
-                  ? `<div class="repo-action-popover watch-rerun-popover" role="menu" aria-label="Re-run options for ${escapeHtml(row.label)}">
-                      <button class="repo-action-item" type="button" role="menuitem" data-action="rerun-all" data-id="${escapeHtml(row.id)}">
-                        <span class="repo-action-title">Re-run all jobs</span>
-                      </button>
-                      ${
-                        row.canRerunFailed
-                          ? `<button class="repo-action-item" type="button" role="menuitem" data-action="rerun-failed" data-id="${escapeHtml(row.id)}">
-                              <span class="repo-action-title">Re-run failed jobs</span>
-                            </button>`
-                          : ""
-                      }
-                    </div>`
-                  : ""
-              }
-            </span>`
-          : ""
-      }
-      ${renderTriageButtons(row.triageState, [row.id], "watch-action-button", row.label, hasDoneCandidate)}
-    </div>
-  `;
-}
-
-function renderTriageButtons(
-  currentState: WatchTriageState,
-  rowIds: string[],
-  className: string,
-  subjectLabel: string,
-  doneCandidate = false,
-): string {
-  const triageButtons = getWatchTriageActions(currentState)
-    .map(
-      (action) => `
-        <button
-          class="${className} watch-triage-button is-${action.state}${action.state === "done" && doneCandidate ? " is-done-candidate" : ""}"
-          type="button"
-          data-action="triage-watch"
-          data-triage-state="${action.state}"
-          data-row-ids="${escapeHtml(rowIds.join("\n"))}"
-          title="${action.label}"
-          aria-label="${action.label} ${escapeHtml(subjectLabel)}"
-        >
-          ${renderTriageIcon(action.state)}
-        </button>
-      `,
-    )
-    .join("");
-
-  if (currentState !== "done") {
-    return triageButtons;
-  }
-
-  return `${triageButtons}
-    <button
-      class="${className} watch-clear-done-button"
-      type="button"
-      data-action="clear-done-watch"
-      data-row-ids="${escapeHtml(rowIds.join("\n"))}"
-      title="Remove from Done"
-      aria-label="Remove ${escapeHtml(subjectLabel)} from Done"
-    >
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/>
-      </svg>
-    </button>
-  `;
-}
-
-function renderTriageIcon(state: WatchTriageState): string {
-  if (state === "inbox") {
-    return `
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M2.25 3.25h11.5v9.5H2.25zM2.25 9h3l1.25 1.5h3L10.75 9h3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
-      </svg>
-    `;
-  }
-
-  if (state === "saved") {
-    return `
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M4 2.25h8v11.5L8 11.2l-4 2.55z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5"/>
-      </svg>
-    `;
-  }
-
-  return `
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path d="m3.25 8.25 3 3 6.5-6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
-    </svg>
-  `;
-}
-
-function renderPrStateIcon(
-  prState: NonNullable<WatchRowViewModel["prState"]>,
-  className = "pr-state-icon",
-): string {
-  const label = escapeHtml(prState.label);
-
-  return `
-    <span
-      class="${className} pr-state-icon pr-state-icon-${prState.tone}"
-      title="Pull request ${label}"
-      aria-label="Pull request ${label}"
-    >
-      ${getPrStateIconSvg(prState.tone)}
-    </span>
-  `;
-}
-
-function renderWatchSubjectIcon(
-  subject: Exclude<WatchRowViewModel["subject"], "pull-request">,
-  className = "watch-leading-icon",
-): string {
-  return `
-    <span
-      class="${className} watch-subject-icon watch-subject-icon-${subject}"
-      title="${subject === "job" ? "Workflow job" : "Workflow run"}"
-      aria-label="${subject === "job" ? "Workflow job" : "Workflow run"}"
-    >
-      ${getWatchSubjectIconSvg(subject)}
-    </span>
   `;
 }
 
@@ -3750,15 +2907,6 @@ function measurePopupContentHeight(): number {
       }, 0);
 
   return (header?.offsetHeight ?? 0) + (addForm?.offsetHeight ?? 0) + watchListContentHeight;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }
 
 async function fetchDemoOpenPullRequests(): Promise<OpenPullRequest[]> {
