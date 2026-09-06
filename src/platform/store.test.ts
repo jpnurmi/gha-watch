@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  loadWatches,
+  saveWatches,
   loadWatchSuppressions,
   loadWorkflowDiscoveryState,
   saveWatchSuppressions,
@@ -78,4 +80,30 @@ describe("watch suppression storage", () => {
       },
     });
   });
+
+  it("migrates legacy records without losing suppressions and keeps failed writes atomic", async () => {
+    const watch = {
+      id: "getsentry/sentry/run/123",
+      target: { kind: "run", owner: "getsentry", repo: "sentry", runId: "123",
+        url: "https://github.com/getsentry/sentry/actions/runs/123" },
+      label: "Build", status: "queued", active: true,
+    };
+    values.set("gha-watch:watches", JSON.stringify([null, watch]));
+    values.set("gha-watch:watch-suppressions", JSON.stringify([
+      { id: "getsentry/sentry/run/456", clearedAt: "2026-09-06T00:00:00Z" },
+    ]));
+    await saveWatches(loadWatches());
+    const persisted = values.get("gha-watch:state")!;
+    expect(JSON.parse(persisted).version).toBe(1);
+    expect(loadWatches()).toHaveLength(1);
+    expect(loadWatchSuppressions()).toHaveLength(1);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: () => { throw new Error("quota exceeded"); },
+    });
+    await expect(saveWatches([])).rejects.toThrow("quota exceeded");
+    expect(values.get("gha-watch:state")).toBe(persisted);
+    expect(loadWatches()).toHaveLength(1);
+  });
+
 });
