@@ -1,5 +1,5 @@
 import { createSettingsJournal } from "./platform/settingsJournal";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { invokeDesktop } from "./platform/desktop";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createAdaptivePollingCoordinator } from "./app/adaptivePolling";
@@ -3609,7 +3609,7 @@ async function hideMainWindow(): Promise<void> {
 
 async function openExternalUrl(url: string): Promise<void> {
   await hideMainWindow();
-  await openUrl(url);
+  await invokeDesktop("open_github_url", { url });
 }
 
 async function acknowledgePopupDismissal(): Promise<void> {

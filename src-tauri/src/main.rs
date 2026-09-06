@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod desktop;
 mod notifications;
 mod tray;
 mod window;
@@ -41,6 +42,7 @@ fn main() {
         .manage(tray::TrayIndicatorState::default())
         .invoke_handler(tauri::generate_handler![
             get_build_sha,
+            desktop::open_github_url,
             tray::set_tray_indicator,
             notifications::show_desktop_notification,
             notifications::clear_desktop_notifications

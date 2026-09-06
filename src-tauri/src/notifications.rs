@@ -1,3 +1,4 @@
+use crate::desktop::is_verified_github_url;
 use crate::window::show_main_window;
 #[cfg(target_os = "linux")]
 use notify_rust::{Notification as NativeNotification, Timeout, Urgency};
@@ -97,20 +98,6 @@ fn validate_desktop_notification(notification: &DesktopNotification) -> Result<(
     }
 
     Ok(())
-}
-
-fn is_verified_github_url(url: &str) -> bool {
-    let Some(path) = url.strip_prefix("https://github.com/") else {
-        return false;
-    };
-
-    !url.chars().any(char::is_whitespace)
-        && path
-            .split(['/', '?', '#'])
-            .filter(|part| !part.is_empty())
-            .take(2)
-            .count()
-            == 2
 }
 
 impl DesktopNotificationActionId {

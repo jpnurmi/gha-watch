@@ -8,7 +8,6 @@
     "core:window:allow-hide",
     "core:window:allow-set-size",
     "notification:default",
-    "opener:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",

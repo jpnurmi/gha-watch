@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeDesktop } from "./desktop";
 
 export function getBuildSha(): Promise<string> {
-  return invoke<string>("get_build_sha");
+  return invokeDesktop("get_build_sha");
 }
