@@ -12,7 +12,7 @@ import { renderDragGripIcon, renderWatchLeadingSlot, renderWatchTreeLeadingSlot 
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
 import { getRefreshHealth } from "./app/refreshHealth";
-import { createRefreshCoordinator } from "./app/refreshCoordinator";
+import { createApplicationSession } from "./app/applicationSession";
 import { createRepositoryIconProvider } from "./app/repositoryIcon";
 import {
   getRepoCiStatusAfterRefreshError,
@@ -200,7 +200,6 @@ let lastSuccessfulRefreshAt: Date | undefined;
 let lastRefreshFailed = false;
 let lastRefreshDegraded = false;
 let settings = loadSettings();
-let syncedStateRevision = 0;
 const settingsSync = createSettingsSync(createSettingsGistRemote(), createSettingsJournal());
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
@@ -350,7 +349,26 @@ const polling = createAdaptivePollingCoordinator({
   },
   setTimeout: window.setTimeout.bind(window),
 });
-const refreshCoordinator = createRefreshCoordinator<WatchTriageState>({
+const session = createApplicationSession<WatchTriageState>({
+  sync: settingsSync,
+  enabled: !isDemoMode,
+  getState: getLocalSyncedState,
+  async applySettings(nextSettings) {
+    settings = nextSettings;
+    await saveSettings(nextSettings);
+  },
+  applyWatches(state) {
+    controller.replaceSyncedWatches(state.watches, state.watchSuppressions);
+  },
+  onSynced() {
+    render();
+    for (const watchedRepo of settings.watchedRepos) {
+      void refreshWatchedRepoIcon(watchedRepo);
+    }
+    void controller.refreshRepositoryIcons();
+  },
+  reportError: (message, error) => console.warn(message, error),
+  poll,
   onRefreshingChanged(refreshing) {
     isPolling = refreshing;
     render();
@@ -359,11 +377,8 @@ const refreshCoordinator = createRefreshCoordinator<WatchTriageState>({
     polling.scheduleNext();
     render();
   },
-  async run(view) {
-    await syncSettingsFromGist();
-    await poll(view);
-  },
 });
+
 const updateCheck = createUpdateCheckCoordinator({
   clearTimeout: window.clearTimeout.bind(window),
   async fetchLatestSha() {
@@ -3662,17 +3677,7 @@ async function updateRateLimit(): Promise<boolean> {
 }
 
 async function updateAppSettings(nextSettings: typeof settings, syncRemote: boolean): Promise<void> {
-  settings = nextSettings;
-
-  if (syncRemote) {
-    syncedStateRevision += 1;
-  }
-
-  await saveSettings(nextSettings);
-
-  if (syncRemote && !isDemoMode) {
-    uploadSyncedState();
-  }
+  await session.updateSettings(nextSettings, syncRemote);
 }
 
 function getLocalSyncedState() {
@@ -3683,19 +3688,8 @@ function getLocalSyncedState() {
   };
 }
 
-function uploadSyncedState(): void {
-  if (isDemoMode) {
-    return;
-  }
-
-  void settingsSync.push(getLocalSyncedState()).catch((error) => {
-    console.warn("Could not upload synced state.", error);
-  });
-}
-
 function queueSyncedStateUpload(): void {
-  syncedStateRevision += 1;
-  uploadSyncedState();
+  session.changed();
 }
 
 function queueSyncedStateUploadForWatchIds(ids: string[]): void {
@@ -3709,48 +3703,8 @@ function queueSyncedStateUploadForWatchIds(ids: string[]): void {
   }
 }
 
-async function syncSettingsFromGist(): Promise<void> {
-  if (isDemoMode) {
-    return;
-  }
-
-  const revision = syncedStateRevision;
-  const localState = getLocalSyncedState();
-
-  try {
-    const syncedState = await settingsSync.sync(localState);
-
-    if (syncedStateRevision !== revision) {
-      return;
-    }
-
-    if (JSON.stringify(syncedState.settings) !== JSON.stringify(settings)) {
-      await updateAppSettings(syncedState.settings, false);
-
-      if (syncedStateRevision !== revision) {
-        return;
-      }
-    }
-
-    controller.replaceSyncedWatches(
-      syncedState.watches,
-      syncedState.watchSuppressions,
-    );
-    settingsSync.acknowledge(getLocalSyncedState());
-    render();
-
-    for (const watchedRepo of settings.watchedRepos) {
-      void refreshWatchedRepoIcon(watchedRepo);
-    }
-
-    void controller.refreshRepositoryIcons();
-  } catch (error) {
-    console.warn("Could not sync state.", error);
-  }
-}
-
 async function refreshSettingsAndStatuses(manualRefreshView?: WatchTriageState): Promise<void> {
-  await refreshCoordinator.refresh(manualRefreshView);
+  await session.refresh(manualRefreshView);
 }
 
 async function poll(manualRefreshView?: WatchTriageState): Promise<void> {
