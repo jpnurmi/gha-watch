@@ -4,6 +4,7 @@ export function createPersistenceQueue<T>(save: (value: T) => Promise<void>): {
 } {
   let pending: Promise<void> | undefined;
   let latest = Promise.resolve();
+  let revision = 0;
   let retry: (() => void) | undefined;
 
   async function persist(value: T): Promise<void> {
@@ -11,7 +12,10 @@ export function createPersistenceQueue<T>(save: (value: T) => Promise<void>): {
   }
 
   function write(value: T): void {
-    const result = pending ? pending.then(() => persist(value)) : persist(value);
+    const current = ++revision;
+    const result = pending
+      ? pending.then(() => current === revision ? persist(value) : undefined)
+      : persist(value);
     latest = result;
     retry = undefined;
     pending = result.then(
