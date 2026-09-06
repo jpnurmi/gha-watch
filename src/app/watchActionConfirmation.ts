@@ -1,4 +1,4 @@
-import type { RerunMode } from "../platform/gh";
+import type { RerunMode } from "./githubPort";
 
 export type WatchActionKind = "rerun";
 
