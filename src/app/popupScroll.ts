@@ -8,7 +8,8 @@ type PopupScrollPosition = {
   watchListTop?: number;
 };
 
-type AddInputState = {
+type InputState = {
+  draftKey?: string;
   focused: boolean;
   selectionDirection: "backward" | "forward" | "none" | null;
   selectionEnd: number | null;
@@ -18,12 +19,17 @@ type AddInputState = {
 
 export function replacePopupHtmlPreservingScroll(root: PopupRenderRoot, html: string): void {
   const scrollPosition = capturePopupScrollPosition(root);
-  const addInputState = captureAddInputState(root);
+  const inputStates = ['input[name="url"]', 'input[name="pattern"]'].map((selector) => ({
+    selector,
+    state: captureInputState(root, selector),
+  }));
 
   root.innerHTML = html;
 
   restorePopupScrollPosition(root, scrollPosition);
-  restoreAddInputState(root, addInputState);
+  for (const { selector, state } of inputStates) {
+    restoreInputState(root, selector, state);
+  }
 }
 
 function capturePopupScrollPosition(root: PopupRenderRoot): PopupScrollPosition {
@@ -54,14 +60,15 @@ function restorePopupScrollPosition(root: PopupRenderRoot, scrollPosition: Popup
   }
 }
 
-function captureAddInputState(root: PopupRenderRoot): AddInputState | undefined {
-  const input = root.querySelector<HTMLInputElement>('input[name="url"]');
+function captureInputState(root: PopupRenderRoot, selector: string): InputState | undefined {
+  const input = root.querySelector<HTMLInputElement>(selector);
 
   if (!input) {
     return undefined;
   }
 
   return {
+    draftKey: input.dataset.draftKey,
     focused: input.ownerDocument.activeElement === input,
     selectionDirection: input.selectionDirection,
     selectionEnd: input.selectionEnd,
@@ -70,14 +77,14 @@ function captureAddInputState(root: PopupRenderRoot): AddInputState | undefined 
   };
 }
 
-function restoreAddInputState(root: PopupRenderRoot, inputState: AddInputState | undefined): void {
+function restoreInputState(root: PopupRenderRoot, selector: string, inputState: InputState | undefined): void {
   if (!inputState) {
     return;
   }
 
-  const input = root.querySelector<HTMLInputElement>('input[name="url"]');
+  const input = root.querySelector<HTMLInputElement>(selector);
 
-  if (!input) {
+  if (!input || input.dataset.draftKey !== inputState.draftKey) {
     return;
   }
 
@@ -87,7 +94,7 @@ function restoreAddInputState(root: PopupRenderRoot, inputState: AddInputState |
     return;
   }
 
-  input.focus();
+  input.focus({ preventScroll: true });
 
   if (inputState.selectionStart !== null && inputState.selectionEnd !== null) {
     input.setSelectionRange(

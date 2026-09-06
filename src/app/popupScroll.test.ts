@@ -62,6 +62,8 @@ function createPopupRoot(
   initialScrollTop: number | undefined,
   initialInput?: FakeAddInputOptions,
   initialDiscoveryScrollTop?: number,
+  inputName = "url",
+  draftKey?: string,
 ): PopupRenderRoot & {
   addInputState: FakeAddInputState | undefined;
   discoveryListScrollTop: number | undefined;
@@ -72,7 +74,7 @@ function createPopupRoot(
     ? undefined
     : { scrollTop: initialDiscoveryScrollTop };
   const ownerDocument: { activeElement: unknown } = { activeElement: undefined };
-  let addInput = initialInput ? createAddInput(ownerDocument, initialInput) : undefined;
+  let addInput = initialInput ? createAddInput(ownerDocument, initialInput, draftKey) : undefined;
   let markup = "";
 
   if (initialInput?.focused) {
@@ -103,7 +105,9 @@ function createPopupRoot(
       discoveryList = value.includes('class="add-discovery-list"')
         ? { scrollTop: 0 }
         : undefined;
-      addInput = value.includes('name="url"') ? createAddInput(ownerDocument) : undefined;
+      addInput = value.includes(`name="${inputName}"`)
+        ? createAddInput(ownerDocument, undefined, value.match(/data-draft-key="([^"]*)"/)?.[1])
+        : undefined;
     },
     get innerHTML() {
       return markup;
@@ -118,7 +122,7 @@ function createPopupRoot(
         return discoveryList;
       }
 
-      if (selector === 'input[name="url"]') {
+      if (selector === `input[name="${inputName}"]`) {
         return addInput;
       }
 
@@ -134,9 +138,11 @@ function createPopupRoot(
 function createAddInput(
   ownerDocument: { activeElement: unknown },
   options?: FakeAddInputOptions,
+  draftKey?: string,
 ): HTMLInputElement {
   const input = {
     ownerDocument,
+    dataset: { draftKey },
     selectionDirection: "none",
     selectionEnd: options?.selectionEnd ?? 0,
     selectionStart: options?.selectionStart ?? 0,
@@ -157,3 +163,35 @@ function createAddInput(
 
   return input as unknown as HTMLInputElement;
 }
+
+
+describe("branch pattern drafts", () => {
+  const draft: FakeAddInputOptions = {
+    focused: true, selectionStart: 2, selectionEnd: 7, value: "release/*",
+  };
+
+  it("preserves the draft, focus, and selection during refresh", () => {
+    const root = createPopupRoot(undefined, draft, undefined, "pattern", "getsentry/sentry/include");
+
+    replacePopupHtmlPreservingScroll(root, '<input name="pattern" data-draft-key="getsentry/sentry/include" />');
+
+    expect(root.addInputState).toEqual({ ...draft, selectionDirection: "none" });
+  });
+
+  it.each(["getsentry/relay/include", "getsentry/sentry/exclude"])("starts a fresh draft for %s", (key) => {
+    const root = createPopupRoot(undefined, draft, undefined, "pattern", "getsentry/sentry/include");
+
+    replacePopupHtmlPreservingScroll(root, `<input name="pattern" data-draft-key="${key}" />`);
+
+    expect(root.addInputState?.value).toBe("");
+  });
+
+  it("does not restore a submitted or closed editor", () => {
+    const root = createPopupRoot(undefined, draft, undefined, "pattern", "getsentry/sentry/include");
+
+    replacePopupHtmlPreservingScroll(root, "<section>updated</section>");
+    replacePopupHtmlPreservingScroll(root, '<input name="pattern" data-draft-key="getsentry/sentry/include" />');
+
+    expect(root.addInputState?.value).toBe("");
+  });
+});
