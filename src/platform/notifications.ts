@@ -1,3 +1,5 @@
+import { NotificationPermissionDeniedError } from "../app/notificationPort";
+export { NotificationPermissionDeniedError } from "../app/notificationPort";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -22,14 +24,6 @@ export type DesktopNotificationDeps = {
 
 const notificationActionEvent = "desktop-notification-action";
 
-export class NotificationPermissionDeniedError extends Error {
-  readonly code = "notification-permission-denied";
-
-  constructor() {
-    super("Desktop notification permission was denied.");
-    this.name = "NotificationPermissionDeniedError";
-  }
-}
 
 const desktopNotificationDeps: DesktopNotificationDeps = {
   isPermissionGranted,

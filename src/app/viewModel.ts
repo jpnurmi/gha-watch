@@ -1,3 +1,5 @@
+import { isDoneCandidate, isDeemphasizedPullRequest, getWatchDisplayLabel, canRerun, canRerunFailed } from "../domain/watchPolicy";
+export { canRerun, canRerunFailed, isDeemphasizedPullRequest } from "../domain/watchPolicy";
 import type { WatchedRepo } from "../domain/watchedRepos";
 import {
   getWatchState,
@@ -153,7 +155,7 @@ export function createPopupViewModel(
   };
 }
 
-function createWatchRowViewModel(
+export function createWatchRowViewModel(
   watch: WatchRecord,
   now: Date,
   repoCiStatus?: RepoCiStatusViewModel,
@@ -253,51 +255,8 @@ function createRow(
   };
 }
 
-function isDoneCandidate(
-  watch: WatchRecord,
-  tone: RowTone,
-  repoCiStatus?: RepoCiStatusViewModel,
-): boolean {
-  if (isPullRequestWatch(watch)) {
-    return watch.sourceState === "merged" || watch.sourceState === "closed";
-  }
 
-  if (tone === "success") {
-    return true;
-  }
 
-  if (tone !== "cancelled" || watch.target.kind !== "run") {
-    return false;
-  }
-
-  const branchName = watch.metadata?.branchName?.trim();
-  const runCommitSha = watch.metadata?.commitSha?.trim();
-  const defaultBranch = repoCiStatus?.defaultBranch?.trim();
-  const defaultBranchCommitSha = repoCiStatus?.commitSha?.trim();
-
-  return Boolean(
-    branchName &&
-      runCommitSha &&
-      defaultBranch &&
-      defaultBranchCommitSha &&
-      branchName === defaultBranch &&
-      runCommitSha.toLowerCase() !== defaultBranchCommitSha.toLowerCase(),
-  );
-}
-
-export function isDeemphasizedPullRequest(watch: WatchRecord): boolean {
-  if (!isPullRequestWatch(watch)) {
-    return false;
-  }
-
-  const title = watch.metadata?.prTitle?.trim() ||
-    (watch.target.kind === "pr" ? getWatchDisplayLabel(watch) : "");
-  return watch.sourceState === "draft" || /\bWIP\b/i.test(title);
-}
-
-function isPullRequestWatch(watch: WatchRecord): boolean {
-  return watch.target.kind === "pr" || Boolean(watch.target.prNumber || watch.source || watch.sourceState);
-}
 
 function getWatchReference(watch: WatchRecord): string | undefined {
   if (watch.target.kind === "run") {
@@ -321,13 +280,6 @@ function getRunPullRequestReference(watch: WatchRecord): string | undefined {
     : undefined;
 }
 
-function getWatchDisplayLabel(watch: WatchRecord): string {
-  if (watch.target.kind !== "pr") {
-    return watch.label;
-  }
-
-  return watch.metadata?.prTitle?.trim() || watch.label;
-}
 
 function getBranchName(watch: WatchRecord): string | undefined {
   return watch.metadata?.branchName?.trim() || undefined;
@@ -363,22 +315,7 @@ function getPullRequestStateLabel(sourceState: PrSourceState): string {
   return labels[sourceState];
 }
 
-export function canRerun(watch: WatchRecord): boolean {
-  const state = getWatchState(watch);
 
-  return state?.status === "completed" &&
-    state.conclusion !== "success" &&
-    state.conclusion !== "skipped";
-}
-
-export function canRerunFailed(watch: WatchRecord): boolean {
-  const state = getWatchState(watch);
-
-  return state?.status === "completed" &&
-    state.conclusion !== "success" &&
-    state.conclusion !== "cancelled" &&
-    state.conclusion !== "skipped";
-}
 
 function groupRowsByRepo(
   watches: WatchRecord[],

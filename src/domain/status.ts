@@ -47,10 +47,6 @@ export function getStatusTransition(
   };
 }
 
-export function isTerminalStatus(state: WatchState): boolean {
-  return state.status === "completed" && state.conclusion === "success";
-}
-
 function isInterestingNotificationState(state: WatchState): boolean {
   if (state.status !== "completed") {
     return false;
@@ -61,4 +57,8 @@ function isInterestingNotificationState(state: WatchState): boolean {
 
 function isFailureConclusion(conclusion: string | null): boolean {
   return Boolean(conclusion && conclusion !== "cancelled" && conclusion !== "skipped");
+}
+
+export function shouldPollWatch(state: WatchState): boolean {
+  return state.status !== "completed" || state.conclusion !== "success";
 }

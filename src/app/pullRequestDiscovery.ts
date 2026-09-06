@@ -1,5 +1,5 @@
 import type { WatchedRepo } from "../domain/watchedRepos";
-import type { AuthoredOpenPullRequest } from "../platform/gh";
+import type { AuthoredOpenPullRequest } from "./githubPort";
 
 export function getUnwatchedPullRequests(
   pullRequests: AuthoredOpenPullRequest[],
