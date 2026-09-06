@@ -133,4 +133,3 @@ function renderTriageIcon(state: WatchTriageState): string {
     </svg>
   `;
 }
-
