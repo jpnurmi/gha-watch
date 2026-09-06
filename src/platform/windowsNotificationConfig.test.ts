@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import rustSource from "../../src-tauri/src/main.rs?raw";
+import mainSource from "../../src-tauri/src/main.rs?raw";
+import rustSource from "../../src-tauri/src/notifications.rs?raw";
 
 describe("Windows notification configuration", () => {
   it("uses WinRT activation callbacks and buttons", () => {
@@ -18,6 +19,6 @@ describe("Windows notification configuration", () => {
     expect(rustSource).toContain("toast.SetGroup(&HSTRING::from(WINDOWS_NOTIFICATION_GROUP))");
     expect(rustSource).toContain("history.RemoveGroupWithId(");
     expect(rustSource).not.toContain("history.ClearWithId(");
-    expect(rustSource).toMatch(/generate_handler!\[[\s\S]*?\bclear_desktop_notifications\b/);
+    expect(mainSource).toMatch(/generate_handler!\[[\s\S]*?\bclear_desktop_notifications\b/);
   });
 });
