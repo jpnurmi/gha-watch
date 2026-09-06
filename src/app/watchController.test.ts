@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   branchPatternWildcardLimit,
   createWatchController,
@@ -4270,5 +4270,140 @@ describe("discovery persistence", () => {
     release();
     await expect(sync).resolves.toMatchObject({ status: "successful" });
     expect(discoverySaves).toHaveLength(1);
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((accept, fail) => { resolve = accept; reject = fail; });
+  return { promise, resolve, reject };
+}
+
+describe("overlapping watch reads", () => {
+  const running: WatchRecord = {
+    ...existingWatch(), status: "in_progress", lastState: { status: "in_progress", conclusion: null }, active: true,
+  };
+  const completed: WatchSnapshot = {
+    status: "completed", conclusion: "failure", title: "CI: Complete", url: runTarget.url,
+  };
+
+  it.each([true, false])("notifies once when the newer poll finishes first: %s", async (newerFirst) => {
+    const { deps, notificationRecords } = createDeps([]);
+    const requests: ReturnType<typeof deferred<WatchSnapshot>>[] = [];
+    deps.fetchState = () => {
+      const request = deferred<WatchSnapshot>();
+      requests.push(request);
+      return request.promise;
+    };
+    const controller = createWatchController(deps, [running]);
+    const older = controller.pollNow();
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    const newer = controller.pollNow({ watchIds: [running.id] });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+
+    requests[newerFirst ? 1 : 0].resolve(completed);
+    await (newerFirst ? newer : older);
+    requests[newerFirst ? 0 : 1].resolve(completed);
+    await Promise.all([older, newer]);
+
+    expect(notificationRecords).toHaveLength(1);
+    expect(controller.getWatches()[0].status).toBe("completed:failure");
+  });
+
+  it.each([false, true])("preserves rerun state after an old request fails: %s", async (fails) => {
+    const { deps, notificationRecords } = createDeps([]);
+    const request = deferred<WatchSnapshot>();
+    deps.fetchState = vi.fn(() => request.promise);
+    const controller = createWatchController(deps, [running]);
+    const poll = controller.pollNow({ watchIds: [running.id] });
+    await vi.waitFor(() => expect(deps.fetchState).toHaveBeenCalledTimes(1));
+
+    await controller.rerun(running.id, "all");
+    if (fails) {
+      request.reject(new Error("old failure"));
+    } else {
+      request.resolve(completed);
+    }
+    await poll;
+
+    expect(controller.getWatches()[0]).toMatchObject({ status: "queued", error: undefined });
+    expect(notificationRecords).toEqual([]);
+  });
+
+  it("ignores an old poll after a watch is marked Done", async () => {
+    const { deps, notificationRecords } = createDeps([]);
+    const request = deferred<WatchSnapshot>();
+    deps.fetchState = vi.fn(() => request.promise);
+    const controller = createWatchController(deps, [running]);
+    const poll = controller.pollNow({ watchIds: [running.id] });
+    await vi.waitFor(() => expect(deps.fetchState).toHaveBeenCalledTimes(1));
+
+    controller.setTriageState([running.id], "done");
+    request.resolve(completed);
+    await poll;
+
+    expect(controller.getWatches()[0]).toMatchObject({ status: "in_progress", triageState: "done" });
+    expect(notificationRecords).toEqual([]);
+  });
+
+  it("does not let metadata hydration overwrite a rerun", async () => {
+    const { deps } = createDeps([]);
+    const request = deferred<WatchSnapshot>();
+    deps.fetchState = vi.fn(() => request.promise);
+    const initial = existingWatch();
+    const controller = createWatchController(deps, [initial]);
+    const refresh = controller.refreshWatchMetadata();
+    await vi.waitFor(() => expect(deps.fetchState).toHaveBeenCalledTimes(1));
+
+    await controller.rerun(initial.id, "all");
+    request.resolve(completed);
+    await refresh;
+
+    expect(controller.getWatches()[0].status).toBe("queued");
+  });
+
+  it("drops a queued alert if a rerun starts while PR metadata is loading", async () => {
+    const { deps, notificationRecords } = createDeps([completed]);
+    const details = deferred<Array<undefined>>();
+    deps.fetchPullRequestDetails = vi.fn(() => details.promise);
+    const initial: WatchRecord = { ...running, id: getWatchId(prTarget), target: prTarget };
+    const controller = createWatchController(deps, [initial]);
+    const poll = controller.pollNow({ watchIds: [initial.id] });
+    await vi.waitFor(() => expect(deps.fetchPullRequestDetails).toHaveBeenCalledTimes(1));
+
+    await controller.rerun(initial.id, "all");
+    details.resolve([]);
+    await poll;
+
+    expect(notificationRecords).toEqual([]);
+    expect(controller.getWatches()[0].status).toBe("queued");
+  });
+});
+
+describe("queued poll snapshots", () => {
+  it("rejects a prefetched completion when a rerun starts during metadata hydration", async () => {
+    const { deps, notificationRecords } = createDeps([]);
+    const metadata = deferred<WatchSnapshot>();
+    deps.fetchState = vi.fn(() => metadata.promise);
+    const running: WatchRecord = { ...existingWatch(), active: true, status: "in_progress", lastState: {
+      status: "in_progress", conclusion: null,
+    } };
+    const inactive: WatchRecord = {
+      ...existingWatch(), id: "getsentry/sentry/run/999", target: { ...runTarget, kind: "run", runId: "999" },
+    };
+    const completed: WatchSnapshot = {
+      status: "completed", conclusion: "failure", title: "CI: Complete", url: runTarget.url,
+    };
+    const controller = createWatchController(deps, [running, inactive]);
+    const poll = controller.pollNow({ prefetchedWatchSnapshots: new Map([[running.id, completed]]) });
+    await vi.waitFor(() => expect(deps.fetchState).toHaveBeenCalledTimes(1));
+
+    await controller.rerun(running.id, "all");
+    metadata.resolve(completed);
+    await poll;
+
+    expect(controller.getWatches().find((watch) => watch.id === running.id)?.status).toBe("queued");
+    expect(notificationRecords).toEqual([]);
   });
 });
