@@ -1,3 +1,4 @@
+import { decodeWatchRecords } from "../domain/watchRecords";
 import { defaultAppSettings, normalizeAppSettings, type AppSettings } from "../domain/settings";
 import {
   normalizeWatchSuppressions,
@@ -24,7 +25,7 @@ export function loadWatches(): WatchRecord[] {
 
   try {
     const parsed = JSON.parse(rawWatches);
-    return Array.isArray(parsed) ? (parsed as WatchRecord[]) : [];
+    return decodeWatchRecords(parsed);
   } catch {
     return [];
   }
