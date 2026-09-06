@@ -1,3 +1,7 @@
+import { createTauriShellExecutor, type ShellExecutor } from "./shell";
+export { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "./shell";
+import { requiredString, parseJson, assertSuccessfulGhResult, normalizeGhError } from "./ghProtocol";
+import { fetchConditionalApiJson } from "./conditionalApi";
 import type { WatchState } from "../domain/status";
 import type { RerunMode, WatchSnapshot, WatchStateFetchOptions, OpenPullRequest, OpenPullRequestCheckOptions, AuthoredOpenPullRequest, PullRequestDetails, PullRequestDetailsBatch, ActiveWorkflowRun, WorkflowRunSummary, WorkflowRunPullRequest, RepositoryCiStatusTone, RepositoryCiStatus, RepositoryCiStatusOptions, RepositoryCiWorkflowStatus, WorkflowDefinition } from "../app/githubPort";
 export type { RerunMode, WatchSnapshot, WatchStateFetchOptions, OpenPullRequest, OpenPullRequestCheckOptions, AuthoredOpenPullRequest, PullRequestDetails, PullRequestDetailsBatch, ActiveWorkflowRun, WorkflowRunSummary, WorkflowRunPullRequest, RepositoryCiStatusTone, RepositoryCiStatus, RepositoryCiStatusOptions, RepositoryCiWorkflowStatus, WorkflowDefinition } from "../app/githubPort";
@@ -8,24 +12,7 @@ import type {
 } from "../domain/githubUrl";
 import type { PrSourceState, WatchMetadata, WatchTiming } from "../domain/watches";
 
-export type ShellResult = {
-  code: number;
-  stdout: string;
-  stderr: string;
-};
 
-export type ShellExecutor = {
-  execute(program: string, args: string[]): Promise<ShellResult>;
-};
-
-type ConditionalApiCacheEntry = {
-  body: string;
-  etag: string;
-};
-
-const conditionalApiCaches = new WeakMap<ShellExecutor, Map<string, ConditionalApiCacheEntry>>();
-const conditionalApiCacheLimit = 1_000;
-let sharedTauriShellExecutor: ShellExecutor | undefined;
 
 
 
@@ -1305,51 +1292,6 @@ function getActionsRunId(
   }
 }
 
-export function createTauriShellExecutor(): ShellExecutor {
-  if (sharedTauriShellExecutor) {
-    return sharedTauriShellExecutor;
-  }
-
-  sharedTauriShellExecutor = {
-    async execute(program, args) {
-      const { Command } = await import("@tauri-apps/plugin-shell");
-      const commands =
-        program === "gh"
-          ? [
-              "gh",
-              "gh-homebrew",
-              "gh-usrlocal",
-              "gh-usrbin",
-              "gh-windows-program-files",
-              "gh-windows-chocolatey",
-            ]
-          : [program];
-      let lastError: unknown;
-
-      for (const command of commands) {
-        try {
-          const output = await Command.create(command, args).execute();
-
-          return {
-            code: output.code ?? 1,
-            stdout: output.stdout,
-            stderr: output.stderr,
-          };
-        } catch (error) {
-          lastError = error;
-
-          if (!isMissingProgramError(error)) {
-            throw error;
-          }
-        }
-      }
-
-      throw lastError;
-    },
-  };
-
-  return sharedTauriShellExecutor;
-}
 
 async function fetchRunFailedChildren(
   target: Extract<WatchTarget, { kind: "run" }>,
@@ -1655,156 +1597,4 @@ function normalizeConclusion(conclusion: string | null | undefined): string | nu
 
 function isFailureConclusion(conclusion: string | null | undefined): boolean {
   return Boolean(conclusion && conclusion !== "success" && conclusion !== "cancelled" && conclusion !== "skipped");
-}
-
-function requiredString(value: string | undefined, label: string): string {
-  if (!value) {
-    throw new Error(`gh returned a response without ${label}.`);
-  }
-
-  return value;
-}
-
-function parseJson<T>(stdout: string): T {
-  try {
-    return JSON.parse(stdout) as T;
-  } catch {
-    throw new Error("gh returned invalid JSON.");
-  }
-}
-
-async function fetchConditionalApiJson<T>(
-  executor: ShellExecutor,
-  args: string[],
-  force = false,
-): Promise<T> {
-  let cache = conditionalApiCaches.get(executor);
-
-  if (!cache) {
-    cache = new Map();
-    conditionalApiCaches.set(executor, cache);
-  }
-
-  const key = JSON.stringify(args);
-  const cached = force ? undefined : cache.get(key);
-
-  if (cached) {
-    cache.delete(key);
-    cache.set(key, cached);
-  }
-
-  const result = await executor.execute("gh", [
-    "api",
-    "--include",
-    ...(cached ? ["-H", `If-None-Match: ${cached.etag}`] : []),
-    ...args,
-  ]);
-  const response = parseIncludedGhResponse(result.stdout);
-
-  if (response?.status === 304) {
-    if (!cached) {
-      throw new Error("gh returned 304 Not Modified without a cached response.");
-    }
-
-    return parseJson<T>(cached.body);
-  }
-
-  assertSuccessfulGhResult(result);
-
-  if (!response) {
-    return parseJson<T>(result.stdout);
-  }
-
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`GitHub returned HTTP ${response.status}.`);
-  }
-
-  if (response.etag) {
-    if (!cache.has(key) && cache.size >= conditionalApiCacheLimit) {
-      const oldestKey = cache.keys().next().value;
-
-      if (oldestKey !== undefined) {
-        cache.delete(oldestKey);
-      }
-    }
-
-    cache.set(key, { body: response.body, etag: response.etag });
-  } else {
-    cache.delete(key);
-  }
-
-  return parseJson<T>(response.body);
-}
-
-function parseIncludedGhResponse(stdout: string): {
-  body: string;
-  etag?: string;
-  status: number;
-} | undefined {
-  const statusMatch = stdout.match(/^HTTP\/\S+\s+(\d{3})\b/);
-
-  if (!statusMatch) {
-    return undefined;
-  }
-
-  const crlfEnd = stdout.indexOf("\r\n\r\n");
-  const lfEnd = stdout.indexOf("\n\n");
-  const headerEnd = crlfEnd >= 0 ? crlfEnd : lfEnd;
-
-  if (headerEnd < 0) {
-    throw new Error("gh returned HTTP headers without a response separator.");
-  }
-
-  const separatorLength = crlfEnd >= 0 ? 4 : 2;
-  const headers = stdout.slice(0, headerEnd);
-  const etag = headers.match(/^etag:\s*(.+)\r?$/im)?.[1]?.trim();
-
-  return {
-    body: stdout.slice(headerEnd + separatorLength),
-    ...(etag ? { etag } : {}),
-    status: Number(statusMatch[1]),
-  };
-}
-
-function assertSuccessfulGhResult(result: ShellResult, additionalSuccessCodes: number[] = []): void {
-  if (result.code === 0 || additionalSuccessCodes.includes(result.code)) {
-    return;
-  }
-
-  throw new Error(result.stderr || result.stdout || `gh exited with status ${result.code}.`);
-}
-
-function normalizeGhError(error: unknown): Error {
-  const message = error instanceof Error ? error.message : String(error);
-  const lowerMessage = message.toLowerCase();
-
-  if (
-    lowerMessage.includes("program not found") ||
-    lowerMessage.includes("no such file") ||
-    lowerMessage.includes("enoent")
-  ) {
-    return new Error("gh CLI was not found. Install GitHub CLI and try again.");
-  }
-
-  if (
-    lowerMessage.includes("gh auth login") ||
-    lowerMessage.includes("authentication") ||
-    lowerMessage.includes("not authenticated") ||
-    lowerMessage.includes("bad credentials")
-  ) {
-    return new Error("gh is not authenticated. Run `gh auth login` and try again.");
-  }
-
-  return error instanceof Error ? error : new Error(message);
-}
-
-function isMissingProgramError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  const lowerMessage = message.toLowerCase();
-  return (
-    lowerMessage.includes("program not found") ||
-    lowerMessage.includes("not found") ||
-    lowerMessage.includes("no such file") ||
-    lowerMessage.includes("enoent")
-  );
 }

@@ -5,7 +5,7 @@ import {
   type WatchSuppression,
 } from "../domain/watchSuppressions";
 import { getWatchTriageState, type WatchRecord } from "../domain/watches";
-import { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "./gh";
+import { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "./shell";
 
 const gistDescription = "GHA Watch synced settings";
 const gistFilename = "gha-watch-settings.json";
@@ -51,8 +51,15 @@ export function createSettingsGistRemote(
 ): SettingsRemote {
   let gistId: string | undefined;
   let discoveryComplete = false;
+  let account: string | undefined;
 
   async function discoverGistId(): Promise<string | undefined> {
+    const current = await executor.getAccount?.();
+    if (current !== account) {
+      account = current;
+      gistId = undefined;
+      discoveryComplete = false;
+    }
     if (discoveryComplete) {
       return gistId;
     }
