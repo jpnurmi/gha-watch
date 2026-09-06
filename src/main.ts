@@ -827,14 +827,14 @@ function formatDiscoveredPullRequestDate(value: string | undefined): string | un
 
 function renderWatchGroup(group: WatchGroupViewModel): string {
   const actions = getRepoHeaderActions({
-    userCollapsed: collapsedGroups.has(group.repoLabel),
+    userCollapsed: collapsedGroups.has(getWatchedRepoKey(group)),
   });
   const isCollapsed = actions.isCollapsed;
 
   return `
     <li
       class="watch-group${isCollapsed ? " is-collapsed" : ""}"
-      data-repo="${escapeHtml(group.repoLabel)}"
+      data-repo="${escapeHtml(getWatchedRepoKey(group))}"
     >
       <div class="watch-group-header">
         ${renderRepoGroupChevron(group, isCollapsed)}
@@ -967,7 +967,7 @@ function renderRepoGroupChevron(
       class="watch-tree-chevron watch-group-toggle-chevron"
       type="button"
       data-action="toggle-group"
-      data-repo="${escapeHtml(group.repoLabel)}"
+      data-repo="${escapeHtml(getWatchedRepoKey(group))}"
       title="${isCollapsed ? "Expand" : "Collapse"}"
       aria-label="${isCollapsed ? "Expand" : "Collapse"} ${escapeHtml(group.repoLabel)}"
       aria-expanded="${isCollapsed ? "false" : "true"}"
