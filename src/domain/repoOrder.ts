@@ -24,7 +24,7 @@ export function normalizeRepoOrder(value: unknown): string[] {
   const seen = new Set<string>();
 
   for (const item of value) {
-    const key = typeof item === "string" ? item.trim() : "";
+    const key = typeof item === "string" ? item.trim().toLowerCase() : "";
 
     if (!repoOrderKeyPattern.test(key) || seen.has(key)) {
       continue;
