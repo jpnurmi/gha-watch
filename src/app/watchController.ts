@@ -28,7 +28,6 @@ import {
   getWatchTriageState,
   markAllWatchesSeen,
   markWatchSeen,
-  hasUnseenStatusChange,
   moveWatchGroupWithinRepo,
   moveWatchWithinRepo,
   normalizeWatchDoneAt,

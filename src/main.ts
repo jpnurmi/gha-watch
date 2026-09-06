@@ -1977,11 +1977,6 @@ function renderTriageIcon(state: WatchTriageState): string {
   `;
 }
 
-function renderStatusIcon(row: WatchRowViewModel, className = "status-icon"): string {
-  const icon = getStatusIconSvg(row.tone, row.id);
-  return `<span class="${className} status-icon status-icon-${row.tone}" aria-hidden="true">${icon}</span>`;
-}
-
 function renderPrStateIcon(
   prState: NonNullable<WatchRowViewModel["prState"]>,
   className = "pr-state-icon",
