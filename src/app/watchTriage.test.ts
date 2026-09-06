@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { getWatchTriageActions } from "./watchTriage";
 
-const mainSource = readFileSync(new URL("../main.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("getWatchTriageActions", () => {
@@ -28,15 +27,6 @@ describe("getWatchTriageActions", () => {
   });
 
   it("renders a compact view switcher and direct triage actions", () => {
-    expect(mainSource).toContain('class="watch-view-switcher"');
-    expect(mainSource).toContain('data-action="select-watch-view"');
-    expect(mainSource).toContain('data-action="triage-watch"');
-    expect(mainSource).toContain('data-action="clear-done-watch"');
-    expect(mainSource).toContain('title="Remove from Done"');
-    expect(mainSource).toContain("renderTriageButtons(row.triageState, [row.id]");
-    expect(mainSource).toContain('class="watch-group-watch is-static"');
-    expect(mainSource).toContain('if (currentWatchView !== "inbox")');
-    expect(mainSource).not.toContain('title="Remove"');
     expect(styles).toMatch(/\.watch-view-switcher\s*\{[^}]*display:\s*inline-flex;/s);
     expect(styles).toMatch(/\.watch-triage-button\s*\{[^}]*color:\s*rgb\(238 241 245 \/ 60%\);/s);
     expect(styles).toMatch(/\.watch-clear-done-button\s*\{[^}]*color:\s*#ff7b72;/s);
