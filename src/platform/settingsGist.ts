@@ -52,16 +52,23 @@ export function createSettingsGistRemote(
   let gistId: string | undefined;
   let discoveryComplete = false;
   let account: string | undefined;
+  let generation = 0;
 
-  async function discoverGistId(): Promise<string | undefined> {
+  async function refreshAccount(): Promise<void> {
     const current = await executor.getAccount?.();
     if (current !== account) {
       account = current;
       gistId = undefined;
       discoveryComplete = false;
+      generation++;
     }
+  }
+
+  async function discoverGistId(): Promise<{ id: string | undefined; generation: number }> {
+    await refreshAccount();
+    const started = generation;
     if (discoveryComplete) {
-      return gistId;
+      return { id: gistId, generation: started };
     }
 
     const result = await executor.execute("gh", [
@@ -70,6 +77,8 @@ export function createSettingsGistRemote(
       "--slurp",
       "/gists?per_page=100",
     ]);
+    await refreshAccount();
+    if (generation !== started) return discoverGistId();
     assertSuccessfulResult(result);
 
     const pages = parseJson<unknown>(result.stdout);
@@ -83,12 +92,16 @@ export function createSettingsGistRemote(
 
     gistId = gists[0]?.id;
     discoveryComplete = true;
-    return gistId;
+    return { id: gistId, generation: started };
   }
 
   return {
     async load() {
-      const id = await discoverGistId();
+      let discovery = await discoverGistId();
+      while (discovery.generation !== generation) {
+        discovery = await discoverGistId();
+      }
+      const { id } = discovery;
 
       if (!id) {
         return undefined;
@@ -101,7 +114,11 @@ export function createSettingsGistRemote(
 
     async save(state) {
       const content = serializeSettingsDocument(state);
-      const id = await discoverGistId();
+      let discovery = await discoverGistId();
+      while (discovery.generation !== generation) {
+        discovery = await discoverGistId();
+      }
+      const { id } = discovery;
 
       if (id) {
         const result = await executor.execute("gh", [
@@ -129,7 +146,9 @@ export function createSettingsGistRemote(
         `files[${gistFilename}][content]=${content}`,
       ]);
       assertSuccessfulResult(result);
-      gistId = requiredString(parseJson<GistResponse>(result.stdout).id, "created Gist id");
+      const created = requiredString(parseJson<GistResponse>(result.stdout).id, "created Gist id");
+      await refreshAccount();
+      if (discovery.generation === generation) gistId = created;
     },
   };
 }
