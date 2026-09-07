@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSettingsSync } from "./settingsSync";
 import { createSettingsJournal } from "../platform/settingsJournal";
-import type { SyncedState } from "../platform/settingsGist";
+import { serializeSettingsDocument, type SyncedState } from "../platform/settingsGist";
 
 const baseline: SyncedState = { settings: { watchedRepos: [], repoOrder: [], dismissedPullRequests: [] }, watches: [] };
 const edited: SyncedState = { ...baseline, settings: { ...baseline.settings,
@@ -36,5 +36,35 @@ describe("durable sync retries", () => {
     await expect(sync.push(edited)).rejects.toThrow("storage full");
     expect(remote.load).not.toHaveBeenCalled();
     expect(remote.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { baseline: null },
+    { baseline: {} },
+    { baseline: [] },
+    { baseline: 0 },
+    { baseline: false },
+  ])("rejects a non-string baseline: $baseline", ({ baseline }) => {
+    vi.stubGlobal("localStorage", { getItem: () => JSON.stringify({
+      version: 1, pending: serializeSettingsDocument(edited), baseline,
+    }) });
+
+    expect(() => createSettingsJournal().load()).toThrow("Unsupported pending sync document.");
+  });
+
+  it("loads pending edits without a baseline", () => {
+    vi.stubGlobal("localStorage", { getItem: () => JSON.stringify({
+      version: 1, pending: serializeSettingsDocument(edited),
+    }) });
+
+    expect(createSettingsJournal().load()).toEqual({ pending: { ...edited, watchSuppressions: [] } });
+  });
+
+  it("rejects a malformed string baseline", () => {
+    vi.stubGlobal("localStorage", { getItem: () => JSON.stringify({
+      version: 1, pending: serializeSettingsDocument(edited), baseline: "{}",
+    }) });
+
+    expect(() => createSettingsJournal().load()).toThrow("unsupported format");
   });
 });

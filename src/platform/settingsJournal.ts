@@ -10,7 +10,11 @@ export function createSettingsJournal(): SettingsSyncJournal {
       if (!raw) return undefined;
       const document = JSON.parse(raw);
       if (document === null) return undefined;
-      if (document.version !== 1 || typeof document.pending !== "string") {
+      if (
+        document.version !== 1 ||
+        typeof document.pending !== "string" ||
+        (Object.hasOwn(document, "baseline") && typeof document.baseline !== "string")
+      ) {
         throw new Error("Unsupported pending sync document.");
       }
       return {
