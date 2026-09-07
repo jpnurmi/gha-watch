@@ -244,4 +244,105 @@ describe("settings Gist", () => {
       { ...savedWatch, target: { kind: "run" } },
     ])).toEqual([savedWatch]);
   });
+
+  it.each([
+    { operation: "load", overlap: false },
+    { operation: "save", overlap: false },
+    { operation: "load", overlap: true },
+    { operation: "save", overlap: true },
+  ])("retries $operation after an account switch (overlapping discovery: $overlap)", async ({ operation, overlap }) => {
+    let account = "first";
+    let release!: (result: ShellResult) => void;
+    let started!: () => void;
+    const pending = new Promise<ShellResult>((resolve) => { release = resolve; });
+    const discovering = new Promise<void>((resolve) => { started = resolve; });
+    const requests: Array<{ method: string; id: string }> = [];
+    const remote = createSettingsGistRemote({
+      getAccount: async () => account,
+      async execute(_program, args) {
+        if (args.includes("/gists?per_page=100")) {
+          if (account === "first") {
+            started();
+            return pending;
+          }
+          return gistList(account);
+        }
+        const path = args.find((arg) => arg.startsWith("/gists/"))!;
+        const id = path.slice("/gists/".length);
+        requests.push({ method: args.includes("PATCH") ? "PATCH" : "GET", id });
+        return gistResult(id);
+      },
+    });
+
+    const first = operation === "load" ? remote.load() : remote.save(state);
+    await discovering;
+    account = "second";
+    if (overlap) await remote.load();
+    release(gistList("first"));
+    await first;
+    await remote.load();
+
+    expect(requests).toEqual([
+      ...(overlap ? [{ method: "GET", id: "second" }] : []),
+      { method: operation === "load" ? "GET" : "PATCH", id: "second" },
+      { method: "GET", id: "second" },
+    ]);
+  });
+
+  it("does not cache a created Gist under a different account", async () => {
+    let account = "first";
+    let release!: (result: ShellResult) => void;
+    let started!: () => void;
+    const pending = new Promise<ShellResult>((resolve) => { release = resolve; });
+    const creating = new Promise<void>((resolve) => { started = resolve; });
+    const requests: string[] = [];
+    const remote = createSettingsGistRemote({
+      getAccount: async () => account,
+      async execute(_program, args) {
+        if (args.includes("/gists?per_page=100")) {
+          return account === "first" ? { code: 0, stdout: "[[]]", stderr: "" } : gistList(account);
+        }
+        if (args.includes("POST")) {
+          started();
+          return pending;
+        }
+        const path = args.find((arg) => arg.startsWith("/gists/"))!;
+        requests.push(path);
+        return gistResult(path.slice("/gists/".length));
+      },
+    });
+
+    const saving = remote.save(state);
+    await creating;
+    account = "second";
+    await remote.load();
+    release(gistResult("created"));
+    await saving;
+    await remote.load();
+
+    expect(requests).toEqual(["/gists/second", "/gists/second"]);
+  });
 });
+
+function gistList(id: string): ShellResult {
+  return {
+    code: 0,
+    stdout: JSON.stringify([[{
+      id,
+      description: "GHA Watch synced settings",
+      files: { "gha-watch-settings.json": {} },
+    }]]),
+    stderr: "",
+  };
+}
+
+function gistResult(id: string): ShellResult {
+  return {
+    code: 0,
+    stdout: JSON.stringify({
+      id,
+      files: { "gha-watch-settings.json": { content: serializeSettingsDocument(state) } },
+    }),
+    stderr: "",
+  };
+}
