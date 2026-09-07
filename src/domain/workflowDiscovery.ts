@@ -1,3 +1,4 @@
+import { getRepositoryKey } from "./identity";
 import {
   getWatchedWorkflowTargets,
   type WatchedRepo,
@@ -28,7 +29,7 @@ export const emptyWorkflowDiscoveryState: WorkflowDiscoveryState = {
 export function getWorkflowDiscoveryRepositoryKey(
   repo: Pick<WatchedRepo, "owner" | "repo">,
 ): string {
-  return `${repo.owner}/${repo.repo}`.toLowerCase();
+  return getRepositoryKey(repo);
 }
 
 export function getWorkflowDiscoverySubscriptionFingerprint(repo: WatchedRepo): string {

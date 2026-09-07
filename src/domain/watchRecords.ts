@@ -1,3 +1,4 @@
+import { canonicalWatchId } from "./identity";
 import type { WatchTarget } from "./githubUrl";
 import { getWatchId, type WatchRecord } from "./watches";
 
@@ -20,7 +21,7 @@ function decodeWatchRecord(value: unknown): WatchRecord | undefined {
     return undefined;
   }
   const target = decodeTarget(value.target);
-  if (!target || value.id !== getWatchId(target) || typeof value.label !== "string"
+  if (!target || typeof value.id !== "string" || canonicalWatchId(value.id) !== getWatchId(target) || typeof value.label !== "string"
     || typeof value.status !== "string" || typeof value.active !== "boolean") {
     return undefined;
   }
@@ -50,7 +51,8 @@ function decodeWatchRecord(value: unknown): WatchRecord | undefined {
   if (sourceRun?.kind === "run") watch.sourceRun = sourceRun;
   for (const key of ["ignoredTargetIds", "ignoredWorkflowNames"] as const) {
     if (Array.isArray(value[key])) {
-      watch[key] = value[key].filter((item): item is string => typeof item === "string");
+      watch[key] = value[key].filter((item): item is string => typeof item === "string")
+        .map((item) => key === "ignoredTargetIds" ? canonicalWatchId(item) : item);
     }
   }
   if (isRecord(value.lastState) && typeof value.lastState.status === "string"

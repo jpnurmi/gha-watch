@@ -211,4 +211,35 @@ describe("watched repository operations", () => {
       workflowTargets: [{ kind: "default", workflowNames: ["CI"] }],
     }]);
   });
+
+  it.each([undefined, "", "https://avatars.githubusercontent.com/u/123?v=4"])(
+    "keeps the first non-empty icon when merging duplicates with initial icon %j",
+    (repoIconUrl) => {
+      const fallbackIconUrl = "https://avatars.githubusercontent.com/u/1396951?v=4";
+
+      expect(normalizeWatchedRepos([
+        {
+          owner: "GetSentry",
+          repo: "Sentry",
+          repoIconUrl,
+          pullRequestScope: "user",
+          defaultBranchWorkflowNames: ["CI"],
+        },
+        {
+          owner: "getsentry",
+          repo: "sentry",
+          repoIconUrl: fallbackIconUrl,
+          pullRequestScope: "all",
+          workflowTargets: [{ kind: "default", workflowNames: ["Build"] }],
+        },
+        { owner: "getsentry", repo: "sentry", pullRequestScope: "user" },
+      ])).toEqual([{
+        owner: "GetSentry",
+        repo: "Sentry",
+        repoIconUrl: repoIconUrl || fallbackIconUrl,
+        pullRequestScope: "all",
+        workflowTargets: [{ kind: "default", workflowNames: ["CI", "Build"] }],
+      }]);
+    },
+  );
 });
