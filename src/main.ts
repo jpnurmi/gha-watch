@@ -279,6 +279,8 @@ type RepositoryWatchMenuState =
       repoKey: string;
       status: "loaded";
       defaultBranch: string;
+      owner: string;
+      repo: string;
       userLogin: string;
       workflows: WorkflowDefinition[];
       selectedTargetKey?: string;
@@ -2285,19 +2287,18 @@ function bindEvents(): void {
       const form = event.currentTarget as HTMLFormElement;
       const kind = getWorkflowTargetKind(form.dataset.kind);
       const pattern = new FormData(form).get("pattern");
-      const group = repositoryWatchMenu?.repoKey.split("/");
+      const menuState = repositoryWatchMenu;
 
       if (
         (kind !== "include" && kind !== "exclude") ||
         typeof pattern !== "string" ||
         !pattern.trim() ||
-        !group ||
-        group.length !== 2
+        menuState?.status !== "loaded"
       ) {
         return;
       }
 
-      addWorkflowTarget({ owner: group[0], repo: group[1] }, kind, pattern.trim());
+      addWorkflowTarget(menuState, kind, pattern.trim());
     },
   );
 
@@ -3294,7 +3295,15 @@ async function toggleRepositoryWatchMenu(repo: Pick<WatchedRepo, "owner" | "repo
     ]);
 
     if (repositoryWatchMenu?.repoKey === repoKey) {
-      repositoryWatchMenu = { repoKey, status: "loaded", workflows, defaultBranch, userLogin };
+      repositoryWatchMenu = {
+        repoKey,
+        status: "loaded",
+        owner: repo.owner,
+        repo: repo.repo,
+        workflows,
+        defaultBranch,
+        userLogin,
+      };
       render();
     }
   } catch (error) {

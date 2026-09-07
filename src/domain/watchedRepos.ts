@@ -45,6 +45,7 @@ export function normalizeWatchedRepos(value: unknown): WatchedRepo[] {
       const previous = watchedRepos[index];
       watchedRepos[index] = normalizeWatchedRepo({
         ...previous,
+        repoIconUrl: previous.repoIconUrl || watchedRepo.repoIconUrl,
         pullRequestScope: previous.pullRequestScope === "all" || watchedRepo.pullRequestScope === "all"
           ? "all" : previous.pullRequestScope ?? watchedRepo.pullRequestScope,
         workflowTargets: [...(previous.workflowTargets ?? []), ...(watchedRepo.workflowTargets ?? [])],

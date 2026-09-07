@@ -30,6 +30,8 @@ describe("canonical identities", () => {
     expect(settings.watchedRepos).toHaveLength(1);
     expect(settings.watchedRepos[0]).toMatchObject({ pullRequestScope: "user", workflowTargets: [{ kind: "default", workflowNames: ["CI"] }] });
     const watches = addWatch([], { ...target, owner: "getsentry", repo: "sentry" });
-    expect(createPopupViewModel(watches, new Date(), settings.watchedRepos).groups).toHaveLength(1);
+    const model = createPopupViewModel(watches, new Date(), settings.watchedRepos);
+    expect(model.groups).toHaveLength(1);
+    expect(model.groups[0]).toMatchObject({ owner: "GetSentry", repo: "Sentry", repoLabel: "GetSentry/Sentry" });
   });
 });
