@@ -44,4 +44,25 @@ describe("application session", () => {
     expect(deps.reportError).toHaveBeenCalled();
     expect(deps.poll).toHaveBeenCalledOnce();
   });
+
+  it.each([false, true])("preserves newer settings when upload is %s", async (syncRemote) => {
+    let release!: (state: SyncedState) => void;
+    const pending = new Promise<SyncedState>((resolve) => { release = resolve; });
+    const { deps, session } = setup(() => pending);
+    const settings = { ...state.settings, repoOrder: ["getsentry/sentry"] };
+    deps.applySettings.mockImplementationOnce(async () => {
+      release({ ...state, settings: { ...state.settings, repoOrder: ["getsentry/relay"] } });
+    });
+
+    const refresh = session.refresh();
+    await session.updateSettings(settings, syncRemote);
+    await refresh;
+
+    expect(deps.applySettings).toHaveBeenCalledExactlyOnceWith(settings);
+    expect(deps.sync.push).toHaveBeenCalledTimes(syncRemote ? 1 : 0);
+    expect(deps.applyWatches).not.toHaveBeenCalled();
+    expect(deps.sync.acknowledge).not.toHaveBeenCalled();
+    expect(deps.onSynced).not.toHaveBeenCalled();
+    expect(deps.poll).toHaveBeenCalledOnce();
+  });
 });

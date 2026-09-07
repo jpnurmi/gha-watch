@@ -53,7 +53,7 @@ export function createApplicationSession<View>(deps: {
   return {
     refresh: refresh.refresh,
     async updateSettings(settings: AppSettings, syncRemote: boolean) {
-      if (syncRemote) revision++;
+      revision++;
       await deps.applySettings(settings);
       if (syncRemote) upload();
     },
