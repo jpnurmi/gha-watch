@@ -2474,7 +2474,7 @@ async function acknowledgePopupDismissal(): Promise<void> {
     clearMenuOpen: isClearMenuOpen,
   });
   isClearMenuOpen = dismissedState.clearMenuOpen;
-  render();
+  renderNow();
 
   if (createTrayState(controller.getWatches()).hasUnseenChanges) {
     controller.markAllSeen();
