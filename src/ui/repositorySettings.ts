@@ -44,9 +44,9 @@ export function renderRepositorySettings(
     return watchedRepos.find((watchedRepo) => getWatchedRepoKey(watchedRepo) === getWatchedRepoKey(repo));
   }
 
-function renderRepositoryWatchMenu(group: WatchGroupViewModel): string {
-  if (currentWatchView !== "inbox") {
-    return `
+  function renderRepositoryWatchMenu(group: WatchGroupViewModel): string {
+    if (currentWatchView !== "inbox") {
+      return `
       <span class="watch-group-watch is-static" aria-hidden="true">
         <span class="watch-group-icon">
           ${renderRepoIcon(group)}
@@ -56,12 +56,12 @@ function renderRepositoryWatchMenu(group: WatchGroupViewModel): string {
         </span>
       </span>
     `;
-  }
+    }
 
-  const repoKey = getWatchedRepoKey(group);
-  const menuState = repositoryWatchMenu?.repoKey === repoKey ? repositoryWatchMenu : undefined;
+    const repoKey = getWatchedRepoKey(group);
+    const menuState = repositoryWatchMenu?.repoKey === repoKey ? repositoryWatchMenu : undefined;
 
-  return `
+    return `
     <div class="repo-action-menu watch-group-watch-menu">
       <button
         class="watch-group-watch${group.watched ? " is-watched" : ""}"
@@ -83,9 +83,12 @@ function renderRepositoryWatchMenu(group: WatchGroupViewModel): string {
           ${renderDragGripIcon()}
         </span>
       </button>
-      ${menuState ? renderRepositoryWatchPopover(group, menuState) : ""}
+      ${menuState ? renderRepositoryWatchPopover(group, menuState, findWatchedRepo(group)) : ""}
     </div>
   `;
+  }
+
+  return renderRepositoryWatchMenu(group);
 }
 
 function renderEyeIcon(watched: boolean): string {
@@ -107,6 +110,7 @@ function renderEyeIcon(watched: boolean): string {
 function renderRepositoryWatchPopover(
   group: WatchGroupViewModel,
   menuState: RepositoryWatchMenuState,
+  watchedRepo: WatchedRepo | undefined,
 ): string {
   let workflowContent: string;
 
@@ -115,22 +119,25 @@ function renderRepositoryWatchPopover(
   } else if (menuState.status === "error") {
     workflowContent = `<div class="repo-action-status is-error">${escapeHtml(menuState.error)}</div>`;
   } else {
-    const workflows = getWorkflowSubscriptionMenuWorkflows(group, menuState.workflows);
+    const workflows = getWorkflowSubscriptionMenuWorkflows(watchedRepo, menuState.workflows);
     workflowContent = workflows.length > 0
-      ? renderWorkflowTargetingEditor(group, menuState, workflows)
+      ? renderWorkflowTargetingEditor(group, menuState, workflows, watchedRepo?.workflowTargets ?? [])
       : `<div class="repo-action-status">No workflows</div>`;
   }
 
   return `
     <div class="repo-action-popover repository-watch-popover">
-      ${renderPullRequestWatchItem(group, menuState.userLogin)}
+      ${renderPullRequestWatchItem(group, menuState.userLogin, watchedRepo)}
       ${workflowContent}
     </div>
   `;
 }
 
-function renderPullRequestWatchItem(group: WatchGroupViewModel, userLogin: string | undefined): string {
-  const watchedRepo = findWatchedRepo(group);
+function renderPullRequestWatchItem(
+  group: WatchGroupViewModel,
+  userLogin: string | undefined,
+  watchedRepo: WatchedRepo | undefined,
+): string {
   const selectedScope = watchedRepo ? getWatchedPullRequestScope(watchedRepo) : undefined;
   const displayLabel = userLogin?.trim() || "…";
 
@@ -176,8 +183,8 @@ function renderWorkflowTargetingEditor(
   group: WatchGroupViewModel,
   menuState: Extract<RepositoryWatchMenuState, { status: "loaded" }>,
   workflows: WorkflowDefinition[],
+  targets: WatchedWorkflowTarget[],
 ): string {
-  const targets = findWatchedRepo(group)?.workflowTargets ?? [];
   const selectedTargetKey = getSelectedWorkflowTargetKey(menuState, targets);
   const selectedTarget = targets.find(
     (target) => getWatchedWorkflowTargetKey(target) === selectedTargetKey,
@@ -393,10 +400,9 @@ function getWorkflowTargetLabel(
 }
 
 function getWorkflowSubscriptionMenuWorkflows(
-  group: WatchGroupViewModel,
+  watchedRepo: WatchedRepo | undefined,
   workflows: WorkflowDefinition[],
 ): WorkflowDefinition[] {
-  const watchedRepo = findWatchedRepo(group);
   const workflowNames = new Set(workflows.map((workflow) => workflow.name));
   const missingSelectedWorkflows = (watchedRepo?.workflowTargets ?? [])
     .flatMap((target) => target.workflowNames)
@@ -414,7 +420,4 @@ function getWorkflowSubscriptionMenuWorkflows(
     }));
 
   return [...workflows, ...missingSelectedWorkflows];
-}
-
-  return renderRepositoryWatchMenu(group);
 }
