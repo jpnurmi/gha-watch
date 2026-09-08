@@ -1,5 +1,5 @@
 import { createSettingsJournal } from "./platform/settingsJournal";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { invokeDesktop } from "./platform/desktop";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getRerunActionIconSvg } from "./app/actionIcon";
 import { createAdaptivePollingCoordinator } from "./app/adaptivePolling";
@@ -411,7 +411,10 @@ function notifyStatusChange(notification: WatchNotification): Promise<void> {
 const handleDesktopNotificationAction = createDesktopNotificationActionHandler({
   controller,
   clearNotifications: clearDesktopNotifications,
-  openUrl: openExternalUrl,
+  async openUrl(url) {
+    await openExternalUrl(url);
+    await hideMainWindow();
+  },
   queueSync: queueSyncedStateUpload,
   refreshAfterRerun: queueRerunRefresh,
   async refreshStaleWatch(watch) {
@@ -2133,7 +2136,7 @@ function bindEvents(): void {
   );
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open-github-url"]')) {
-    button.addEventListener("click", (event) => {
+    button.addEventListener("click", async (event) => {
       event.preventDefault();
       const ids = getTreeNodeRowIds(button);
 
@@ -2144,7 +2147,12 @@ function bindEvents(): void {
       queueSyncedStateUploadForWatchIds(ids);
 
       if (button.dataset.url) {
-        void openExternalUrl(button.dataset.url);
+        try {
+          await openExternalUrl(button.dataset.url);
+          await hideMainWindow();
+        } catch (error) {
+          console.error("Could not open GitHub link.", error);
+        }
       }
     });
   }
@@ -2169,14 +2177,19 @@ function bindEvents(): void {
   }
 
   for (const button of app.querySelectorAll<HTMLButtonElement>('[data-action="open-repo-ci-workflow"]')) {
-    button.addEventListener("click", (event) => {
+    button.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopPropagation();
 
       repoCiStatusMenu = undefined;
 
       if (button.dataset.url) {
-        void openExternalUrl(button.dataset.url);
+        try {
+          await openExternalUrl(button.dataset.url);
+          await hideMainWindow();
+        } catch (error) {
+          console.error("Could not open GitHub workflow.", error);
+        }
       }
     });
   }
@@ -3617,8 +3630,7 @@ async function hideMainWindow(): Promise<void> {
 }
 
 async function openExternalUrl(url: string): Promise<void> {
-  await hideMainWindow();
-  await openUrl(url);
+  await invokeDesktop("open_github_url", { url });
 }
 
 async function acknowledgePopupDismissal(): Promise<void> {
