@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import plist from "../../src-tauri/Info.plist?raw";
-import rustSource from "../../src-tauri/src/main.rs?raw";
+import rustSource from "../../src-tauri/src/notifications/macos.rs?raw";
 
 describe("macOS notification configuration", () => {
   it("requests alert-style notifications in the app bundle", () => {
@@ -9,17 +9,17 @@ describe("macOS notification configuration", () => {
   });
 
   it("keeps failures visible and dismisses transient notifications after their timeout", () => {
-    expect(rustSource).toContain("if !notification.persistent");
+    expect(rustSource).toContain("(!notification.persistent).then(");
     expect(rustSource).toContain("Duration::from_millis(timeout_ms)");
-    expect(rustSource).toContain("dismiss_macos_notification(&title, &body)");
-    expect(rustSource).toContain("center.removeDeliveredNotification(&notification)");
+    expect(rustSource).toContain("dismiss_macos_notification(&id)");
+    expect(rustSource).toContain("center.removeDeliveredNotification(native)");
   });
 
-  it("shows the app on content click and maps validated action labels", () => {
-    expect(rustSource).toContain("mac_notification_sys::MainButton::SingleAction(label)");
-    expect(rustSource).toContain("mac_notification_sys::MainButton::DropdownActions(");
-    expect(rustSource).toMatch(/NotificationResponse::Click\) => \{\s*show_main_window\(&app, None\)/);
-    expect(rustSource).toContain(".find(|action| action.label == label)");
-    expect(rustSource).toContain("emit_desktop_notification_action(&app, &notification, action.id)");
+  it("shows the app on content click and maps validated actions", () => {
+    expect(rustSource).toContain("native.setActionButtonTitle(&NSString::from_str(&action.label))");
+    expect(rustSource).toContain('NSString::from_str("_alternateActionButtonTitles")');
+    expect(rustSource).toMatch(/ContentsClicked => \{\s*show_main_window\(&self.ivars\(\).app, None\)/);
+    expect(rustSource).toContain("notification.actions.get(index.unsignedLongLongValue() as usize)");
+    expect(rustSource).toContain("emit_desktop_notification_action(&self.ivars().app, &notification, action.id)");
   });
 });
