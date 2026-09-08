@@ -71,7 +71,6 @@ function renderRepositoryWatchMenu(group: WatchGroupViewModel): string {
         data-repo="${escapeHtml(group.repo)}"
         title="Watches"
         aria-label="Watches for ${escapeHtml(group.repoLabel)}"
-        aria-haspopup="menu"
         aria-expanded="${menuState ? "true" : "false"}"
       >
         <span class="watch-group-icon" aria-hidden="true">
@@ -123,7 +122,7 @@ function renderRepositoryWatchPopover(
   }
 
   return `
-    <div class="repo-action-popover repository-watch-popover" role="menu">
+    <div class="repo-action-popover repository-watch-popover">
       ${renderPullRequestWatchItem(group, menuState.userLogin)}
       ${workflowContent}
     </div>
@@ -159,7 +158,7 @@ function renderPullRequestWatchScope(
     <button
       class="repository-watch-segment repository-watch-segment-${scope}${checked ? " is-selected" : ""}"
       type="button"
-      role="menuitemcheckbox"
+      role="checkbox"
       aria-checked="${checked ? "true" : "false"}"
       data-action="toggle-watched-pull-request-scope"
       data-owner="${escapeHtml(group.owner)}"
