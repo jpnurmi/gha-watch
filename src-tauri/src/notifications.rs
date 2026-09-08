@@ -2,8 +2,10 @@ use crate::window::show_main_window;
 #[cfg(target_os = "linux")]
 use notify_rust::{Notification as NativeNotification, Timeout, Urgency};
 use std::collections::HashSet;
+#[cfg(any(target_os = "linux", test))]
+use std::sync::Mutex;
 #[cfg(target_os = "linux")]
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 #[cfg(windows)]
 use tauri_winrt_notification::Toast;
@@ -176,7 +178,7 @@ fn show_clickable_notification(
         if !notification.persistent {
             let title = notification.title.clone();
             let body = notification.body.clone();
-            let timeout_ms = notification.timeout_ms.unwrap_or(15_000);
+            let timeout_ms = macos_notification_timeout_ms(notification.timeout_ms);
 
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(timeout_ms));
@@ -253,6 +255,11 @@ fn dismiss_macos_notification(title: &str, body: &str) {
             center.removeDeliveredNotification(&notification);
         }
     }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_notification_timeout_ms(timeout_ms: Option<u64>) -> u64 {
+    timeout_ms.unwrap_or(15_000).min(60_000)
 }
 
 #[cfg(target_os = "linux")]
@@ -436,41 +443,58 @@ fn clear_native_notifications(_app: &AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn clear_native_notifications(_app: &AppHandle) -> Result<(), String> {
-    let mut active = ACTIVE_NOTIFICATIONS
-        .get_or_init(Mutex::default)
-        .lock()
-        .map_err(|error| error.to_string())?;
-    if active.is_empty() {
-        return Ok(());
-    }
-    let connection = zbus::blocking::Connection::session().map_err(|error| error.to_string())?;
-    close_active_notifications(&mut active, |id| {
-        connection
-            .call_method(
-                Some("org.freedesktop.Notifications"),
-                "/org/freedesktop/Notifications",
-                Some("org.freedesktop.Notifications"),
-                "CloseNotification",
-                &id,
-            )
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    })
+    close_active_notifications(
+        ACTIVE_NOTIFICATIONS.get_or_init(Mutex::default),
+        || zbus::blocking::Connection::session().map_err(|error| error.to_string()),
+        |connection, id| {
+            connection
+                .call_method(
+                    Some("org.freedesktop.Notifications"),
+                    "/org/freedesktop/Notifications",
+                    Some("org.freedesktop.Notifications"),
+                    "CloseNotification",
+                    &id,
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        },
+    )
 }
 
 #[cfg(any(target_os = "linux", test))]
-fn close_active_notifications(
-    active: &mut HashSet<u32>,
-    mut close: impl FnMut(u32) -> Result<(), String>,
+fn close_active_notifications<T>(
+    active: &Mutex<HashSet<u32>>,
+    connect: impl FnOnce() -> Result<T, String>,
+    mut close: impl FnMut(&T, u32) -> Result<(), String>,
 ) -> Result<(), String> {
+    let mut pending = {
+        let mut active = active.lock().map_err(|error| error.to_string())?;
+        std::mem::take(&mut *active)
+    };
+    if pending.is_empty() {
+        return Ok(());
+    }
+
     let mut failures = Vec::new();
-    active.retain(|id| match close(*id) {
-        Ok(()) => false,
-        Err(error) => {
-            failures.push(error);
-            true
+    match connect() {
+        Ok(connection) => pending.retain(|id| match close(&connection, *id) {
+            Ok(()) => false,
+            Err(error) => {
+                failures.push(error);
+                true
+            }
+        }),
+        Err(error) => failures.push(error),
+    }
+    if !pending.is_empty() {
+        match active.lock() {
+            Ok(mut active) => active.extend(pending),
+            Err(error) => {
+                failures.push(error.to_string());
+                error.into_inner().extend(pending);
+            }
         }
-    });
+    }
     if failures.is_empty() {
         Ok(())
     } else {
@@ -568,22 +592,26 @@ mod notification_lifecycle_tests {
 
     #[test]
     fn keeps_failed_dismissals_for_retry() {
-        let mut active = HashSet::from([1, 2, 3]);
+        let active = Mutex::new(HashSet::from([1, 2, 3]));
         let mut attempted = HashSet::new();
-        let result = close_active_notifications(&mut active, |id| {
-            attempted.insert(id);
-            if id == 2 {
-                Err("service unavailable".to_string())
-            } else {
-                Ok(())
-            }
-        });
+        let result = close_active_notifications(
+            &active,
+            || Ok(()),
+            |_, id| {
+                attempted.insert(id);
+                if id == 2 {
+                    Err("service unavailable".to_string())
+                } else {
+                    Ok(())
+                }
+            },
+        );
 
         assert_eq!(result, Err("service unavailable".to_string()));
         assert_eq!(attempted, HashSet::from([1, 2, 3]));
-        assert_eq!(active, HashSet::from([2]));
-        assert!(close_active_notifications(&mut active, |_| Ok(())).is_ok());
-        assert!(active.is_empty());
+        assert_eq!(*active.lock().unwrap(), HashSet::from([2]));
+        assert!(close_active_notifications(&active, || Ok(()), |_, _| Ok(())).is_ok());
+        assert!(active.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -606,5 +634,84 @@ mod notification_lifecycle_tests {
         assert!(xml.contains("<text>&quot;quoted&quot; &apos;text&apos;</text>"));
         assert!(xml.contains("content=\"Open &lt;CI&gt;\" arguments=\"open\""));
         assert!(xml.contains("scenario=\"reminder\""));
+    }
+
+    #[test]
+    fn allows_notification_updates_during_dismissal() {
+        let active = Mutex::new(HashSet::from([1]));
+        let result = close_active_notifications(
+            &active,
+            || {
+                let mut active = active.try_lock().unwrap();
+                assert!(active.is_empty());
+                active.insert(2);
+                Ok(())
+            },
+            |_, id| {
+                assert_eq!(id, 1);
+                active.try_lock().unwrap().insert(3);
+                Err("close failed".to_string())
+            },
+        );
+
+        assert_eq!(result, Err("close failed".to_string()));
+        assert_eq!(*active.lock().unwrap(), HashSet::from([1, 2, 3]));
+    }
+
+    #[test]
+    fn keeps_notifications_when_connection_fails() {
+        let active = Mutex::new(HashSet::from([1, 2]));
+        let result = close_active_notifications(
+            &active,
+            || {
+                active.try_lock().unwrap().insert(3);
+                Err::<(), _>("connection failed".to_string())
+            },
+            |_, _| panic!("must not close without a connection"),
+        );
+
+        assert_eq!(result, Err("connection failed".to_string()));
+        assert_eq!(*active.lock().unwrap(), HashSet::from([1, 2, 3]));
+    }
+
+    #[test]
+    fn preserves_retries_and_reports_a_poisoned_mutex() {
+        let active = Mutex::new(HashSet::from([1]));
+        let result = close_active_notifications(
+            &active,
+            || Ok(()),
+            |_, _| {
+                let _ = std::panic::catch_unwind(|| {
+                    let _guard = active.lock().unwrap();
+                    panic!("poison notification state");
+                });
+                Err("close failed".to_string())
+            },
+        );
+
+        let error = active.lock().unwrap_err();
+        assert_eq!(result, Err(format!("close failed; {error}")));
+        assert_eq!(*error.into_inner(), HashSet::from([1]));
+    }
+
+    #[test]
+    fn skips_connection_when_no_notifications_are_active() {
+        let active = Mutex::new(HashSet::new());
+        assert!(close_active_notifications(
+            &active,
+            || -> Result<(), String> { panic!("must not connect without notifications") },
+            |_, _| panic!("must not close without notifications"),
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn bounds_macos_dismissal_timeout() {
+        assert_eq!(macos_notification_timeout_ms(None), 15_000);
+        assert_eq!(macos_notification_timeout_ms(Some(0)), 0);
+        assert_eq!(macos_notification_timeout_ms(Some(30_000)), 30_000);
+        assert_eq!(macos_notification_timeout_ms(Some(60_000)), 60_000);
+        assert_eq!(macos_notification_timeout_ms(Some(60_001)), 60_000);
+        assert_eq!(macos_notification_timeout_ms(Some(u64::MAX)), 60_000);
     }
 }

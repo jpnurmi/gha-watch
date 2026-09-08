@@ -73,16 +73,13 @@ fn show_and_focus_window(window: &tauri::WebviewWindow) {
     let _ = window.show();
 
     #[cfg(target_os = "linux")]
-    present_linux_window(window);
-
-    #[cfg(target_os = "linux")]
-    return;
-
-    #[cfg(not(target_os = "linux"))]
-    let _ = window.set_focus();
+    {
+        present_linux_window(window);
+    }
 
     #[cfg(not(target_os = "linux"))]
     {
+        let _ = window.set_focus();
         let window = window.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(75));
