@@ -151,10 +151,13 @@ describe("platform frame styling", () => {
   });
 
   it("presents the Linux window once instead of delayed refocusing it", () => {
-    expect(rustSource).toContain("present_linux_window(window)");
-    expect(rustSource).toContain("gtk_window.present()");
-    expect(rustSource).toContain('#[cfg(target_os = "linux")]\n    {\n        present_linux_window(window);\n    }');
-    expect(rustSource).toContain('#[cfg(not(target_os = "linux"))]\n    {\n        let _ = window.set_focus();');
-    expect(rustSource).toContain("std::thread::sleep(std::time::Duration::from_millis(75))");
+    const body = rustSource.match(/^fn show_and_focus_window\([^\n]*\) \{\n([\s\S]*?)^\}/m)?.[1];
+    const presentBody = rustSource.match(/^fn present_linux_window\([^\n]*\) \{\n([\s\S]*?)^\}/m)?.[1];
+
+    expect(body).toBeDefined();
+    expect(presentBody).toContain("gtk_window.present()");
+    expect(body).toContain('#[cfg(target_os = "linux")]\n    {\n        present_linux_window(window);\n    }');
+    expect(body).toContain('#[cfg(not(target_os = "linux"))]\n    {\n        let _ = window.set_focus();');
+    expect(body).toContain("std::thread::sleep(std::time::Duration::from_millis(75))");
   });
 });

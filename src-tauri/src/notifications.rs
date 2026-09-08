@@ -1,4 +1,9 @@
+#[cfg(target_os = "macos")]
+mod macos;
+
 use crate::window::show_main_window;
+#[cfg(target_os = "macos")]
+use macos::{clear_native_notifications, show_clickable_notification};
 #[cfg(target_os = "linux")]
 use notify_rust::{Notification as NativeNotification, Timeout, Urgency};
 use std::collections::HashSet;
@@ -163,98 +168,6 @@ fn emit_desktop_notification_action(
             url: Some(notification.url.clone()),
         },
     );
-}
-
-#[cfg(target_os = "macos")]
-fn show_clickable_notification(
-    app: AppHandle,
-    notification: DesktopNotification,
-) -> Result<(), String> {
-    let bundle_identifier = app.config().identifier.clone();
-
-    std::thread::spawn(move || {
-        let _ = mac_notification_sys::set_application(&bundle_identifier);
-
-        if !notification.persistent {
-            let title = notification.title.clone();
-            let body = notification.body.clone();
-            let timeout_ms = macos_notification_timeout_ms(notification.timeout_ms);
-
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(timeout_ms));
-                dismiss_macos_notification(&title, &body);
-            });
-        }
-
-        let action_labels = notification
-            .actions
-            .iter()
-            .map(|action| action.label.as_str())
-            .collect::<Vec<_>>();
-        let mut native = mac_notification_sys::Notification::new();
-        native
-            .title(&notification.title)
-            .message(&notification.body)
-            .wait_for_click(true);
-
-        match action_labels.as_slice() {
-            [label] => {
-                native.main_button(mac_notification_sys::MainButton::SingleAction(label));
-            }
-            [_, _, ..] => {
-                native.main_button(mac_notification_sys::MainButton::DropdownActions(
-                    "Actions",
-                    &action_labels,
-                ));
-            }
-            [] => {}
-        }
-
-        let response = native.send();
-
-        match response {
-            Ok(mac_notification_sys::NotificationResponse::Click) => {
-                show_main_window(&app, None);
-                dismiss_macos_notification(&notification.title, &notification.body);
-            }
-            Ok(mac_notification_sys::NotificationResponse::ActionButton(label)) => {
-                if let Some(action) = notification
-                    .actions
-                    .iter()
-                    .find(|action| action.label == label)
-                {
-                    emit_desktop_notification_action(&app, &notification, action.id);
-                    dismiss_macos_notification(&notification.title, &notification.body);
-                }
-            }
-            Ok(_) => {}
-            Err(error) => {
-                eprintln!("Could not show GHA Watch notification: {error}");
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-#[allow(deprecated)]
-fn dismiss_macos_notification(title: &str, body: &str) {
-    let center = objc2_foundation::NSUserNotificationCenter::defaultUserNotificationCenter();
-    let delivered = center.deliveredNotifications();
-
-    for notification in delivered.iter() {
-        let matches_title = notification
-            .title()
-            .is_some_and(|value| value.to_string() == title);
-        let matches_body = notification
-            .informativeText()
-            .is_some_and(|value| value.to_string() == body);
-
-        if matches_title && matches_body {
-            center.removeDeliveredNotification(&notification);
-        }
-    }
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -431,14 +344,6 @@ fn windows_notification_xml(notification: &DesktopNotification) -> String {
         "<toast {attributes}><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual><actions>{actions}</actions></toast>",
         escape(&notification.title), escape(&notification.body),
     )
-}
-
-#[cfg(target_os = "macos")]
-#[allow(deprecated)]
-fn clear_native_notifications(_app: &AppHandle) -> Result<(), String> {
-    objc2_foundation::NSUserNotificationCenter::defaultUserNotificationCenter()
-        .removeAllDeliveredNotifications();
-    Ok(())
 }
 
 #[cfg(target_os = "linux")]
