@@ -165,7 +165,6 @@ describe("createPopupViewModel", () => {
       }),
     ]);
 
-    expect(model.groups[0].tree).toEqual([]);
     expect(model.groups[0].items).toMatchObject([
       {
         kind: "row",
@@ -221,7 +220,6 @@ describe("createPopupViewModel", () => {
       }),
     ]);
 
-    expect(model.groups[0].tree).toEqual([]);
     expect(model.groups[0].items).toMatchObject([
       {
         kind: "row",
@@ -256,7 +254,6 @@ describe("createPopupViewModel", () => {
       }),
     ]);
 
-    expect(model.groups[0].tree).toEqual([]);
     expect(model.groups[0].items).toMatchObject([
       {
         kind: "row",

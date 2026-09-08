@@ -754,8 +754,8 @@ input {
 .watch-group-workflow-button:hover,
 .watch-group-pr-button:hover,
 .watch-group-triage-button:hover,
-.watch-tree-chevron:hover:not([aria-disabled="true"]),
-.watch-tree-chevron:focus-visible:not([aria-disabled="true"]) {
+.watch-group-toggle-chevron:hover:not([aria-disabled="true"]),
+.watch-group-toggle-chevron:focus-visible:not([aria-disabled="true"]) {
   background: rgb(255 255 255 / 7%);
   color: rgb(238 241 245 / 78%);
 }
@@ -1399,42 +1399,11 @@ button.repo-ci-status:focus-visible {
   list-style: none;
 }
 
-.watch-tree-node,
-.watch-tree-children {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-:is(.watch-group-list, .watch-tree-children) > :is(.watch, .watch-tree-node) {
+.watch-group-list > .watch {
   border-top: 1px solid rgb(255 255 255 / 8%);
 }
 
-.watch-tree-header {
-  --watch-row-bg: #161b22;
-
-  position: relative;
-  display: grid;
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 52px;
-  grid-template-columns: var(--tree-chevron-width) var(--tree-leading-width) minmax(0, 1fr);
-  align-items: start;
-  gap: var(--tree-column-gap);
-  padding: 8px calc(6px + var(--scrollbar-gutter-width)) 8px
-    calc(var(--tree-left-padding) + var(--tree-indent, 0px));
-  background: var(--watch-row-bg);
-  color: inherit;
-}
-
-.watch-tree-header.has-actions {
-  grid-template-columns: var(--tree-chevron-width) var(--tree-leading-width) minmax(0, 1fr) var(
-      --tree-actions-width
-    );
-}
-
-.watch-tree-chevron,
-.watch-tree-chevron-spacer {
+.watch-group-toggle-chevron {
   display: inline-grid;
   width: var(--tree-chevron-width);
   height: 22px;
@@ -1442,7 +1411,7 @@ button.repo-ci-status:focus-visible {
   place-items: center;
 }
 
-.watch-tree-chevron {
+.watch-group-toggle-chevron {
   width: 18px;
   height: 18px;
   justify-self: center;
@@ -1454,111 +1423,12 @@ button.repo-ci-status:focus-visible {
   cursor: pointer;
 }
 
-.watch-tree-chevron[aria-disabled="true"] {
+.watch-group-toggle-chevron[aria-disabled="true"] {
   cursor: default;
   opacity: 0.45;
 }
 
-.watch-tree-chevron svg {
-  width: 12px;
-  height: 12px;
-  display: block;
-}
-
-.watch-tree-leading {
-  display: inline-grid;
-  width: var(--tree-leading-width);
-  height: var(--tree-leading-width);
-  place-items: center;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: rgb(238 241 245 / 46%);
-  cursor: default;
-}
-
-button.watch-tree-leading {
-  cursor: pointer;
-}
-
-.watch-tree-leading-slot {
-  position: relative;
-  display: inline-grid;
-  width: var(--tree-leading-width);
-  height: var(--tree-leading-width);
-  place-items: center;
-}
-
-.watch-tree-leading-icon {
-  width: 18px;
-  height: 18px;
-  margin-top: 0;
-}
-
-.watch-tree-main {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  cursor: default;
-  text-align: left;
-}
-
-.watch-tree-node-workflow > .watch-tree-header .watch-label {
-  color: rgb(238 241 245 / 74%);
-  font-size: 13px;
-  font-weight: 750;
-}
-
-.watch-tree-actions {
-  display: flex;
-  width: var(--tree-actions-width);
-  height: 20px;
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
-  margin-top: -3px;
-  padding-right: 0;
-}
-
-.watch-tree-action-button {
-  display: inline-grid;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 0;
-  border-radius: 5px;
-  padding: 0;
-  background: transparent;
-  color: rgb(238 241 245 / 60%);
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-}
-
-.watch-tree-header.has-actions:hover .watch-tree-action-button,
-.watch-tree-header.has-actions:focus-within .watch-tree-action-button {
-  opacity: 0.6;
-  pointer-events: auto;
-  visibility: visible;
-}
-
-.watch-tree-action-button:hover,
-.watch-tree-action-button:focus-visible {
-  background: rgb(255 255 255 / 7%);
-  opacity: 1;
-}
-
-.watch-tree-action-button svg {
+.watch-group-toggle-chevron svg {
   width: 12px;
   height: 12px;
   display: block;
@@ -1582,18 +1452,15 @@ button.watch-tree-leading {
   cursor: default;
 }
 
-.watch.is-row-dragging,
-.watch-tree-node.is-row-dragging > .watch-tree-header {
+.watch.is-row-dragging {
   opacity: 0.48;
 }
 
-.watch.is-row-drop-before,
-.watch-tree-node.is-row-drop-before > .watch-tree-header {
+.watch.is-row-drop-before {
   box-shadow: inset 0 2px 0 #58a6ff;
 }
 
-.watch.is-row-drop-after,
-.watch-tree-node.is-row-drop-after > .watch-tree-header {
+.watch.is-row-drop-after {
   box-shadow: inset 0 -2px 0 #58a6ff;
 }
 
@@ -1601,23 +1468,15 @@ button.watch-tree-leading {
   user-select: none;
 }
 
-.watch-group-list.is-reordering-runs .watch,
-.watch-group-list.is-reordering-runs .watch-tree-node > .watch-tree-header,
-.watch-tree-children.is-reordering-runs .watch,
-.watch-tree-children.is-reordering-runs .watch-tree-node > .watch-tree-header {
+.watch-group-list.is-reordering-runs .watch {
   background: rgb(88 166 255 / 5%);
 }
 
-.watch-list.is-reordering-runs .watch.is-row-dragging .watch-drag-glyph,
-.watch-list.is-reordering-runs .watch-tree-node.is-row-dragging > .watch-tree-header .watch-drag-glyph {
+.watch-list.is-reordering-runs .watch.is-row-dragging .watch-drag-glyph {
   display: inline-grid;
 }
 
 .watch-list.is-reordering-runs .watch.is-row-dragging .watch-leading-seen-button {
-  display: none;
-}
-
-.watch-list.is-reordering-runs .watch-tree-node.is-row-dragging > .watch-tree-header .unseen-dot {
   display: none;
 }
 
@@ -2057,7 +1916,7 @@ button.watch-workflow-status:focus-visible {
   opacity: 1;
 }
 
-:is(.watch-group-triage-button, .watch-tree-action-button, .watch-action-button).is-done-candidate {
+:is(.watch-group-triage-button, .watch-action-button).is-done-candidate {
   background: transparent;
   color: rgb(238 241 245 / 60%);
   opacity: 0.72;
@@ -2065,16 +1924,14 @@ button.watch-workflow-status:focus-visible {
   visibility: visible;
 }
 
-:is(.watch-group-triage-button, .watch-tree-action-button, .watch-action-button).is-done-candidate:hover,
-:is(.watch-group-triage-button, .watch-tree-action-button, .watch-action-button).is-done-candidate:focus-visible {
+:is(.watch-group-triage-button, .watch-action-button).is-done-candidate:hover,
+:is(.watch-group-triage-button, .watch-action-button).is-done-candidate:focus-visible {
   background: rgb(255 255 255 / 7%);
   opacity: 0.72;
 }
 
 .watch-group-header:hover .watch-group-triage-button.is-done-candidate,
 .watch-group-header:focus-within .watch-group-triage-button.is-done-candidate,
-.watch-tree-header.has-actions:hover .watch-tree-action-button.is-done-candidate,
-.watch-tree-header.has-actions:focus-within .watch-tree-action-button.is-done-candidate,
 .watch:hover .watch-action-button.is-done-candidate,
 .watch:focus-within .watch-action-button.is-done-candidate {
   opacity: 0.72;

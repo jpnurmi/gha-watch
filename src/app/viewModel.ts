@@ -52,39 +52,7 @@ export type WatchRowViewModel = {
   url: string;
 };
 
-export type WatchTreeNodeKind = "pull-request" | "workflow";
-
-export type WatchTreeNodeViewModel = {
-  id: string;
-  kind: WatchTreeNodeKind;
-  label: string;
-  referenceLabel?: string;
-  detailLabel?: string;
-  prState?: PrStateViewModel;
-  branchName?: string;
-  rowCount: number;
-  rowIds: string[];
-  primaryRowId?: string;
-  statusLabel: string;
-  tone: RowTone;
-  hasFailedChildren: boolean;
-  timingText?: string;
-  unseenStatusChange: boolean;
-  doneCandidate: boolean;
-  url?: string;
-  rows: WatchRowViewModel[];
-  children: WatchTreeNodeViewModel[];
-};
-
-export type WatchGroupItemViewModel =
-  | {
-      kind: "row";
-      row: WatchRowViewModel;
-    }
-  | {
-      kind: "tree";
-      node: WatchTreeNodeViewModel;
-    };
+export type WatchGroupItemViewModel = { kind: "row"; row: WatchRowViewModel };
 
 export type WatchGroupViewModel = {
   owner: string;
@@ -94,7 +62,6 @@ export type WatchGroupViewModel = {
   ciStatus?: RepoCiStatusViewModel;
   watched: boolean;
   rows: WatchRowViewModel[];
-  tree: WatchTreeNodeViewModel[];
   items: WatchGroupItemViewModel[];
 };
 
@@ -396,7 +363,6 @@ function createWatchGroup(
     ...(ciStatus ? { ciStatus } : {}),
     watched,
     rows: [],
-    tree: [],
     items: [],
   };
 }
