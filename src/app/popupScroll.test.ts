@@ -1,197 +1,72 @@
-import { describe, expect, it } from "vitest";
-import { replacePopupHtmlPreservingScroll, type PopupRenderRoot } from "./popupScroll";
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it } from "vitest";
+import { replacePopupHtmlPreservingScroll } from "./popupScroll";
 
-describe("replacePopupHtmlPreservingScroll", () => {
-  it("keeps the watch list scroll offset when popup content is replaced", () => {
-    const root = createPopupRoot(184);
-
-    replacePopupHtmlPreservingScroll(root, "<section>updated</section>");
-
-    expect(root.watchListScrollTop).toBe(184);
-    expect(root.innerHTML).toBe("<section>updated</section>");
-  });
-
-  it("does not create scroll state when the watch list is absent", () => {
-    const root = createPopupRoot(undefined);
-
-    replacePopupHtmlPreservingScroll(root, "<section>updated</section>");
-
-    expect(root.watchListScrollTop).toBeUndefined();
-  });
-
-  it("keeps the discovery list scroll offset when a suggestion is removed", () => {
-    const root = createPopupRoot(undefined, undefined, 132);
-
-    replacePopupHtmlPreservingScroll(root, '<ul class="add-discovery-list">updated</ul>');
-
-    expect(root.discoveryListScrollTop).toBe(132);
-  });
-
-  it("keeps the add input value and focus when popup content is replaced", () => {
-    const root = createPopupRoot(undefined, {
-      focused: true,
-      selectionEnd: 10,
-      selectionStart: 10,
-      value: "owner/repo#1234",
-    });
-
-    replacePopupHtmlPreservingScroll(root, '<form><input name="url" /></form>');
-
-    expect(root.addInputState).toEqual({
-      focused: true,
-      selectionDirection: "none",
-      selectionEnd: 10,
-      selectionStart: 10,
-      value: "owner/repo#1234",
-    });
-  });
+let root: HTMLElement;
+beforeEach(() => {
+  document.body.innerHTML = '<main></main>';
+  root = document.querySelector('main')!;
 });
 
-type FakeAddInputOptions = {
-  focused: boolean;
-  selectionEnd: number | null;
-  selectionStart: number | null;
-  value: string;
-};
-
-type FakeAddInputState = FakeAddInputOptions & {
-  selectionDirection: "backward" | "forward" | "none" | null;
-};
-
-function createPopupRoot(
-  initialScrollTop: number | undefined,
-  initialInput?: FakeAddInputOptions,
-  initialDiscoveryScrollTop?: number,
-  inputName = "url",
-  draftKey?: string,
-): PopupRenderRoot & {
-  addInputState: FakeAddInputState | undefined;
-  discoveryListScrollTop: number | undefined;
-  watchListScrollTop: number | undefined;
-} {
-  let watchList = initialScrollTop === undefined ? undefined : { scrollTop: initialScrollTop };
-  let discoveryList = initialDiscoveryScrollTop === undefined
-    ? undefined
-    : { scrollTop: initialDiscoveryScrollTop };
-  const ownerDocument: { activeElement: unknown } = { activeElement: undefined };
-  let addInput = initialInput ? createAddInput(ownerDocument, initialInput, draftKey) : undefined;
-  let markup = "";
-
-  if (initialInput?.focused) {
-    ownerDocument.activeElement = addInput;
-  }
-
-  return {
-    get addInputState() {
-      return addInput
-        ? {
-            focused: ownerDocument.activeElement === addInput,
-            selectionDirection: addInput.selectionDirection,
-            selectionEnd: addInput.selectionEnd,
-            selectionStart: addInput.selectionStart,
-            value: addInput.value,
-          }
-        : undefined;
-    },
-    get watchListScrollTop() {
-      return watchList?.scrollTop;
-    },
-    get discoveryListScrollTop() {
-      return discoveryList?.scrollTop;
-    },
-    set innerHTML(value: string) {
-      markup = value;
-      watchList = initialScrollTop === undefined ? undefined : { scrollTop: 0 };
-      discoveryList = value.includes('class="add-discovery-list"')
-        ? { scrollTop: 0 }
-        : undefined;
-      addInput = value.includes(`name="${inputName}"`)
-        ? createAddInput(ownerDocument, undefined, value.match(/data-draft-key="([^"]*)"/)?.[1])
-        : undefined;
-    },
-    get innerHTML() {
-      return markup;
-    },
-    markup: "",
-    querySelector(selector: string) {
-      if (selector === ".watch-list") {
-        return watchList;
-      }
-
-      if (selector === ".add-discovery-list") {
-        return discoveryList;
-      }
-
-      if (selector === `input[name="${inputName}"]`) {
-        return addInput;
-      }
-
-      return null;
-    },
-  } as unknown as PopupRenderRoot & {
-    addInputState: FakeAddInputState | undefined;
-    discoveryListScrollTop: number | undefined;
-    watchListScrollTop: number | undefined;
-  };
+function html(key = "owner/repo/include", status = "Loading"): string {
+  return `<section class="shell"><ul class="watch-list"><li data-id="1">${status}</li></ul>
+    <form class="add-form"><div class="status">${status}</div><input name="url" /></form>
+    <form class="pattern-form"><input name="pattern" data-draft-key="${key}" /></form></section>`;
 }
 
-function createAddInput(
-  ownerDocument: { activeElement: unknown },
-  options?: FakeAddInputOptions,
-  draftKey?: string,
-): HTMLInputElement {
-  const input = {
-    ownerDocument,
-    dataset: { draftKey },
-    selectionDirection: "none",
-    selectionEnd: options?.selectionEnd ?? 0,
-    selectionStart: options?.selectionStart ?? 0,
-    value: options?.value ?? "",
-    focus() {
-      ownerDocument.activeElement = input;
-    },
-    setSelectionRange(
-      start: number,
-      end: number,
-      direction?: "backward" | "forward" | "none" | null,
-    ) {
-      input.selectionStart = start;
-      input.selectionEnd = end;
-      input.selectionDirection = direction ?? "none";
-    },
-  };
-
-  return input as unknown as HTMLInputElement;
-}
-
-
-describe("branch pattern drafts", () => {
-  const draft: FakeAddInputOptions = {
-    focused: true, selectionStart: 2, selectionEnd: 7, value: "release/*",
-  };
-
-  it("preserves the draft, focus, and selection during refresh", () => {
-    const root = createPopupRoot(undefined, draft, undefined, "pattern", "getsentry/sentry/include");
-
-    replacePopupHtmlPreservingScroll(root, '<input name="pattern" data-draft-key="getsentry/sentry/include" />');
-
-    expect(root.addInputState).toEqual({ ...draft, selectionDirection: "none" });
+describe("popup updates", () => {
+  it("preserves roots, editable nodes, selection, and scroll during refresh", () => {
+    replacePopupHtmlPreservingScroll(root, html());
+    const shell = root.firstElementChild;
+    const list = root.querySelector<HTMLElement>('.watch-list')!;
+    list.scrollTop = 120;
+    const input = root.querySelector<HTMLInputElement>('[name="pattern"]')!;
+    input.value = "release/*";
+    input.focus();
+    input.setSelectionRange(2, 7, "backward");
+    replacePopupHtmlPreservingScroll(root, html(undefined, "Updated"));
+    expect(root.firstElementChild).toBe(shell);
+    expect(root.querySelector('.watch-list')).toBe(list);
+    expect(list.scrollTop).toBe(120);
+    expect(root.querySelector('[name="pattern"]')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe("release/*");
+    expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([2, 7, "backward"]);
+    expect(list.textContent).toBe("Updated");
   });
 
-  it.each(["getsentry/relay/include", "getsentry/sentry/exclude"])("starts a fresh draft for %s", (key) => {
-    const root = createPopupRoot(undefined, draft, undefined, "pattern", "getsentry/sentry/include");
+  it("preserves manual input when discovery changes element type", () => {
+    replacePopupHtmlPreservingScroll(root, html());
+    const input = root.querySelector<HTMLInputElement>('[name="url"]')!;
+    input.value = "owner/repo#12";
+    replacePopupHtmlPreservingScroll(root, html().replace('<div class="status">Loading</div>', '<ul class="add-discovery-list"><li>PR</li></ul>'));
+    expect(root.querySelector('[name="url"]')).toBe(input);
+    expect(input.value).toBe("owner/repo#12");
+  });
 
-    replacePopupHtmlPreservingScroll(root, `<input name="pattern" data-draft-key="${key}" />`);
-
-    expect(root.addInputState?.value).toBe("");
+  it.each(["owner/other/include", "owner/repo/exclude"])("starts a fresh draft for %s", (key) => {
+    replacePopupHtmlPreservingScroll(root, html());
+    const input = root.querySelector<HTMLInputElement>('[name="pattern"]')!;
+    input.value = "release/*";
+    replacePopupHtmlPreservingScroll(root, html(key));
+    expect(root.querySelector('[name="pattern"]')).not.toBe(input);
+    expect(root.querySelector<HTMLInputElement>('[name="pattern"]')!.value).toBe("");
   });
 
   it("does not restore a submitted or closed editor", () => {
-    const root = createPopupRoot(undefined, draft, undefined, "pattern", "getsentry/sentry/include");
+    replacePopupHtmlPreservingScroll(root, html());
+    root.querySelector<HTMLInputElement>('[name="pattern"]')!.value = "release/*";
+    replacePopupHtmlPreservingScroll(root, '<section class="shell"></section>');
+    replacePopupHtmlPreservingScroll(root, html());
+    expect(root.querySelector<HTMLInputElement>('[name="pattern"]')!.value).toBe("");
+  });
 
-    replacePopupHtmlPreservingScroll(root, "<section>updated</section>");
-    replacePopupHtmlPreservingScroll(root, '<input name="pattern" data-draft-key="getsentry/sentry/include" />');
-
-    expect(root.addInputState?.value).toBe("");
+  it("reorders keyed rows without replacing them or retaining removed rows", () => {
+    replacePopupHtmlPreservingScroll(root, '<ul><li data-id="1">One</li><li data-id="2">Two</li><li data-id="3">Three</li></ul>');
+    const first = root.querySelector('[data-id="1"]');
+    const second = root.querySelector('[data-id="2"]');
+    replacePopupHtmlPreservingScroll(root, '<ul><li data-id="2">Updated</li><li data-id="1">One</li></ul>');
+    expect(Array.from(root.querySelectorAll('li'))).toEqual([second, first]);
+    expect(second?.textContent).toBe("Updated");
   });
 });

@@ -23,9 +23,9 @@ describe("dismissPopupUi", () => {
   });
 
   it.each(["open-github-url", "open-repo-ci-workflow"])("handles %s failures before hiding the popup", (action) => {
-    const handler = mainSource.split(`'[data-action="${action}"]'`)[1]?.split("\n  }\n")[0];
+    const handler = mainSource.split(`'[data-action="${action}"]'`)[1]?.split("\n  });")[0];
 
-    expect(handler).toContain('button.addEventListener("click", async (event) => {');
+    expect(handler).toContain(', async (event, button: HTMLButtonElement) => {');
     expect(handler).toMatch(
       /try \{\s*await openExternalUrl\(button.dataset.url\);\s*await hideMainWindow\(\);\s*\} catch \(error\) \{\s*console.error\("Could not open GitHub (?:link|workflow)\.", error\);\s*\}/,
     );
