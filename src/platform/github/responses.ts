@@ -193,8 +193,8 @@ export type RateLimit = RateLimitValues & {
 };
 
 export type RateLimitResponse = {
-  resources: {
-    core: RateLimitValues;
-    graphql: RateLimitValues;
+  resources?: {
+    core?: unknown;
+    graphql?: unknown;
   };
 };

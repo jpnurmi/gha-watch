@@ -6,15 +6,16 @@ import { createTauriShellExecutor, type ShellExecutor } from "../shell";
 import { normalizeRepositoryCiWorkflowRun, summarizeRepositoryCiStatus } from "./normalize";
 import { type CommitComparisonResponse, type CommitViewResponse, type RepositoryViewResponse, type WorkflowRunsApiResponse } from "./responses";
 
+const repositoryRequests = new WeakMap<ShellExecutor, Map<string, Promise<RepositoryViewResponse>>>();
+
 export async function fetchRepositoryIconUrl(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<string | undefined> {
   try {
-    const result = await executor.execute("gh", ["api", `repos/${target.owner}/${target.repo}`]);
+    const response = await fetchRepositoryView(target, executor);
 
-    assertSuccessfulGhResult(result);
-    return parseJson<RepositoryViewResponse>(result.stdout).owner?.avatar_url;
+    return response.owner?.avatar_url;
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -25,10 +26,9 @@ export async function fetchRepositoryDefaultBranch(
   executor: ShellExecutor = createTauriShellExecutor(),
 ): Promise<string> {
   try {
-    const result = await executor.execute("gh", ["api", `repos/${target.owner}/${target.repo}`]);
+    const response = await fetchRepositoryView(target, executor);
 
-    assertSuccessfulGhResult(result);
-    return requiredString(parseJson<RepositoryViewResponse>(result.stdout).default_branch, "repository default branch");
+    return requiredString(response.default_branch, "repository default branch");
   } catch (error) {
     throw normalizeGhError(error);
   }
@@ -96,5 +96,36 @@ export async function fetchRepositoryDefaultBranchCiStatus(
     return summarizeRepositoryCiStatus(defaultBranch, commitSha, runs);
   } catch (error) {
     throw normalizeGhError(error);
+  }
+}
+
+async function fetchRepositoryView(
+  target: Pick<ParsedWatchTarget, "owner" | "repo">,
+  executor: ShellExecutor,
+): Promise<RepositoryViewResponse> {
+  let requests = repositoryRequests.get(executor);
+
+  if (!requests) {
+    requests = new Map();
+    repositoryRequests.set(executor, requests);
+  }
+
+  const key = `${target.owner.toLowerCase()}/${target.repo.toLowerCase()}`;
+  const pending = requests.get(key);
+
+  if (pending) {
+    return pending;
+  }
+
+  const request = executor.execute("gh", ["api", `repos/${target.owner}/${target.repo}`]).then((result) => {
+    assertSuccessfulGhResult(result);
+    return parseJson<RepositoryViewResponse>(result.stdout);
+  });
+  requests.set(key, request);
+
+  try {
+    return await request;
+  } finally {
+    requests.delete(key);
   }
 }
