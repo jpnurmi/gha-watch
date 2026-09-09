@@ -165,11 +165,11 @@ export function toggleWatchedWorkflowSubscription(
 export function addWatchedWorkflowTarget(
   watchedRepos: WatchedRepo[],
   repo: Pick<WatchedRepo, "owner" | "repo">,
-  target: Pick<WatchedWorkflowTarget, "kind" | "pattern">,
+  target: WatchedWorkflowTarget,
 ): WatchedRepo[] {
-  const normalized = normalizeWorkflowTarget({ ...target, workflowNames: [] });
+  const normalized = normalizeWorkflowTarget(target);
 
-  if (!normalized) {
+  if (!normalized || normalized.workflowNames.length === 0) {
     return watchedRepos;
   }
 

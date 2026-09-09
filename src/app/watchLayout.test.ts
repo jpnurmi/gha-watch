@@ -61,7 +61,6 @@ describe("watch layout", () => {
   });
 
   it("opens combined repository watches from the repo icon eye badge", () => {
-    expect(styles).not.toContain(".workflow-target-count");
     expect(styles).toMatch(
       /\.watch-group-watch\.is-watched \.watch-group-watch-glyph\s*\{[^}]*color:\s*#58a6ff;/s,
     );
@@ -70,8 +69,8 @@ describe("watch layout", () => {
     expect(styles).toMatch(/\.workflow-target-remove\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;/s);
     expect(styles).toMatch(/\.workflow-target-select\s*\{[^}]*display:\s*flex;/s);
     expect(styles).toMatch(/\.workflow-target-label\s*\{[^}]*flex:\s*0 1 auto;/s);
-    expect(styles).toMatch(/\.workflow-target-remove\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;/s);
-    expect(styles).toMatch(/\.workflow-target-row:hover \.workflow-target-remove,[^{]*\.workflow-target-row:focus-within \.workflow-target-remove\s*\{[^}]*visibility:\s*visible;/s);
+    expect(styles).toMatch(/\.workflow-target-remove\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s);
+    expect(styles).toMatch(/\.workflow-target-row:hover \.workflow-target-remove,[^{]*\.workflow-target-row:has\(:focus-visible\) \.workflow-target-remove\s*\{[^}]*opacity:\s*0\.6;[^}]*pointer-events:\s*auto;/s);
     expect(styles).not.toMatch(/\.workflow-target-remove\s*\{[^}]*border-left:/s);
   });
 

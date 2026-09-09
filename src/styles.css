@@ -1109,8 +1109,36 @@ input {
   background: rgb(255 255 255 / 10%);
 }
 
-.workflow-target-pattern-form {
-  padding: 0 9px 8px;
+.workflow-target-form {
+  padding-bottom: 8px;
+}
+
+.workflow-target-pattern-field {
+  margin: 0 9px 8px;
+}
+
+.workflow-target-form-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 11px 0;
+}
+
+.workflow-target-form .add-form-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.workflow-target-cancel {
+  border: 0;
+  border-radius: 5px;
+  padding: 0 9px;
+  background: transparent;
+  color: #d8dee7;
+  cursor: pointer;
+}
+
+.workflow-target-cancel:hover {
+  background: rgb(255 255 255 / 7%);
 }
 
 .workflow-target-pattern-input {
@@ -1218,6 +1246,56 @@ input {
   white-space: nowrap;
 }
 
+.workflow-target-summary {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex: 1 0 35%;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  margin-left: auto;
+  line-height: 0;
+}
+
+.workflow-target-names {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+}
+
+.workflow-target-summary .workflow-target-chip {
+  display: inline-flex;
+  height: 12px;
+  max-width: none;
+  align-items: center;
+  align-self: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.workflow-target-names + .workflow-target-count {
+  position: absolute;
+  right: 0;
+  visibility: hidden;
+}
+
+.workflow-target-summary.is-collapsed .workflow-target-names {
+  visibility: hidden;
+}
+
+.workflow-target-summary.is-collapsed .workflow-target-count {
+  visibility: visible;
+}
+
+.workflow-target-chip.is-empty {
+  border-color: rgb(139 148 158 / 24%);
+  background: transparent;
+  color: rgb(216 222 231 / 52%);
+}
+
 .workflow-target-remove {
   display: grid;
   width: 18px;
@@ -1229,14 +1307,12 @@ input {
   color: rgb(216 222 231 / 60%);
   opacity: 0;
   pointer-events: none;
-  visibility: hidden;
 }
 
 .workflow-target-row:hover .workflow-target-remove,
-.workflow-target-row:focus-within .workflow-target-remove {
+.workflow-target-row:has(:focus-visible) .workflow-target-remove {
   opacity: 0.6;
   pointer-events: auto;
-  visibility: visible;
 }
 
 .workflow-target-remove-icon {
@@ -1252,6 +1328,7 @@ input {
 }
 
 .workflow-target-workflows {
+  grid-column: 1 / -1;
   border-top: 1px solid rgb(255 255 255 / 10%);
   padding: 8px 0 3px;
 }

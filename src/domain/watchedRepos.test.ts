@@ -107,16 +107,10 @@ describe("watched repository operations", () => {
   });
 
   it("toggles workflow subscriptions and watches repositories when needed", () => {
-    const withTarget = addWatchedWorkflowTarget(
+    const watchedRepos = addWatchedWorkflowTarget(
       [],
       { owner: "getsentry", repo: "sentry-native" },
-      { kind: "default" },
-    );
-    const watchedRepos = toggleWatchedWorkflowSubscription(
-      withTarget,
-      { owner: "getsentry", repo: "sentry-native" },
-      "default",
-      "CI",
+      { kind: "default", workflowNames: ["CI"] },
     );
 
     expect(watchedRepos).toEqual([
@@ -127,8 +121,8 @@ describe("watched repository operations", () => {
       },
     ]);
     expect(hasWatchedWorkflowSubscriptions(watchedRepos[0])).toBe(true);
-    const withOwnTarget = addWatchedWorkflowTarget(watchedRepos, watchedRepos[0], { kind: "own" });
-    expect(toggleWatchedWorkflowSubscription(withOwnTarget, watchedRepos[0], "own", "CI")).toEqual([
+    const withOwnTarget = addWatchedWorkflowTarget(watchedRepos, watchedRepos[0], { kind: "own", workflowNames: ["CI"] });
+    expect(withOwnTarget).toEqual([
       {
         owner: "getsentry",
         repo: "sentry-native",
@@ -173,12 +167,13 @@ describe("watched repository operations", () => {
     const withTarget = addWatchedWorkflowTarget(withPullRequests, repo, {
       kind: "include",
       pattern: "release/*",
+      workflowNames: ["CI"],
     });
 
     expect(getWatchedWorkflowTargetKey(withTarget[0].workflowTargets![0])).toBe("include:release/*");
     expect(removeWatchedWorkflowTarget(withTarget, repo, "include:release/*")).toEqual(withPullRequests);
     expect(removeWatchedWorkflowTarget(
-      addWatchedWorkflowTarget([], repo, { kind: "default" }),
+      addWatchedWorkflowTarget([], repo, { kind: "default", workflowNames: ["CI"] }),
       repo,
       "default",
     )).toEqual([]);
@@ -242,4 +237,32 @@ describe("watched repository operations", () => {
       }]);
     },
   );
+
+  it.each(["default", "own", "all", "include", "exclude"] as const)("requires workflows before adding a %s rule", (kind) => {
+    const repo = { owner: "getsentry", repo: "sentry-native" };
+    const watchedRepos = [{ ...repo, pullRequestScope: "user" as const }];
+
+    for (const workflowNames of [[], ["", " "]]) {
+      expect(addWatchedWorkflowTarget(watchedRepos, repo, {
+        kind, pattern: "release/*", workflowNames,
+      })).toBe(watchedRepos);
+    }
+  });
+
+  it("saves a branch rule with its selected workflows", () => {
+    const repo = { owner: "getsentry", repo: "sentry-native" };
+    const watchedRepos = [{
+      ...repo,
+      workflowTargets: [{ kind: "default" as const, workflowNames: ["CI"] }],
+    }];
+    const saved = addWatchedWorkflowTarget(watchedRepos, repo, {
+      kind: "include", pattern: " release/* ", workflowNames: ["CI", "CodeQL", "CI"],
+    });
+
+    expect(saved[0].workflowTargets).toEqual([
+      { kind: "default", workflowNames: ["CI"] },
+      { kind: "include", pattern: "release/*", workflowNames: ["CI", "CodeQL"] },
+    ]);
+    expect(watchedRepos[0].workflowTargets).toEqual([{ kind: "default", workflowNames: ["CI"] }]);
+  });
 });

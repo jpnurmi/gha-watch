@@ -60,4 +60,63 @@ describe("UI regions", () => {
     expect(html).toContain('name="url"');
     expect(html).toContain('Invalid &quot;URL&quot;');
   });
+
+  it.each(["include", "exclude"] as const)("marks an empty %s rule inactive until a workflow is selected", (kind) => {
+    const props = {
+      currentWatchView: "inbox" as const,
+      renderRepoIcon: () => "icon",
+      watchedRepos: [{
+        owner: "owner", repo: "repo",
+        workflowTargets: [{ kind, pattern: "release/*", workflowNames: [] as string[] }],
+      }],
+      repositoryWatchMenu: {
+        repoKey: "owner/repo", owner: "owner", repo: "repo", status: "loaded" as const,
+        defaultBranch: "main", userLogin: "user",
+        workflows: [{ name: "CI", path: ".github/workflows/ci.yml", state: "active" }],
+      },
+    };
+
+    const inactive = renderRepositorySettings(group, props);
+    expect(inactive).toContain('>No workflows</span>');
+    expect(inactive).toContain('Select at least one workflow to activate this rule.');
+    expect(inactive).toContain('aria-checked="false"');
+
+    props.watchedRepos[0].workflowTargets[0].workflowNames = ["CI"];
+    const active = renderRepositorySettings(group, props);
+    expect(active).not.toContain('>No workflows</span>');
+    expect(active).toContain('class="watch-branch-badge workflow-target-chip" title="CI">CI</span>');
+    expect(active).not.toContain('Select at least one workflow to activate this rule.');
+    expect(active).toContain('aria-checked="true"');
+  });
+
+  it.each(["default", "own", "all", "include", "exclude"] as const)("requires confirming workflows for a new %s rule", (kind) => {
+    const draft = { kind, workflowNames: ["CI"] };
+    const props = {
+      currentWatchView: "inbox" as const,
+      renderRepoIcon: () => "icon",
+      watchedRepos: [{
+        owner: "owner", repo: "repo",
+        workflowTargets: [{ kind: "default" as const, workflowNames: ["CI"] }],
+      }],
+      repositoryWatchMenu: {
+        repoKey: "owner/repo", owner: "owner", repo: "repo", status: "loaded" as const,
+        defaultBranch: "main", userLogin: "user", targetEditor: draft,
+        workflows: [{ name: "CI", path: ".github/workflows/ci.yml", state: "active" }],
+      },
+    };
+
+    const selected = renderRepositorySettings(group, props);
+    expect(selected).toContain('data-action="save-workflow-target"');
+    expect(selected).toContain('data-action="toggle-draft-workflow"');
+    expect(selected).not.toContain('data-action="toggle-workflow-subscription"');
+    expect(selected).toContain('aria-checked="true"');
+    expect(selected).toContain('>Save rule</button>');
+    expect(selected).toContain('>Cancel</button>');
+    expect(selected.includes('name="pattern"')).toBe(kind === "include" || kind === "exclude");
+
+    draft.workflowNames = [];
+    const empty = renderRepositorySettings(group, props);
+    expect(empty).toContain('disabled>Save rule</button>');
+    expect(empty).toContain('aria-checked="false"');
+  });
 });

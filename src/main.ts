@@ -3,7 +3,7 @@ import { createCoalescedEffect } from "./app/coalescedEffect";
 import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import { renderWatch } from "./ui/watchRow";
 import { renderAddForm, type PullRequestDiscoveryState } from "./ui/addPanel";
-import { renderRepositorySettings, type RepositoryWatchMenuState } from "./ui/repositorySettings";
+import { fitWorkflowTargetSummaries, renderRepositorySettings, type RepositoryWatchMenuState } from "./ui/repositorySettings";
 import { escapeHtml, renderBranchBadge, renderChevronIcon, renderTriageButtons } from "./ui/markup";
 import { createSettingsJournal } from "./platform/settingsJournal";
 import { invokeDesktop } from "./platform/desktop";
@@ -68,6 +68,7 @@ import {
   addWatchedRepo,
   getWatchedRepoKey,
   getWatchedWorkflowTargetKey,
+  getWatchedWorkflowTargets,
   isWatchedRepo,
   removeWatchedWorkflowTarget,
   toggleWatchedPullRequestScope,
@@ -75,6 +76,7 @@ import {
   updateWatchedRepoIcon,
   type WatchedPullRequestScope,
   type WatchedRepo,
+  type WatchedWorkflowTarget,
   type WatchedWorkflowTargetKind,
 } from "./domain/watchedRepos";
 import {
@@ -160,6 +162,7 @@ function getUiPlatform(userAgent: string): string {
 }
 
 const app = appRoot;
+window.addEventListener("resize", () => fitWorkflowTargetSummaries(app));
 const isDemoMode =
   window.location.hostname === "127.0.0.1" &&
   new URLSearchParams(window.location.search).get("demo") === "checks";
@@ -619,6 +622,7 @@ function renderNow(): void {
     </section>
   `);
 
+  fitWorkflowTargetSummaries(app);
   void resizePopupToContent();
 }
 
@@ -1227,39 +1231,73 @@ function bindEvents(): void {
 
   on("click", '[data-action="add-workflow-target"]', (_event, button: HTMLButtonElement) => {
     const kind = getWorkflowTargetKind(button.dataset.kind);
+    const menuState = repositoryWatchMenu;
 
-    if (!kind || repositoryWatchMenu?.status !== "loaded") {
+    if (!kind || menuState?.status !== "loaded") {
       return;
     }
 
-    if (kind === "include" || kind === "exclude") {
-      repositoryWatchMenu = { ...repositoryWatchMenu, targetEditor: kind };
-      render();
-      return;
-    }
-
-    addWorkflowTarget({
-      owner: button.dataset.owner || "",
-      repo: button.dataset.repo || "",
-    }, kind);
+    const repo = settings.watchedRepos.find(
+      (item) => getWatchedRepoKey(item) === menuState.repoKey,
+    );
+    const workflowNames = [...new Set(repo
+      ? getWatchedWorkflowTargets(repo).flatMap((target) => target.workflowNames)
+      : [])];
+    repositoryWatchMenu = { ...menuState, targetEditor: { kind, workflowNames } };
+    render();
   });
 
-  on("submit", '[data-action="add-workflow-pattern"]', (event, form: HTMLFormElement) => {
+  on("click", '[data-action="toggle-draft-workflow"]', (_event, button: HTMLButtonElement) => {
+    const menuState = repositoryWatchMenu;
+
+    if (menuState?.status !== "loaded") {
+      return;
+    }
+
+    const draft = menuState.targetEditor;
+    const name = button.dataset.workflow;
+
+    if (!draft || draft === "menu" || !name) {
+      return;
+    }
+
+    repositoryWatchMenu = {
+      ...menuState,
+      targetEditor: {
+        ...draft,
+        workflowNames: draft.workflowNames.includes(name)
+          ? draft.workflowNames.filter((item) => item !== name)
+          : [...draft.workflowNames, name],
+      },
+    };
+    render();
+  });
+
+  on("submit", '[data-action="save-workflow-target"]', (event, form: HTMLFormElement) => {
     event.preventDefault();
-    const kind = getWorkflowTargetKind(form.dataset.kind);
     const pattern = new FormData(form).get("pattern");
     const menuState = repositoryWatchMenu;
 
-    if (
-      (kind !== "include" && kind !== "exclude") ||
-      typeof pattern !== "string" ||
-      !pattern.trim() ||
-      menuState?.status !== "loaded"
-    ) {
+    if (menuState?.status !== "loaded") {
       return;
     }
 
-    addWorkflowTarget(menuState, kind, pattern.trim());
+    const draft = menuState.targetEditor;
+
+    if (!draft || draft === "menu" || draft.workflowNames.length === 0) {
+      return;
+    }
+
+    const needsPattern = draft.kind === "include" || draft.kind === "exclude";
+
+    if (needsPattern && (typeof pattern !== "string" || !pattern.trim())) {
+      return;
+    }
+
+    addWorkflowTarget(menuState, {
+      ...draft,
+      ...(needsPattern && typeof pattern === "string" ? { pattern: pattern.trim() } : {}),
+    });
   });
 
   on("click", '[data-action="select-workflow-target"]', (_event, button: HTMLButtonElement) => {
@@ -1269,7 +1307,7 @@ function bindEvents(): void {
 
     repositoryWatchMenu = {
       ...repositoryWatchMenu,
-      selectedTargetKey: button.dataset.target,
+      selectedTargetKey: button.getAttribute("aria-expanded") === "true" ? null : button.dataset.target,
       targetEditor: undefined,
     };
     render();
@@ -2217,12 +2255,11 @@ function toggleWorkflowSubscription(
 
 function addWorkflowTarget(
   repo: Pick<WatchedRepo, "owner" | "repo">,
-  kind: WatchedWorkflowTargetKind,
-  pattern?: string,
+  target: WatchedWorkflowTarget,
 ): void {
   const wasWatched = isWatchedRepo(settings.watchedRepos, repo);
-  let watchedRepos = addWatchedWorkflowTarget(settings.watchedRepos, repo, { kind, pattern });
-  const targetKey = getWatchedWorkflowTargetKey({ kind, pattern });
+  let watchedRepos = addWatchedWorkflowTarget(settings.watchedRepos, repo, target);
+  const targetKey = getWatchedWorkflowTargetKey(target);
 
   if (!wasWatched) {
     watchedRepos = updateWatchedRepoIcon(watchedRepos, repo, findRepoIconUrl(repo));
@@ -2238,6 +2275,8 @@ function addWorkflowTarget(
   if (!wasWatched) {
     void refreshWatchedRepoIcon(repo);
   }
+
+  void refreshSettingsAndStatuses();
 }
 
 function removeWorkflowTarget(repo: Pick<WatchedRepo, "owner" | "repo">, targetKey: string): void {
