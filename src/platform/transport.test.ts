@@ -73,4 +73,43 @@ describe("GitHub transport", () => {
     await remote.load();
     expect(executor.execute).toHaveBeenCalledTimes(2);
   });
+
+  it("preserves stdout and stderr", async () => {
+    const events = new EventEmitter<CommandEvents>();
+    const command = Object.assign(events, {
+      stdout: new EventEmitter<OutputEvents<string>>(), stderr: new EventEmitter<OutputEvents<string>>(),
+      spawn: async () => ({ kill: async () => {} }),
+    }) as unknown as Command<string>;
+    const result = executeShellCommand(command);
+    command.stdout.emit("data", "first\n");
+    command.stdout.emit("data", "second\r\n");
+    command.stdout.emit("data", "last");
+    command.stderr.emit("data", "warning\r\n");
+    command.stderr.emit("data", "details");
+    events.emit("close", { code: 0, signal: null });
+
+    await expect(result).resolves.toEqual({
+      code: 0,
+      stdout: "first\nsecond\r\nlast",
+      stderr: "warning\r\ndetails",
+    });
+  });
+
+  it.each(["\n", "\r\n"])("parses streamed HTTP responses with %j header line endings", async (ending) => {
+    const events = new EventEmitter<CommandEvents>();
+    const command = Object.assign(events, {
+      stdout: new EventEmitter<OutputEvents<string>>(), stderr: new EventEmitter<OutputEvents<string>>(),
+      async spawn() {
+        command.stdout.emit("data", "HTTP/2.0 200 OK\n");
+        command.stdout.emit("data", `Etag: "abc"${ending}`);
+        command.stdout.emit("data", ending);
+        command.stdout.emit("data", '{"ok":true}');
+        events.emit("close", { code: 0, signal: null });
+        return { kill: async () => {} };
+      },
+    }) as unknown as Command<string>;
+    const executor = { execute: () => executeShellCommand(command) };
+
+    await expect(fetchConditionalApiJson(executor, ["repos/getsentry/sentry"])).resolves.toEqual({ ok: true });
+  });
 });

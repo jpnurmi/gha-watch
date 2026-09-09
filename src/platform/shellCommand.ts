@@ -20,7 +20,7 @@ export async function executeShellCommand(command: Command<string>, timeoutMs = 
   let timedOut = false;
   command.on("close", (result) => {
     if (timedOut) reject(new ShellTimeoutError());
-    else resolve({ code: result.code ?? 1, stdout: stdout.join("\n"), stderr: stderr.join("\n") });
+    else resolve({ code: result.code ?? 1, stdout: stdout.join(""), stderr: stderr.join("") });
   });
   command.on("error", reject);
   // observe errors that arrive before spawn resolves
