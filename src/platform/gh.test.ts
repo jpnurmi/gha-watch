@@ -763,6 +763,60 @@ describe("fetchRateLimit", () => {
       },
     ]);
   });
+
+  it.each([null, {}, { resources: null }, { resources: {} }])("rejects missing quotas in %j", async (response) => {
+    const { executor } = createExecutor({ code: 0, stdout: JSON.stringify(response), stderr: "" });
+
+    await expect(fetchRateLimit(executor)).rejects.toThrow("gh returned a response without valid REST rate limit.");
+  });
+
+  describe.each([
+    ["core", "REST"],
+    ["graphql", "GraphQL"],
+  ])("%s quota validation", (resource, label) => {
+    const quota = { limit: 5000, used: 500, remaining: 4500, reset: 1786273200 };
+
+    it.each([undefined, null, {}, "invalid"])("rejects a malformed quota: %j", async (value) => {
+      const { executor } = createExecutor({
+        code: 0,
+        stdout: JSON.stringify({ resources: { core: quota, graphql: quota, [resource]: value } }),
+        stderr: "",
+      });
+
+      await expect(fetchRateLimit(executor)).rejects.toThrow(`gh returned a response without valid ${label} rate limit.`);
+    });
+
+    describe.each(["limit", "used", "remaining", "reset"])("%s", (field) => {
+      it.each([undefined, null, "5000", true, {}])("rejects a nonnumeric value: %j", async (value) => {
+        const { executor } = createExecutor({
+          code: 0,
+          stdout: JSON.stringify({
+            resources: { core: quota, graphql: quota, [resource]: { ...quota, [field]: value } },
+          }),
+          stderr: "",
+        });
+
+        await expect(fetchRateLimit(executor)).rejects.toThrow(`gh returned a response without valid ${label} rate limit.`);
+      });
+    });
+  });
+
+  it("accepts zero values and compares quotas by remaining fraction", async () => {
+    const { executor } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({
+        resources: {
+          core: { limit: 5000, used: 4500, remaining: 500, reset: 0 },
+          graphql: { limit: 100, used: 0, remaining: 100, reset: 1786273200 },
+        },
+      }),
+      stderr: "",
+    });
+
+    await expect(fetchRateLimit(executor)).resolves.toEqual({
+      resource: "REST", limit: 5000, used: 4500, remaining: 500, reset: 0,
+    });
+  });
 });
 
 describe("fetchRepositoryIconUrl", () => {
@@ -822,6 +876,83 @@ describe("fetchRepositoryDefaultBranch", () => {
         args: ["api", "repos/getsentry/sentry-native"],
       },
     ]);
+  });
+});
+
+describe("repository metadata requests", () => {
+  const target = { owner: "getsentry", repo: "sentry-native" };
+  const avatarUrl = "https://avatars.githubusercontent.com/u/1396951?v=4";
+  const result = {
+    code: 0,
+    stdout: JSON.stringify({ default_branch: "main", owner: { avatar_url: avatarUrl } }),
+    stderr: "",
+  };
+
+  it("shares concurrent icon and default branch requests", async () => {
+    const { executor, calls } = createExecutor(result);
+
+    await expect(Promise.all([
+      fetchRepositoryIconUrl(target, executor),
+      fetchRepositoryDefaultBranch({ owner: "GetSentry", repo: "Sentry-Native" }, executor),
+    ])).resolves.toEqual([avatarUrl, "main"]);
+    expect(calls).toEqual([{ program: "gh", args: ["api", "repos/getsentry/sentry-native"] }]);
+  });
+
+  it("keeps repositories and executors separate", async () => {
+    const first = createExecutor(result);
+    const second = createExecutor(result);
+
+    await Promise.all([
+      fetchRepositoryIconUrl(target, first.executor),
+      fetchRepositoryDefaultBranch({ ...target, repo: "sentry" }, first.executor),
+      fetchRepositoryDefaultBranch({ ...target, owner: "jpnurmi" }, first.executor),
+      fetchRepositoryDefaultBranch(target, second.executor),
+    ]);
+
+    expect(first.calls).toHaveLength(3);
+    expect(second.calls).toHaveLength(1);
+  });
+
+  it("fetches fresh metadata after a request completes", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      result,
+      { ...result, stdout: JSON.stringify({ default_branch: "develop" }) },
+    ]);
+
+    await expect(fetchRepositoryIconUrl(target, executor)).resolves.toBe(avatarUrl);
+    await expect(fetchRepositoryDefaultBranch(target, executor)).resolves.toBe("develop");
+    expect(calls).toHaveLength(2);
+  });
+
+  it.each([
+    [{ code: 1, stdout: "", stderr: "gh auth login" }, "gh is not authenticated. Run `gh auth login` and try again."],
+    [{ code: 0, stdout: "invalid JSON", stderr: "" }, "gh returned invalid JSON."],
+  ])("retries after a shared failure: %j", async (failure, message) => {
+    const { executor, calls } = createSequenceExecutor([failure, result]);
+    const icon = fetchRepositoryIconUrl(target, executor);
+    const branch = fetchRepositoryDefaultBranch(target, executor);
+
+    await Promise.all([
+      expect(icon).rejects.toThrow(message),
+      expect(branch).rejects.toThrow(message),
+    ]);
+    expect(calls).toHaveLength(1);
+    await expect(fetchRepositoryDefaultBranch(target, executor)).resolves.toBe("main");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("validates each field independently", async () => {
+    const { executor, calls } = createExecutor({
+      ...result, stdout: JSON.stringify({ owner: { avatar_url: avatarUrl } }),
+    });
+    const branch = fetchRepositoryDefaultBranch(target, executor);
+    const icon = fetchRepositoryIconUrl(target, executor);
+
+    await Promise.all([
+      expect(branch).rejects.toThrow("gh returned a response without repository default branch."),
+      expect(icon).resolves.toBe(avatarUrl),
+    ]);
+    expect(calls).toHaveLength(1);
   });
 });
 
