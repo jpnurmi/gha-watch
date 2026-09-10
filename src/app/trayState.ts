@@ -16,9 +16,11 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
     (watch) => getWatchTriageState(watch) === "inbox" && !isDeemphasizedPullRequest(watch),
   );
   const hasUnseenChanges = inbox.some(hasUnseenStatusChange);
-  const active = inbox.filter((watch) => watch.active);
   const errors = inbox.filter((watch) => Boolean(watch.error));
   const watchStates = inbox.map((watch) => getWatchState(watch));
+  const active = inbox.filter(
+    (watch, index) => watch.active && watchStates[index]?.status !== "completed",
+  );
   const failures = inbox.filter(
     (_watch, index) =>
       watchStates[index]?.status === "completed" &&
@@ -29,9 +31,7 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
   const cancelled = inbox.filter(
     (_watch, index) => watchStates[index]?.status === "completed" && watchStates[index].conclusion === "cancelled",
   );
-  const hasActiveFailures = inbox.some(
-    (watch, index) => watch.active && Boolean(watchStates[index]?.hasFailedChildren),
-  );
+  const hasActiveFailures = active.some((watch) => Boolean(getWatchState(watch)?.hasFailedChildren));
 
   if (errors.length > 0) {
     return {

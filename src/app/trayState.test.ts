@@ -308,4 +308,43 @@ describe("createTrayState", () => {
       tooltip: "GHA Watch: all watches complete",
     });
   });
+
+  it.each([
+    ["failure", "error"],
+    ["timed_out", "error"],
+    ["action_required", "error"],
+    ["cancelled", "cancelled"],
+    ["skipped", "success"],
+  ] as const)("does not show completed %s as busy while polling", (conclusion, status) => {
+    for (const lastState of [undefined, { status: "completed", conclusion, hasFailedChildren: true }]) {
+      expect(
+        createTrayState([
+          watch({
+            active: true,
+            status: `completed:${conclusion}`,
+            lastState,
+          }),
+        ]),
+      ).toMatchObject({ status });
+    }
+  });
+
+  it("counts only unfinished watches when polling completed failures", () => {
+    expect(
+      createTrayState([
+        watch({ status: "in_progress", lastState: { status: "in_progress", conclusion: null } }),
+        watch({
+          id: "getsentry/sentry/run/456",
+          active: true,
+          status: "completed:failure",
+          lastState: { status: "completed", conclusion: "failure" },
+        }),
+      ]),
+    ).toEqual({
+      status: "mixed",
+      hasUnseenChanges: false,
+      label: "Failures with 1 active watch",
+      tooltip: "GHA Watch: failures detected; 1 watch still active",
+    });
+  });
 });
