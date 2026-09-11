@@ -1680,7 +1680,8 @@ export function createWatchController(
       const now = getNow();
       const normalizedSyncedWatches = syncedWatches
         .map(normalizeWatchSeenStatus)
-        .map((watch) => normalizeWatchDoneAt(watch, now));
+        .map((watch) => normalizeWatchDoneAt(watch, now))
+        .map(withDefaultDraftTriage);
       const retainedSyncedWatches = clearExpiredDoneWatches(
         normalizedSyncedWatches,
         now,
@@ -2032,7 +2033,7 @@ export function createWatchController(
         };
         const status = formatWatchState(nextState);
         const transition = getStatusTransition(current.lastState, nextState);
-        const nextWatch = {
+        const nextWatch = withDefaultDraftTriage({
           ...current,
           target: withSnapshotPrNumber(current.target, snapshot.prNumber),
           label: getSnapshotLabel(current, snapshot),
@@ -2045,7 +2046,7 @@ export function createWatchController(
           error: undefined,
           errorKind: undefined,
           errorAt: undefined,
-        };
+        });
 
         if (transition.notify && shouldSendWatchNotification(nextWatch)) {
           rowNotifications.push({ notification: createWatchNotification(nextWatch, notificationTime), status });
