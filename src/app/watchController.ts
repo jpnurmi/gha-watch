@@ -50,7 +50,7 @@ import type {
 } from "./githubPort";
 import { NotificationPermissionDeniedError } from "./notificationPort";
 import { createWatchNotification, type WatchNotification } from "./watchNotification";
-import { isDeemphasizedPullRequest } from "../domain/watchPolicy";
+import { isDraftPullRequestWatch } from "../domain/watchPolicy";
 import { createPersistenceQueue } from "./persistenceQueue";
 
 export type WatchControllerDeps = {
@@ -359,9 +359,12 @@ export function createWatchController(
 ): WatchController {
   const initialNow = deps.now?.() ?? new Date();
   let normalizedDoneAt = false;
+  let normalizedDraftTriage = false;
   const normalizedWatches = initialWatches.map(normalizeWatchSeenStatus).map((watch) => {
-    const normalized = normalizeWatchDoneAt(watch, initialNow);
-    normalizedDoneAt ||= normalized !== watch;
+    const withDoneAt = normalizeWatchDoneAt(watch, initialNow);
+    const normalized = withDefaultDraftTriage(withDoneAt);
+    normalizedDoneAt ||= withDoneAt !== watch;
+    normalizedDraftTriage ||= normalized !== withDoneAt;
     return normalized;
   });
   const watchState = createWatchState(clearExpiredDoneWatches(normalizedWatches, initialNow), deps.save);
@@ -381,7 +384,7 @@ export function createWatchController(
     suppressions = addWatchSuppressions(suppressions, clearedIds, initialNow);
   }
 
-  if (normalizedDoneAt || watchState.get() !== normalizedWatches) {
+  if (normalizedDoneAt || normalizedDraftTriage || watchState.get() !== normalizedWatches) {
     watchState.persist();
   }
 
@@ -560,7 +563,7 @@ export function createWatchController(
       }
       let watch = existingWatch;
       updateWatch(id, (current) => {
-        watch = withBaselineSnapshot(current, snapshot);
+        watch = withDefaultDraftTriage(withBaselineSnapshot(current, snapshot));
         return watch;
       });
       return { watch };
@@ -592,7 +595,7 @@ export function createWatchController(
     try {
       const snapshot = prefetchedSnapshot ?? await deps.fetchState(target);
       metadataHydratedWatchIds.add(watch.id);
-      return { watch: withBaselineSnapshot(watch, snapshot) };
+      return { watch: withDefaultDraftTriage(withBaselineSnapshot(watch, snapshot)) };
     } catch (error) {
       const failure = createWatchPollFailure(watch.id, error);
       return {
@@ -670,7 +673,7 @@ export function createWatchController(
       }
 
       successfulWatchIds.push(watch.id);
-      return withPullRequestDetails(watch, target, details);
+      return withDefaultDraftTriage(withPullRequestDetails(watch, target, details));
     });
 
     if (nextWatches.some((watch, index) => watch !== watchState.get()[index])) {
@@ -1304,7 +1307,7 @@ export function createWatchController(
     const snapshot = summarizeWorkflowRuns(runs);
     const status = formatWatchState(snapshot.state);
     const [baseWatch] = addWatch([], target);
-    const nextWatch: WatchRecord = {
+    const nextWatch: WatchRecord = withDefaultDraftTriage({
       ...(existingWatch ?? baseWatch),
       target,
       label: pullRequest.title,
@@ -1321,7 +1324,7 @@ export function createWatchController(
       error: undefined,
       errorKind: undefined,
       errorAt: undefined,
-    };
+    });
 
     const shouldNotify = snapshot.terminal && (
       !existingWatch ||
@@ -1494,7 +1497,7 @@ export function createWatchController(
       currentWatch.metadata?.branchName === metadata?.branchName &&
       currentWatch.sourceState === sourceState
     )) {
-      updateWatch(id, (watch) => ({
+      updateWatch(id, (watch) => withDefaultDraftTriage({
         ...watch,
         label: pullRequest.title,
         metadata,
@@ -1677,7 +1680,8 @@ export function createWatchController(
       const now = getNow();
       const normalizedSyncedWatches = syncedWatches
         .map(normalizeWatchSeenStatus)
-        .map((watch) => normalizeWatchDoneAt(watch, now));
+        .map((watch) => normalizeWatchDoneAt(watch, now))
+        .map(withDefaultDraftTriage);
       const retainedSyncedWatches = clearExpiredDoneWatches(
         normalizedSyncedWatches,
         now,
@@ -2029,7 +2033,7 @@ export function createWatchController(
         };
         const status = formatWatchState(nextState);
         const transition = getStatusTransition(current.lastState, nextState);
-        const nextWatch = {
+        const nextWatch = withDefaultDraftTriage({
           ...current,
           target: withSnapshotPrNumber(current.target, snapshot.prNumber),
           label: getSnapshotLabel(current, snapshot),
@@ -2042,7 +2046,7 @@ export function createWatchController(
           error: undefined,
           errorKind: undefined,
           errorAt: undefined,
-        };
+        });
 
         if (transition.notify && shouldSendWatchNotification(nextWatch)) {
           rowNotifications.push({ notification: createWatchNotification(nextWatch, notificationTime), status });
@@ -2385,8 +2389,16 @@ function emptyMetadataRefreshResult(): MetadataRefreshResult {
   };
 }
 
+function withDefaultDraftTriage(watch: WatchRecord): WatchRecord {
+  if (watch.triageState !== undefined || !isDraftPullRequestWatch(watch)) {
+    return watch;
+  }
+
+  return { ...watch, triageState: "saved" };
+}
+
 function shouldSendWatchNotification(watch: WatchRecord): boolean {
-  return getWatchTriageState(watch) === "inbox" && !isDeemphasizedPullRequest(watch);
+  return getWatchTriageState(watch) === "inbox";
 }
 
 function getPollSummaryStatus(successCount: number, failureCount: number): PollSummaryStatus {

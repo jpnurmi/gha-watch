@@ -692,11 +692,12 @@ describe("createPopupViewModel", () => {
     expect(model.rows.map((row) => row.doneCandidate)).toEqual([true, true, true, false, false]);
   });
 
-  it("deemphasizes draft and standalone-WIP pull request titles", () => {
+  it("styles draft and WIP pull request titles without dimming rows", () => {
     const pullRequest = (
       id: string,
       title: string,
       sourceState: WatchRecord["sourceState"] = "ready",
+      triageState?: WatchRecord["triageState"],
     ) =>
       watch({
         id: `getsentry/sentry/pull/${id}`,
@@ -710,6 +711,7 @@ describe("createPopupViewModel", () => {
         sourceState,
         label: title,
         metadata: { prTitle: title },
+        ...(triageState ? { triageState } : {}),
       });
     const model = createPopupViewModel([
       pullRequest("1", "Draft without a marker", "draft"),
@@ -720,6 +722,7 @@ describe("createPopupViewModel", () => {
       pullRequest("6", "WIPped into shape"),
       pullRequest("7", "SWIP the prefix"),
       pullRequest("8", "Ready for review"),
+      pullRequest("9", "Saved WIP", "ready", "saved"),
       watch({ label: "WIP: standalone workflow" }),
       watch({
         id: "getsentry/sentry/run/456",
@@ -737,7 +740,7 @@ describe("createPopupViewModel", () => {
       }),
     ]);
 
-    expect(model.rows.map((row) => row.deemphasized)).toEqual([
+    expect(model.rows.map((row) => row.draftLike)).toEqual([
       true,
       true,
       true,
@@ -746,6 +749,7 @@ describe("createPopupViewModel", () => {
       false,
       false,
       false,
+      true,
       false,
       true,
     ]);

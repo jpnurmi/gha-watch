@@ -5,24 +5,24 @@ import { getWatchTriageActions } from "./watchTriage";
 const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("getWatchTriageActions", () => {
-  it("offers save and done actions from the inbox", () => {
+  it("offers drafts and done actions from the inbox", () => {
     expect(getWatchTriageActions("inbox")).toEqual([
-      { label: "Save", state: "saved" },
+      { label: "Move to Drafts", state: "saved" },
       { label: "Done", state: "done" },
     ]);
   });
 
   it("offers inbox and done actions from saved", () => {
     expect(getWatchTriageActions("saved")).toEqual([
-      { label: "Move to inbox", state: "inbox" },
+      { label: "Move to Inbox", state: "inbox" },
       { label: "Done", state: "done" },
     ]);
   });
 
-  it("offers inbox and save actions from done", () => {
+  it("offers inbox and drafts actions from done", () => {
     expect(getWatchTriageActions("done")).toEqual([
-      { label: "Move to inbox", state: "inbox" },
-      { label: "Save", state: "saved" },
+      { label: "Move to Inbox", state: "inbox" },
+      { label: "Move to Drafts", state: "saved" },
     ]);
   });
 

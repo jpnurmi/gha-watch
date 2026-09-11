@@ -350,6 +350,30 @@ describe("watchController", () => {
     expect(saves.at(-1)).toEqual(controller.getWatches());
   });
 
+  it("moves synced draft watches without explicit triage to Drafts", () => {
+    const { deps, saves } = createDeps([]);
+    const remoteDraft: WatchRecord = {
+      ...existingWatch(),
+      id: "getsentry/sentry/pull/51",
+      target: prTarget,
+      sourceState: "ready",
+      label: "WIP: Polish draft triage",
+      metadata: { prTitle: "WIP: Polish draft triage" },
+    };
+    const controller = createWatchController(deps, [existingWatch()]);
+
+    controller.replaceSyncedWatches([remoteDraft]);
+
+    expect(controller.getWatches()).toMatchObject([
+      existingWatch(),
+      {
+        id: "getsentry/sentry/pull/51",
+        triageState: "saved",
+      },
+    ]);
+    expect(saves.at(-1)).toEqual(controller.getWatches());
+  });
+
   it("removes local inbox watches suppressed after remote Done pruning", () => {
     const { deps, suppressionSaves } = createDeps([]);
     const localInbox = existingWatch();
@@ -516,6 +540,34 @@ describe("watchController", () => {
         metadata: { branchName: "feature/flaky-ci", prTitle: "Pull request #51" },
         status: "queued",
         lastSeenStatus: "queued",
+      },
+    ]);
+  });
+
+  it("adds draft pull request watches to Drafts by default", async () => {
+    const { deps } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "Pull request #51",
+        prNumber: "51",
+        url: prTarget.url,
+      },
+    ]);
+    const controller = createWatchController({
+      ...deps,
+      async fetchPullRequestDetails() {
+        return [{ branchName: "feature/flaky-ci", state: "draft", title: "WIP: Pull request #51" }];
+      },
+    });
+
+    await controller.add(prTarget);
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/pull/51",
+        sourceState: "draft",
+        triageState: "saved",
       },
     ]);
   });
@@ -2807,7 +2859,7 @@ describe("watchController", () => {
     ]);
   });
 
-  it("refreshes inactive draft PRs without notifying", async () => {
+  it("refreshes inactive draft PRs explicitly moved to Inbox", async () => {
     const { deps, fetches, notificationRecords } = createDeps([
       {
         status: "completed",
@@ -2830,6 +2882,7 @@ describe("watchController", () => {
         status: "completed:failure",
         lastSeenStatus: "completed:failure",
         lastState: { status: "completed", conclusion: "failure" },
+        triageState: "inbox",
         timing: {
           startedAt: "2026-08-17T14:26:59Z",
           completedAt: "2026-08-17T14:27:00Z",
@@ -2842,7 +2895,7 @@ describe("watchController", () => {
     await controller.pollNow();
 
     expect(fetches).toEqual([prTarget]);
-    expect(notificationRecords).toEqual([]);
+    expect(notificationRecords).toHaveLength(1);
     expect(controller.getWatches()).toMatchObject([
       {
         status: "completed:success",
@@ -2851,6 +2904,43 @@ describe("watchController", () => {
           completedAt: "2026-08-17T17:27:32Z",
         },
         active: false,
+      },
+    ]);
+  });
+
+  it("moves polled WIP pull requests to Drafts before notifying", async () => {
+    const { deps, fetches, notificationRecords } = createDeps([
+      {
+        status: "completed",
+        conclusion: "failure",
+        title: "Pull request #51",
+        metadata: { prTitle: "WIP: Polish draft triage" },
+        url: prTarget.url,
+      },
+    ]);
+    const controller = createWatchController(deps, [
+      {
+        id: getWatchId(prTarget),
+        target: prTarget,
+        sourceState: "ready",
+        label: "Polish draft triage",
+        metadata: { prTitle: "Polish draft triage" },
+        status: "in_progress",
+        lastSeenStatus: "in_progress",
+        lastState: { status: "in_progress", conclusion: null },
+        active: true,
+        error: undefined,
+      },
+    ]);
+
+    await controller.pollNow();
+
+    expect(fetches).toEqual([prTarget]);
+    expect(notificationRecords).toEqual([]);
+    expect(controller.getWatches()).toMatchObject([
+      {
+        triageState: "saved",
+        status: "completed:failure",
       },
     ]);
   });

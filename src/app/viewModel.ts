@@ -1,6 +1,6 @@
 import { getRepositoryKey } from "../domain/identity";
-import { isDoneCandidate, isDeemphasizedPullRequest, getWatchDisplayLabel, canRerun, canRerunFailed } from "../domain/watchPolicy";
-export { canRerun, canRerunFailed, isDeemphasizedPullRequest } from "../domain/watchPolicy";
+import { isDoneCandidate, isDraftPullRequestWatch, getWatchDisplayLabel, canRerun, canRerunFailed } from "../domain/watchPolicy";
+export { canRerun, canRerunFailed, isDraftPullRequestWatch } from "../domain/watchPolicy";
 import type { WatchedRepo } from "../domain/watchedRepos";
 import {
   getWatchState,
@@ -47,7 +47,7 @@ export type WatchRowViewModel = {
   canRerun: boolean;
   canRerunFailed: boolean;
   doneCandidate: boolean;
-  deemphasized: boolean;
+  draftLike: boolean;
   triageState: WatchTriageState;
   url: string;
 };
@@ -146,7 +146,7 @@ export function createWatchRowViewModel(
       canRerun: canRerun(watch),
       canRerunFailed: canRerunFailed(watch),
       doneCandidate: isDoneCandidate(watch, "error", repoCiStatus),
-      deemphasized: isDeemphasizedPullRequest(watch),
+      draftLike: isDraftPullRequestWatch(watch),
       triageState: getWatchTriageState(watch),
       url: watch.target.url,
     };
@@ -217,7 +217,7 @@ function createRow(
     canRerun: canRerun(watch),
     canRerunFailed: canRerunFailed(watch),
     doneCandidate: isDoneCandidate(watch, tone, repoCiStatus),
-    deemphasized: isDeemphasizedPullRequest(watch),
+    draftLike: isDraftPullRequestWatch(watch),
     triageState: getWatchTriageState(watch),
     url: watch.target.url,
   };

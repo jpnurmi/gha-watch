@@ -32,7 +32,7 @@ export function isDoneCandidate(
   );
 }
 
-export function isDeemphasizedPullRequest(watch: WatchRecord): boolean {
+export function isDraftPullRequestWatch(watch: WatchRecord): boolean {
   if (!isPullRequestWatch(watch)) {
     return false;
   }

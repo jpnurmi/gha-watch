@@ -640,7 +640,7 @@ function renderPopupBodySection(
 function renderWatchList(viewModel: ReturnType<typeof createPopupViewModel>): string {
   const emptyState = {
     inbox: { label: "Inbox is clear", showAdd: true },
-    saved: { label: "No saved watches", showAdd: false },
+    saved: { label: "No drafts", showAdd: false },
     done: { label: "Nothing marked done", showAdd: false },
   }[currentWatchView];
 
@@ -663,7 +663,7 @@ function renderWatchList(viewModel: ReturnType<typeof createPopupViewModel>): st
 function renderWatchViewSwitcher(counts: WatchViewCounts): string {
   const views: Array<{ label: string; state: WatchTriageState }> = [
     { label: "Inbox", state: "inbox" },
-    { label: "Saved", state: "saved" },
+    { label: "Drafts", state: "saved" },
     { label: "Done", state: "done" },
   ];
 
