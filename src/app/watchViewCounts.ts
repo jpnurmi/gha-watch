@@ -16,7 +16,7 @@ export const watchViewCountVisualLimit = 99;
 
 const watchViewLabels: Record<WatchTriageState, string> = {
   inbox: "Inbox",
-  saved: "Saved",
+  saved: "Drafts",
   done: "Done",
 };
 

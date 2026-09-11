@@ -1,6 +1,5 @@
 import type { WatchRecord } from "../domain/watches";
 import { getWatchState, getWatchTriageState, hasUnseenStatusChange } from "../domain/watches";
-import { isDeemphasizedPullRequest } from "./viewModel";
 
 export type TrayStatus = "idle" | "active" | "mixed" | "cancelled" | "error" | "app-error" | "success";
 
@@ -12,23 +11,22 @@ export type TrayState = {
 };
 
 export function createTrayState(watches: WatchRecord[]): TrayState {
-  const inbox = watches.filter(
-    (watch) => getWatchTriageState(watch) === "inbox" && !isDeemphasizedPullRequest(watch),
-  );
-  const hasUnseenChanges = inbox.some(hasUnseenStatusChange);
-  const errors = inbox.filter((watch) => Boolean(watch.error));
-  const watchStates = inbox.map((watch) => getWatchState(watch));
+  const inbox = watches.filter((watch) => getWatchTriageState(watch) === "inbox");
+  const included = inbox;
+  const hasUnseenChanges = included.some(hasUnseenStatusChange);
+  const errors = included.filter((watch) => Boolean(watch.error));
+  const watchStates = included.map((watch) => getWatchState(watch));
   const active = inbox.filter(
-    (watch, index) => watch.active && watchStates[index]?.status !== "completed",
+    (watch) => watch.active && getWatchState(watch)?.status !== "completed",
   );
-  const failures = inbox.filter(
+  const failures = included.filter(
     (_watch, index) =>
       watchStates[index]?.status === "completed" &&
       watchStates[index].conclusion !== "success" &&
       watchStates[index].conclusion !== "cancelled" &&
       watchStates[index].conclusion !== "skipped",
   );
-  const cancelled = inbox.filter(
+  const cancelled = included.filter(
     (_watch, index) => watchStates[index]?.status === "completed" && watchStates[index].conclusion === "cancelled",
   );
   const hasActiveFailures = active.some((watch) => Boolean(getWatchState(watch)?.hasFailedChildren));
@@ -78,7 +76,7 @@ export function createTrayState(watches: WatchRecord[]): TrayState {
     };
   }
 
-  if (inbox.length > 0) {
+  if (included.length > 0) {
     return {
       status: "success",
       hasUnseenChanges,

@@ -520,6 +520,34 @@ describe("watchController", () => {
     ]);
   });
 
+  it("adds draft pull request watches to Drafts by default", async () => {
+    const { deps } = createDeps([
+      {
+        status: "queued",
+        conclusion: null,
+        title: "Pull request #51",
+        prNumber: "51",
+        url: prTarget.url,
+      },
+    ]);
+    const controller = createWatchController({
+      ...deps,
+      async fetchPullRequestDetails() {
+        return [{ branchName: "feature/flaky-ci", state: "draft", title: "WIP: Pull request #51" }];
+      },
+    });
+
+    await controller.add(prTarget);
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/pull/51",
+        sourceState: "draft",
+        triageState: "saved",
+      },
+    ]);
+  });
+
   it("surfaces pull request metadata failures after adding the watch", async () => {
     const { deps } = createDeps([
       {
@@ -2807,7 +2835,7 @@ describe("watchController", () => {
     ]);
   });
 
-  it("refreshes inactive draft PRs without notifying", async () => {
+  it("refreshes inactive draft PRs explicitly moved to Inbox", async () => {
     const { deps, fetches, notificationRecords } = createDeps([
       {
         status: "completed",
@@ -2830,6 +2858,7 @@ describe("watchController", () => {
         status: "completed:failure",
         lastSeenStatus: "completed:failure",
         lastState: { status: "completed", conclusion: "failure" },
+        triageState: "inbox",
         timing: {
           startedAt: "2026-08-17T14:26:59Z",
           completedAt: "2026-08-17T14:27:00Z",
@@ -2842,7 +2871,7 @@ describe("watchController", () => {
     await controller.pollNow();
 
     expect(fetches).toEqual([prTarget]);
-    expect(notificationRecords).toEqual([]);
+    expect(notificationRecords).toHaveLength(1);
     expect(controller.getWatches()).toMatchObject([
       {
         status: "completed:success",

@@ -80,7 +80,7 @@ describe("createTrayState", () => {
     });
   });
 
-  it("ignores dimmed draft and WIP pull requests", () => {
+  it("ignores completed draft and WIP pull requests in Drafts", () => {
     expect(
       createTrayState([
         watch({
@@ -93,8 +93,11 @@ describe("createTrayState", () => {
             url: "https://github.com/getsentry/sentry/pull/123",
           },
           sourceState: "draft",
-          active: true,
-          lastSeenStatus: "queued",
+          triageState: "saved",
+          active: false,
+          status: "completed:failure",
+          lastSeenStatus: "in_progress",
+          lastState: { status: "completed", conclusion: "failure" },
         }),
         watch({
           id: "getsentry/sentry/run/456",
@@ -107,6 +110,7 @@ describe("createTrayState", () => {
             url: "https://github.com/getsentry/sentry/actions/runs/456",
           },
           sourceState: "ready",
+          triageState: "saved",
           metadata: { prTitle: "Fix flaky tests [WIP]" },
           active: false,
           status: "completed:failure",
@@ -126,6 +130,54 @@ describe("createTrayState", () => {
       label: "All watches complete",
       tooltip: "GHA Watch: all watches complete",
     });
+  });
+
+  it("uses a busy tray icon for a failing workflow from a WIP pull request", () => {
+    expect(
+      createTrayState([
+        watch({
+          target: {
+            kind: "run",
+            owner: "getsentry",
+            repo: "sentry-unreal",
+            runId: "1540",
+            prNumber: "1540",
+            url: "https://github.com/getsentry/sentry-unreal/actions/runs/1540",
+          },
+          sourceState: "ready",
+          metadata: { prTitle: "[WIP] ref(native): port attachments to value-based API" },
+          status: "in_progress:failure",
+          lastState: { status: "in_progress", conclusion: null, hasFailedChildren: true },
+        }),
+      ]),
+    ).toEqual({
+      status: "mixed",
+      hasUnseenChanges: false,
+      label: "Failures with 1 active watch",
+      tooltip: "GHA Watch: failures detected; 1 watch still active",
+    });
+  });
+
+  it("counts draft pull requests explicitly moved to Inbox", () => {
+    expect(
+      createTrayState([
+        watch({
+          id: "getsentry/sentry/pull/123",
+          target: {
+            kind: "pr",
+            owner: "getsentry",
+            repo: "sentry",
+            prNumber: "123",
+            url: "https://github.com/getsentry/sentry/pull/123",
+          },
+          sourceState: "draft",
+          triageState: "inbox",
+          active: false,
+          status: "completed:failure",
+          lastState: { status: "completed", conclusion: "failure" },
+        }),
+      ]),
+    ).toMatchObject({ status: "error" });
   });
 
   it("keeps standalone WIP-named workflows in the aggregate", () => {

@@ -1710,22 +1710,15 @@ button.repo-ci-status:focus-visible {
   text-align: left;
 }
 
-.watch.has-done-candidate .watch-title-text,
-.watch.is-deemphasized .watch-title-text {
+.watch.has-done-candidate .watch-title-text {
   opacity: 0.55;
 }
 
-.watch.is-deemphasized .watch-title-text {
+.watch.is-draft-like .watch-title-text {
   font-style: italic;
 }
 
-.watch.has-done-candidate .watch-title-text {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-
-.watch.has-done-candidate :is(.watch-workflow-status.status-icon-success, .watch-workflow-status.status-icon-failure),
-.watch.is-deemphasized :is(.watch-workflow-status.status-icon-success, .watch-workflow-status.status-icon-failure) {
+.watch.has-done-candidate :is(.watch-workflow-status.status-icon-success, .watch-workflow-status.status-icon-failure) {
   color: #8b949e;
 }
 

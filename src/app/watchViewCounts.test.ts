@@ -122,7 +122,7 @@ describe("watch view badges", () => {
       getWatchViewAriaLabel("inbox", { total: 123, unseen: 17 }),
     ).toBe("Inbox, 123 items, 17 unseen");
     expect(getWatchViewAriaLabel("saved", { total: 1, unseen: 1 })).toBe(
-      "Saved, 1 item",
+      "Drafts, 1 item",
     );
   });
 
