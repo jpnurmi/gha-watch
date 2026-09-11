@@ -30,6 +30,14 @@ describe("UI regions", () => {
     expect(renderWatch(row, { id: "other", kind: "rerun" })).not.toContain('data-action="rerun-failed"');
   });
 
+  it("highlights unseen changes on the title without a leading dot", () => {
+    const html = renderWatch({ ...row, unseenStatusChange: true });
+
+    expect(html).toContain("has-unseen-change");
+    expect(html).not.toContain("unseen-dot");
+    expect(html).not.toContain("watch-leading-seen-button");
+  });
+
   it("shows removal only in Done and preserves the PR lifecycle icon", () => {
     expect(renderWatch({ ...row, triageState: "done" })).toContain('title="Remove from Done"');
     expect(renderWatch(row)).not.toContain('data-action="clear-done-watch"');

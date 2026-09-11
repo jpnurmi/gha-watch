@@ -1553,10 +1553,6 @@ button.repo-ci-status:focus-visible {
   display: inline-grid;
 }
 
-.watch-list.is-reordering-runs .watch.is-row-dragging .watch-leading-seen-button {
-  display: none;
-}
-
 .status-icon,
 .pr-state-icon,
 .watch-subject-icon {
@@ -1574,31 +1570,6 @@ button.repo-ci-status:focus-visible {
   width: var(--tree-leading-width);
   height: var(--tree-leading-width);
   justify-self: center;
-}
-
-.watch-leading-seen-button {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: inline-grid;
-  border: 0;
-  padding: 0;
-  place-items: end;
-  background: transparent;
-  color: #58a6ff;
-  cursor: pointer;
-}
-
-.watch-leading-seen-button:hover .unseen-dot,
-.watch-leading-seen-button:focus-visible .unseen-dot {
-  box-shadow:
-    0 0 0 2px rgb(88 166 255 / 22%),
-    0 0 8px rgb(88 166 255 / 45%);
-}
-
-.watch-leading-seen-button .unseen-dot {
-  right: -2px;
-  bottom: -1px;
 }
 
 .watch-drag-glyph {
@@ -1718,6 +1689,10 @@ button.repo-ci-status:focus-visible {
   font-style: italic;
 }
 
+.watch.has-unseen-change .watch-title-text {
+  color: #58a6ff;
+}
+
 .watch.has-done-candidate :is(.watch-workflow-status.status-icon-success, .watch-workflow-status.status-icon-failure) {
   color: #8b949e;
 }
@@ -1763,7 +1738,8 @@ button.repo-ci-status:focus-visible {
 
 .watch-title-link:hover .watch-title-text,
 .watch-title-link:focus-visible .watch-title-text {
-  color: #58a6ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .watch-title-text {
@@ -2005,15 +1981,6 @@ button.watch-workflow-status:focus-visible {
 .watch:hover .watch-action-button.is-done-candidate,
 .watch:focus-within .watch-action-button.is-done-candidate {
   opacity: 0.72;
-}
-
-.unseen-dot {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: #58a6ff;
-  box-shadow: 0 0 0 2px rgb(88 166 255 / 16%);
 }
 
 .empty {

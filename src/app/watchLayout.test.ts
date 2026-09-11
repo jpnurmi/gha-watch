@@ -107,10 +107,10 @@ describe("watch layout", () => {
 
   it("opens explicit titles and statuses without making row backgrounds clickable", () => {
     expect(styles).toMatch(
-      /\.watch-title-link:hover \.watch-title-text,[^{]*\.watch-title-link:focus-visible \.watch-title-text\s*\{[^}]*color:\s*#58a6ff;/s,
+      /\.watch-title-link:hover \.watch-title-text,[^{]*\.watch-title-link:focus-visible \.watch-title-text\s*\{[^}]*text-decoration:\s*underline;[^}]*text-underline-offset:\s*2px;/s,
     );
-    expect(styles).not.toMatch(
-      /\.watch-title-link:hover \.watch-title-text,[^{]*\.watch-title-link:focus-visible \.watch-title-text\s*\{[^}]*text-decoration:/s,
+    expect(styles).toMatch(
+      /\.watch\.has-unseen-change \.watch-title-text\s*\{[^}]*color:\s*#58a6ff;/s,
     );
     expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*63px;/s);
     expect(styles).toMatch(

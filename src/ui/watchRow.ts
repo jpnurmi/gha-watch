@@ -27,6 +27,7 @@ export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: Pending
             [row.referenceLabel, row.pullRequestReferenceLabel],
             row.url,
             [row.id],
+            row.unseenStatusChange,
           )}
         </span>
         ${renderMetadata(row)}
@@ -37,30 +38,16 @@ export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: Pending
 }
 
 function renderLeadingIcon(row: WatchRowViewModel): string {
-  const markSeenOverlay = row.unseenStatusChange ? renderWatchSeenOverlay(row) : "";
-
   if (row.subject === "pull-request") {
     const prState = row.prState ?? { label: "Ready", tone: "ready" as const };
-    return renderWatchLeadingSlot(renderPrStateIcon(prState, "watch-leading-icon"), markSeenOverlay);
+    return renderWatchLeadingSlot(renderPrStateIcon(prState, "watch-leading-icon"));
   }
 
   if (row.subject === "job") {
-    return renderWatchLeadingSlot(renderWatchSubjectIcon("job"), markSeenOverlay);
+    return renderWatchLeadingSlot(renderWatchSubjectIcon("job"));
   }
 
-  return renderWatchLeadingSlot(renderWatchSubjectIcon("workflow"), markSeenOverlay);
-}
-
-function renderWatchSeenOverlay(row: WatchRowViewModel): string {
-  return `
-    <button class="watch-leading-seen-button" type="button" data-action="mark-seen" data-id="${escapeHtml(row.id)}" title="Mark seen" aria-label="Mark ${escapeHtml(row.label)} seen">
-      ${renderUnseenDot()}
-    </button>
-  `;
-}
-
-function renderUnseenDot(): string {
-  return `<span class="unseen-dot" aria-hidden="true"></span>`;
+  return renderWatchLeadingSlot(renderWatchSubjectIcon("workflow"));
 }
 
 function renderMetadata(row: WatchRowViewModel): string {
@@ -129,6 +116,7 @@ function renderWatchTitleLink(
   referenceLabels: Array<string | undefined>,
   url: string | undefined,
   rowIds: string[],
+  unseenStatusChange: boolean,
 ): string {
   const references = referenceLabels
     .filter((reference): reference is string => Boolean(reference))
@@ -140,6 +128,21 @@ function renderWatchTitleLink(
   `;
 
   if (!url) {
+    if (unseenStatusChange) {
+      return `
+        <button
+          class="watch-title-cluster watch-title-link"
+          type="button"
+          data-action="mark-seen"
+          data-id="${escapeHtml(rowIds[0] ?? "")}"
+          data-row-ids="${escapeHtml(rowIds.join("\n"))}"
+          aria-label="Mark ${escapeHtml(label)} seen"
+        >
+          ${content}
+        </button>
+      `;
+    }
+
     return `<span class="watch-title-cluster">${content}</span>`;
   }
 
