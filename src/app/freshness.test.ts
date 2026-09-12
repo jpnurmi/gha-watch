@@ -61,13 +61,15 @@ describe("getFreshnessState", () => {
     expect(mainSource).toContain('class="header-freshness"');
     expect(mainSource).toContain("if (refreshHealth.hasSuccessfulRequest)");
     expect(mainSource).toMatch(/class="header-freshness">[\s\S]*?data-action="refresh"[\s\S]*?renderFreshnessIndicator\(\)/);
-    expect(styles).toMatch(/\.header-freshness\s*\{[^}]*position:\s*absolute;[^}]*top:\s*calc\(100% \+ 1px\);/s);
+    expect(styles).toMatch(/\.header-freshness\s*\{[^}]*position:\s*absolute;[^}]*top:\s*calc\(100% \+ 4px\);[^}]*left:\s*-18px;/s);
     expect(styles).toMatch(/\.header-freshness\s*\{[^}]*align-items:\s*center;/s);
     expect(styles).toMatch(
       /\.refresh-button\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*color:\s*rgb\(238 241 245 \/ 46%\);/s,
     );
     expect(styles).toMatch(/\.refresh-button svg\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px;/s);
     expect(styles).toMatch(/\.rate-limit-indicator\s*\{[^}]*right:\s*0;[^}]*bottom:\s*-12px;/s);
+    expect(styles).not.toMatch(/\.rate-limit-bar-cover\s*\{[^}]*display:\s*none;/s);
+    expect(styles).toMatch(/\.freshness-indicator\s*\{[^}]*font-size:\s*10px;[^}]*line-height:\s*1\.3;/s);
     expect(styles).toMatch(/\.freshness-indicator\.is-stale\s*\{[^}]*color:\s*#d29922;/s);
   });
 });

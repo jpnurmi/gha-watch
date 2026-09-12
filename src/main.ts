@@ -564,7 +564,6 @@ function renderNow(): void {
         ${updateAvailable ? `<span class="update-available-label">Update available</span>` : ""}
         <div class="header-row">
           <div class="header-brand">
-            <h1 class="header-title">GHA Watch</h1>
             <div class="header-freshness">
               <button
                 class="icon-button refresh-button"
