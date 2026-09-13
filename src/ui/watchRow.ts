@@ -38,16 +38,30 @@ export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: Pending
 }
 
 function renderLeadingIcon(row: WatchRowViewModel): string {
+  const markSeenOverlay = row.unseenStatusChange ? renderWatchSeenOverlay(row) : "";
+
   if (row.subject === "pull-request") {
     const prState = row.prState ?? { label: "Ready", tone: "ready" as const };
-    return renderWatchLeadingSlot(renderPrStateIcon(prState, "watch-leading-icon"));
+    return renderWatchLeadingSlot(renderPrStateIcon(prState, "watch-leading-icon"), markSeenOverlay);
   }
 
   if (row.subject === "job") {
-    return renderWatchLeadingSlot(renderWatchSubjectIcon("job"));
+    return renderWatchLeadingSlot(renderWatchSubjectIcon("job"), markSeenOverlay);
   }
 
-  return renderWatchLeadingSlot(renderWatchSubjectIcon("workflow"));
+  return renderWatchLeadingSlot(renderWatchSubjectIcon("workflow"), markSeenOverlay);
+}
+
+function renderWatchSeenOverlay(row: WatchRowViewModel): string {
+  return `
+    <button class="watch-leading-seen-button" type="button" data-action="mark-seen" data-id="${escapeHtml(row.id)}" title="Mark seen" aria-label="Mark ${escapeHtml(row.label)} seen">
+      ${renderUnseenDot()}
+    </button>
+  `;
+}
+
+function renderUnseenDot(): string {
+  return `<span class="unseen-dot" aria-hidden="true"></span>`;
 }
 
 function renderMetadata(row: WatchRowViewModel): string {
