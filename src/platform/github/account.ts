@@ -1,6 +1,7 @@
 import { assertSuccessfulGhResult, normalizeGhError, parseJson, requiredString } from "../ghProtocol";
 import { createTauriShellExecutor, type ShellExecutor } from "../shell";
 import { type RateLimit, type RateLimitResponse, type RateLimitValues, type UserViewResponse } from "./responses";
+import { getGraphqlRateLimit } from "./rateLimit";
 
 export async function fetchAuthenticatedUserLogin(
   executor: ShellExecutor = createTauriShellExecutor(),
@@ -28,7 +29,10 @@ export async function fetchRateLimit(
     assertSuccessfulGhResult(result);
     const response = parseJson<RateLimitResponse>(result.stdout);
     const core: RateLimit = { resource: "REST", ...requiredRateLimit(response?.resources?.core, "REST rate limit") };
-    const graphql: RateLimit = { resource: "GraphQL", ...requiredRateLimit(response?.resources?.graphql, "GraphQL rate limit") };
+    const graphql = await getGraphqlRateLimit(executor) ?? {
+      resource: "GraphQL" as const,
+      ...requiredRateLimit(response?.resources?.graphql, "GraphQL rate limit"),
+    };
 
     return getRemainingRateLimitRatio(graphql) < getRemainingRateLimitRatio(core)
       ? graphql

@@ -74,8 +74,9 @@ export async function fetchConditionalApiJson<T>(
   return parseJson<T>(response.body);
 }
 
-function parseIncludedGhResponse(stdout: string): {
+export function parseIncludedGhResponse(stdout: string): {
   body: string;
+  headers: string;
   etag?: string;
   status: number;
 } | undefined {
@@ -98,6 +99,7 @@ function parseIncludedGhResponse(stdout: string): {
   const etag = headers.match(/^etag:\s*(.+)\r?$/im)?.[1]?.trim();
 
   return {
+    headers,
     body: stdout.slice(headerEnd + separatorLength),
     ...(etag ? { etag } : {}),
     status: Number(statusMatch[1]),

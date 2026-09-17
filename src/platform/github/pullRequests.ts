@@ -4,6 +4,7 @@ import { assertSuccessfulGhResult, normalizeGhError, parseJson } from "../ghProt
 import { createTauriShellExecutor, type ShellExecutor } from "../shell";
 import { comparePullRequestsByUpdatedAt, createPullRequestDetailsQuery, normalizeAuthoredOpenPullRequest, normalizeOpenPullRequest, normalizePullRequestDetails } from "./normalize";
 import { type PullRequestDetailsQueryResponse, type PullRequestListResponse, type PullRequestSearchResponse } from "./responses";
+import { executeGraphql } from "./rateLimit";
 
 export async function fetchOpenPullRequests(
   target: Pick<ParsedWatchTarget, "owner" | "repo">,
@@ -96,7 +97,7 @@ export async function fetchPullRequestDetails(
     for (let offset = 0; offset < targets.length; offset += batchSize) {
       const batch = targets.slice(offset, offset + batchSize);
       const query = createPullRequestDetailsQuery(batch);
-      const result = await executor.execute("gh", query.args);
+      const result = await executeGraphql(executor, query.args);
 
       assertSuccessfulGhResult(result);
       const response = parseJson<PullRequestDetailsQueryResponse>(result.stdout);
