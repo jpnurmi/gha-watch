@@ -149,4 +149,21 @@ describe("createWatchNotification", () => {
       timeoutMs: 15_000,
     });
   });
+
+  it.each(["success", "failure", "cancelled", "skipped"])("puts the note first in %s banners", (conclusion) => {
+    const notification = createWatchNotification(watch({
+      note: "Deploy after CI passes\nCheck the release tag",
+      status: `completed:${conclusion}`,
+      lastState: { status: "completed", conclusion },
+    }));
+
+    expect(notification.body).toMatch(/^Deploy after CI passes\nCheck the release tag\ngetsentry\/sentry\n/);
+    expect(notification.largeBody).toBe(notification.body);
+  });
+
+  it("omits blank notes", () => {
+    const now = new Date();
+    expect(createWatchNotification(watch({ note: " \n " }), now))
+      .toEqual(createWatchNotification(watch(), now));
+  });
 });

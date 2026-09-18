@@ -18,7 +18,7 @@ type InputState = {
 
 export function replacePopupHtmlPreservingScroll(root: PopupRenderRoot, html: string): void {
   const scrollPosition = capturePopupScrollPosition(root);
-  const inputStates = ['input[name="url"]', 'input[name="pattern"]'].map((selector) => ({
+  const inputStates = ['input[name="url"]', 'input[name="pattern"]', 'textarea[name="note"]'].map((selector) => ({
     selector,
     state: captureInputState(root, selector),
   }));
@@ -60,7 +60,7 @@ function restorePopupScrollPosition(root: PopupRenderRoot, scrollPosition: Popup
 }
 
 function captureInputState(root: PopupRenderRoot, selector: string): InputState | undefined {
-  const input = root.querySelector<HTMLInputElement>(selector);
+  const input = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
 
   if (!input) {
     return undefined;
@@ -81,7 +81,7 @@ function restoreInputState(root: PopupRenderRoot, selector: string, inputState: 
     return;
   }
 
-  const input = root.querySelector<HTMLInputElement>(selector);
+  const input = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
 
   if (!input || input.dataset.draftKey !== inputState.draftKey) {
     return;

@@ -4496,3 +4496,71 @@ describe("queued poll snapshots", () => {
     expect(notificationRecords).toEqual([]);
   });
 });
+
+describe("watch notes", () => {
+  it("saves, edits, and removes a note on only the selected item", async () => {
+    const { deps, saves, notificationRecords } = createDeps([]);
+    const first = existingWatch();
+    const second = { ...existingWatch(), id: getWatchId(prTarget), target: prTarget, note: "Other reminder" };
+    const controller = createWatchController(deps, [first, second]);
+
+    controller.setNote(first.id, "  Deploy after CI passes  ");
+    await vi.waitFor(() => expect(saves.at(-1)?.[0].note).toBe("Deploy after CI passes"));
+    expect(controller.getWatches()[1].note).toBe("Other reminder");
+    controller.setNote(first.id, "Check the release tag");
+    await vi.waitFor(() => expect(saves.at(-1)?.[0].note).toBe("Check the release tag"));
+    controller.setNote(first.id, " \n ");
+    await vi.waitFor(() => expect(saves.at(-1)?.[0]).not.toHaveProperty("note"));
+    expect(controller.getWatches()[1].note).toBe("Other reminder");
+    expect(notificationRecords).toEqual([]);
+
+    const unchanged = controller.getWatches();
+    controller.setNote(first.id, "");
+    controller.setNote("missing", "Reminder");
+    expect(controller.getWatches()).toBe(unchanged);
+  });
+
+  it.each([runTarget, prTarget, jobTarget])("keeps a $kind note saved during a poll", async (target) => {
+    const { deps, notificationRecords } = createDeps([]);
+    const request = deferred<WatchSnapshot>();
+    deps.fetchState = vi.fn(() => request.promise);
+    const running: WatchRecord = {
+      ...existingWatch(), id: getWatchId(target), target, active: true,
+      status: "in_progress", lastState: { status: "in_progress", conclusion: null },
+    };
+    const controller = createWatchController(deps, [running]);
+    const poll = controller.pollNow({ watchIds: [running.id] });
+    await vi.waitFor(() => expect(deps.fetchState).toHaveBeenCalledTimes(1));
+
+    controller.setNote(running.id, "Check the release tag");
+    request.resolve({ status: "completed", conclusion: "success", title: "Complete", url: target.url });
+    await poll;
+
+    expect(controller.getWatches()[0]).toMatchObject({ note: "Check the release tag", status: "completed:success" });
+    expect(notificationRecords).toHaveLength(1);
+    expect(notificationRecords[0].body).toMatch(/^Check the release tag\n/);
+  });
+
+  it.each(["Updated reminder", ""])("uses the latest note when delivering a queued PR alert: %s", async (note) => {
+    const { deps, notificationRecords } = createDeps([
+      { status: "completed", conclusion: "failure", title: "Complete", url: prTarget.url },
+    ]);
+    const details = deferred<Array<undefined>>();
+    deps.fetchPullRequestDetails = vi.fn(() => details.promise);
+    const running: WatchRecord = {
+      ...existingWatch(), id: getWatchId(prTarget), target: prTarget, active: true,
+      status: "in_progress", lastState: { status: "in_progress", conclusion: null }, note: "Old reminder",
+    };
+    const controller = createWatchController(deps, [running]);
+    const poll = controller.pollNow({ watchIds: [running.id] });
+    await vi.waitFor(() => expect(deps.fetchPullRequestDetails).toHaveBeenCalledTimes(1));
+
+    controller.setNote(running.id, note);
+    details.resolve([]);
+    await poll;
+
+    expect(notificationRecords).toHaveLength(1);
+    expect(notificationRecords[0].body).not.toContain("Old reminder");
+    expect(notificationRecords[0].body.startsWith("Updated reminder\n")).toBe(Boolean(note));
+  });
+});

@@ -4,7 +4,7 @@ import type { WatchRecord } from "./watches";
 
 export type StoredWatch = {
   identity: Pick<WatchRecord, "id" | "target" | "source" | "sourceRun">;
-  intent: Pick<WatchRecord, "triageState" | "doneAt" | "ignoredTargetIds" | "ignoredWorkflowNames">;
+  intent: Pick<WatchRecord, "triageState" | "doneAt" | "ignoredTargetIds" | "ignoredWorkflowNames" | "note">;
   local: Pick<WatchRecord, "lastSeenStatus" | "repoIconUrl" | "error" | "errorKind" | "errorAt">;
   observation: Omit<WatchRecord, keyof StoredWatch["identity"] | keyof StoredWatch["intent"] | keyof StoredWatch["local"] | "status"> & { status?: string };
 };
@@ -12,10 +12,10 @@ export type StoredWatch = {
 export function encodeStoredWatches(watches: WatchRecord[]): StoredWatch[] {
   return watches.map((watch) => {
     const { id, target, source, sourceRun, triageState, doneAt, ignoredTargetIds, ignoredWorkflowNames,
-      lastSeenStatus, repoIconUrl, error, errorKind, errorAt, status, ...observation } = watch;
+      lastSeenStatus, repoIconUrl, error, errorKind, errorAt, status, note, ...observation } = watch;
     return {
       identity: { id, target, source, sourceRun },
-      intent: { triageState, doneAt, ignoredTargetIds, ignoredWorkflowNames },
+      intent: { triageState, doneAt, ignoredTargetIds, ignoredWorkflowNames, note },
       local: { lastSeenStatus, repoIconUrl, error, errorKind, errorAt },
       observation: { ...observation, ...(!observation.lastState ? { status } : {}) },
     };

@@ -30,7 +30,7 @@ function decodeWatchRecord(value: unknown): WatchRecord | undefined {
     active: value.active, error: typeof value.error === "string" ? value.error : undefined,
     lastState: undefined,
   };
-  for (const key of ["lastSeenStatus", "repoIconUrl"] as const) {
+  for (const key of ["lastSeenStatus", "repoIconUrl", "note"] as const) {
     if (typeof value[key] === "string") watch[key] = value[key];
   }
   for (const key of ["doneAt", "errorAt"] as const) {

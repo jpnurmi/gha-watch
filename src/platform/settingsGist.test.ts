@@ -346,3 +346,11 @@ function gistResult(id: string): ShellResult {
     stderr: "",
   };
 }
+
+describe("synced watch notes", () => {
+  it("preserves notes through serialization", () => {
+    const watch = { ...savedWatch, note: "Deploy after CI passes\nCheck the release tag" };
+    expect(parseSettingsDocument(serializeSettingsDocument({ ...state, watches: [watch] })).watches)
+      .toEqual([watch]);
+  });
+});

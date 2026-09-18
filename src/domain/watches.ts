@@ -46,6 +46,7 @@ export type WatchRecord = {
   error: string | undefined;
   errorKind?: WatchErrorKind;
   errorAt?: string;
+  note?: string;
 };
 
 export type WatchDropPosition = "before" | "after";

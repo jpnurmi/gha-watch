@@ -127,4 +127,21 @@ describe("UI regions", () => {
     expect(empty).toContain('disabled>Save rule</button>');
     expect(empty).toContain('aria-checked="false"');
   });
+
+  it("escapes notes in both the row and its editor", () => {
+    const noted = { ...row, note: '</textarea><script>"reminder"</script>' };
+    for (const html of [renderWatch(noted), renderWatch(noted, undefined, row.id)]) {
+      expect(html).toContain('&lt;/textarea&gt;&lt;script&gt;&quot;reminder&quot;&lt;/script&gt;');
+      expect(html).not.toContain('<script>');
+    }
+    expect(renderWatch(noted)).toContain('title="Edit note"');
+    expect(renderWatch(noted, undefined, row.id)).toContain('data-action="remove-note"');
+  });
+
+  it("opens a note editor only for the selected item", () => {
+    expect(renderWatch(row)).toContain('title="Add note"');
+    expect(renderWatch(row, undefined, row.id)).toContain('<textarea name="note"');
+    expect(renderWatch(row, undefined, "other")).not.toContain('<textarea');
+    expect(renderWatch(row, undefined, row.id)).not.toContain('data-action="remove-note"');
+  });
 });

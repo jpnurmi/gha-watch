@@ -184,6 +184,7 @@ let updateAvailable = false;
 let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
 let pendingWatchAction: PendingWatchAction | undefined;
+let editingNoteId: string | undefined;
 let currentWatchView: WatchTriageState = "inbox";
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
 let pullRequestMenu: PullRequestMenuState | undefined;
@@ -467,6 +468,13 @@ window.addEventListener("keydown", (event) => {
       return;
     }
 
+    if (editingNoteId) {
+      editingNoteId = undefined;
+      render();
+      event.preventDefault();
+      return;
+    }
+
     void hideMainWindow();
   }
 });
@@ -740,7 +748,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
 }
 
 function renderWatchGroupItem(item: WatchGroupViewModel["items"][number]): string {
-  return renderWatch(item.row, pendingWatchAction);
+  return renderWatch(item.row, pendingWatchAction, editingNoteId);
 }
 
 function renderRepoCiStatus(group: WatchGroupViewModel): string {
@@ -1057,6 +1065,7 @@ function bindEvents(): void {
     }
 
     currentWatchView = view;
+    editingNoteId = undefined;
     isAdding = false;
     isClearMenuOpen = false;
     pendingWatchAction = undefined;
@@ -1391,6 +1400,48 @@ function bindEvents(): void {
     dismissWatchActionOnRowLeave(row.dataset.id);
   });
 
+  on("click", '[data-action="edit-note"]', (_event, button: HTMLButtonElement) => {
+    editingNoteId = button.dataset.id;
+    pendingWatchAction = undefined;
+    renderNow();
+    app.querySelector<HTMLTextAreaElement>('.watch-note-form textarea')?.focus();
+  });
+
+  on("submit", '[data-action="save-note"]', (event, form: HTMLFormElement) => {
+    event.preventDefault();
+    const id = form.dataset.id;
+    const note = new FormData(form).get("note");
+
+    if (id && typeof note === "string") {
+      editingNoteId = undefined;
+      controller.setNote(id, note);
+      queueSyncedStateUploadForWatchIds([id]);
+      render();
+    }
+  });
+
+  on("keydown", '.watch-note-form textarea', (event, input: HTMLTextAreaElement) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) {
+      event.preventDefault();
+      input.form?.requestSubmit();
+    }
+  });
+
+  on("click", '[data-action="cancel-note"]', () => {
+    editingNoteId = undefined;
+    render();
+  });
+
+  on("click", '[data-action="remove-note"]', (_event, button: HTMLButtonElement) => {
+    const id = button.dataset.id;
+    if (id) {
+      editingNoteId = undefined;
+      controller.setNote(id, "");
+      queueSyncedStateUploadForWatchIds([id]);
+      render();
+    }
+  });
+
   bindRepoReorderEvents();
   bindWatchReorderEvents();
 }
@@ -1527,7 +1578,7 @@ function getWatchRowPressTarget(
     return undefined;
   }
 
-  if (event.target.closest('.watch-actions, [data-action="mark-seen"], [data-action="open-github-url"]')) {
+  if (event.target.closest('.watch-actions, .watch-note-form, [data-action="edit-note"], [data-action="mark-seen"], [data-action="open-github-url"]')) {
     return undefined;
   }
 

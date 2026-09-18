@@ -26,4 +26,8 @@ describe("watch records", () => {
       { ...watch, target: { ...watch.target, url: "javascript:alert(1)" } },
     ])).toEqual([]);
   });
+
+  it("ignores malformed notes without losing the watch", () => {
+    expect(decodeWatchRecords([{ ...watch, note: { text: "bad" } }])).toEqual([watch]);
+  });
 });

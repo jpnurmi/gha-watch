@@ -481,3 +481,32 @@ describe("settings sync helpers", () => {
     ).watchSuppressions).toEqual([]);
   });
 });
+
+describe("note sync", () => {
+  it.each(["saved", "done"] as const)("preserves note edits and removal when moving to %s", (triageState) => {
+    const previousWatch = { ...watch("2", "saved"), note: "Old reminder" };
+    const remoteWatch = { ...previousWatch, label: "Updated remotely" };
+    for (const note of ["Local reminder", undefined]) {
+      const localWatch = { ...watch("2", triageState), ...(note ? { note } : {}) };
+      const merged = mergeSyncedStates(
+        { ...localState, watches: [previousWatch] },
+        { ...localState, watches: [localWatch] },
+        { ...remoteState, watches: [remoteWatch] },
+      ).watches[0];
+      expect(merged.note).toBe(note);
+      expect(merged.label).toBe("Updated remotely");
+      expect(merged.triageState).toBe(triageState);
+    }
+  });
+
+  it("keeps a remote note edit when only triage changes locally", () => {
+    const previousWatch = { ...watch("2", "saved"), note: "Old reminder" };
+    const merged = mergeSyncedStates(
+      { ...localState, watches: [previousWatch] },
+      { ...localState, watches: [{ ...watch("2", "done"), note: previousWatch.note }] },
+      { ...remoteState, watches: [{ ...previousWatch, note: "Remote reminder" }] },
+    ).watches[0];
+    expect(merged.note).toBe("Remote reminder");
+    expect(merged.triageState).toBe("done");
+  });
+});
