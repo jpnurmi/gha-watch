@@ -45,6 +45,26 @@ describe("UI regions", () => {
       .toContain('pr-state-icon-merged');
   });
 
+  it("shows stack position after the PR number, including when checks fail to load", () => {
+    const pr = {
+      ...watch,
+      target: { kind: "pr" as const, owner: "owner", repo: "repo", prNumber: "1", url: "https://github.com/owner/repo/pull/1" },
+      metadata: { prStack: { number: 42, position: 2, size: 5 } },
+    };
+    for (const error of [undefined, "Could not load checks"]) {
+      const html = renderWatch(createPopupViewModel([{ ...pr, error }]).rows[0]);
+      expect(html).toContain('class="watch-stack"');
+      expect(html).toContain('title="PR 2 of 5 in stack #42"');
+      expect(html).toContain('aria-label="PR 2 of 5 in stack #42"');
+      expect(html).toContain('>2/5</span>');
+      expect(html.indexOf('class="watch-stack"')).toBeGreaterThan(html.indexOf('class="watch-title-reference"'));
+      expect(html.indexOf('class="watch-stack"')).toBeLessThan(html.indexOf('class="watch-meta"'));
+    }
+    expect(renderWatch(row)).not.toContain('class="watch-stack"');
+    expect(renderWatch(createPopupViewModel([{ ...watch, metadata: pr.metadata }]).rows[0]))
+      .not.toContain('class="watch-stack"');
+  });
+
   it("keeps repository settings out of saved history", () => {
     const html = renderRepositorySettings(group, { currentWatchView: "saved", watchedRepos: [], renderRepoIcon: () => "icon" });
     expect(html).toContain('watch-group-watch is-static');

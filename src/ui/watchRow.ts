@@ -29,6 +29,7 @@ export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: Pending
             [row.id],
             row.unseenStatusChange,
           )}
+          ${row.stack ? renderStackBadge(row.stack) : ""}
         </span>
         ${renderMetadata(row)}
         ${renderNote(row, editingNoteId === row.id)}
@@ -240,4 +241,13 @@ function renderNote(row: WatchRowViewModel, editing: boolean): string {
   return row.note
     ? `<button class="watch-note" type="button" data-action="edit-note" data-id="${escapeHtml(row.id)}" title="${escapeHtml(row.note)}" aria-label="Edit note for ${escapeHtml(row.label)}: ${escapeHtml(row.note)}">${escapeHtml(row.note)}</button>`
     : "";
+}
+
+function renderStackBadge(stack: NonNullable<WatchRowViewModel["stack"]>): string {
+  const label = `PR ${stack.position} of ${stack.size} in stack${stack.number ? ` #${stack.number}` : ""}`;
+  return `<span class="watch-stack" role="img" title="${label}" aria-label="${label}">
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m8 1.5 6 3.25L8 8 2 4.75Zm-6 6.75 6 3.25 6-3.25M2 11.75 8 15l6-3.25" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.3"/>
+    </svg><span aria-hidden="true">${stack.position}/${stack.size}</span>
+  </span>`;
 }

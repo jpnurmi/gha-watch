@@ -1266,6 +1266,7 @@ export function createWatchController(
           ? { headBranch: detail?.branchName ?? reference?.branchName }
           : {}),
         ...(detail?.state ? { state: detail.state } : {}),
+        ...(detail?.stack ? { stack: detail.stack } : {}),
         url: target.url,
       });
     });
@@ -1314,6 +1315,7 @@ export function createWatchController(
       label: pullRequest.title,
       metadata: mergeWatchMetadata(existingWatch?.metadata, {
         prTitle: pullRequest.title,
+        prStack: pullRequest.stack,
         ...(pullRequest.headBranch ? { branchName: pullRequest.headBranch } : {}),
       }),
       sourceState: pullRequest.state ?? (pullRequest.isDraft ? "draft" : "ready"),
@@ -1486,6 +1488,7 @@ export function createWatchController(
 
     const metadata = mergeWatchMetadata(currentWatch.metadata, {
       prTitle: pullRequest.title,
+      prStack: pullRequest.stack,
       ...(pullRequest.updatedAt ? { prUpdatedAt: pullRequest.updatedAt } : {}),
       ...(pullRequest.headBranch ? { branchName: pullRequest.headBranch } : {}),
     });
@@ -1496,6 +1499,9 @@ export function createWatchController(
       currentWatch.metadata?.prTitle === metadata?.prTitle &&
       currentWatch.metadata?.prUpdatedAt === metadata?.prUpdatedAt &&
       currentWatch.metadata?.branchName === metadata?.branchName &&
+      currentWatch.metadata?.prStack?.position === metadata?.prStack?.position &&
+      currentWatch.metadata?.prStack?.size === metadata?.prStack?.size &&
+      currentWatch.metadata?.prStack?.number === metadata?.prStack?.number &&
       currentWatch.sourceState === sourceState
     )) {
       updateWatch(id, (watch) => withDefaultDraftTriage({
@@ -2337,6 +2343,7 @@ function withPullRequestDetails(
   const label = watch.target.kind === "pr" ? details.title : watch.label;
   const metadata = mergeWatchMetadata(watch.metadata, {
     prTitle: details.title,
+    prStack: details.stack,
     ...(details.branchName ? { branchName: details.branchName } : {}),
   });
 
@@ -2345,6 +2352,9 @@ function withPullRequestDetails(
     watch.label === label &&
     watch.metadata?.prTitle === metadata?.prTitle &&
     watch.metadata?.branchName === metadata?.branchName &&
+    watch.metadata?.prStack?.position === metadata?.prStack?.position &&
+    watch.metadata?.prStack?.size === metadata?.prStack?.size &&
+    watch.metadata?.prStack?.number === metadata?.prStack?.number &&
     watch.source === source
   ) {
     return watch;
@@ -2367,6 +2377,7 @@ function toPullRequestDetails(pullRequest: OpenPullRequest): PullRequestDetails 
   return {
     ...(pullRequest.authorLogin ? { authorLogin: pullRequest.authorLogin } : {}),
     ...(pullRequest.headBranch ? { branchName: pullRequest.headBranch } : {}),
+    ...(pullRequest.stack ? { stack: pullRequest.stack } : {}),
     state: pullRequest.state ?? (pullRequest.isDraft ? "draft" : "ready"),
     title: pullRequest.title,
   };

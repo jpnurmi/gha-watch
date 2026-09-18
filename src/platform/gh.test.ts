@@ -475,6 +475,8 @@ describe("fetchWatchState", () => {
               isDraft: true,
               state: "OPEN",
               title: "Draft pull request",
+              stack: { number: 42, size: 5 },
+              stackEntry: { position: 2 },
             },
           },
           repository1: {
@@ -499,7 +501,7 @@ describe("fetchWatchState", () => {
     }));
 
     await expect(fetchPullRequestDetails(targets, executor)).resolves.toEqual([
-      { authorLogin: "jpnurmi", branchName: "feature/draft", state: "draft", title: "Draft pull request" },
+      { authorLogin: "jpnurmi", branchName: "feature/draft", state: "draft", title: "Draft pull request", stack: { number: 42, position: 2, size: 5 } },
       { state: "ready", title: "Ready pull request" },
       { state: "merged", title: "Merged pull request" },
       { state: "closed", title: "Closed pull request" },
@@ -515,6 +517,7 @@ describe("fetchWatchState", () => {
     expect(calls[0].args).toContain("number3=54");
     expect(calls[0].args[3]).toContain("headRefName");
     expect(calls[0].args[3]).toContain("author { login }");
+    expect(calls[0].args[3]).toContain("stack { number size } stackEntry { position }");
   });
 
   it("keeps missing pull request details isolated within a batch", async () => {
@@ -1385,7 +1388,7 @@ describe("fetchOpenPullRequests", () => {
   it("fetches open pull requests through gh and sorts them by update time", async () => {
     const { executor, calls } = createExecutor({
       code: 0,
-      stdout: JSON.stringify([
+      stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: [
         {
           number: 51,
           title: "Older PR",
@@ -1404,7 +1407,7 @@ describe("fetchOpenPullRequests", () => {
           updatedAt: "2026-05-17T12:00:00Z",
           url: "https://github.com/getsentry/sentry/pull/52",
         },
-      ]),
+      ] } } } }),
       stderr: "",
     });
 
@@ -1437,38 +1440,31 @@ describe("fetchOpenPullRequests", () => {
       },
     ]);
 
-    expect(calls).toEqual([
-      {
-        program: "gh",
-        args: [
-          "pr",
-          "list",
-          "-R",
-          "getsentry/sentry",
-          "--state",
-          "open",
-          "--limit",
-          "100",
-          "--json",
-          "number,title,isDraft,author,headRefName,updatedAt,url",
-        ],
-      },
-    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].program).toBe("gh");
+    expect(calls[0].args.slice(0, 2)).toEqual(["api", "graphql"]);
+    expect(calls[0].args[3]).toContain("pullRequests(states: OPEN, first: 100");
+    expect(calls[0].args[3]).toContain("stack { number size } stackEntry { position }");
+    expect(calls[0].args[3]).not.toContain("commits(");
+    expect(calls[0].args).toContain("owner=getsentry");
+    expect(calls[0].args).toContain("repo=sentry");
   });
 
   it("includes current check snapshots in the repository pull request query", async () => {
     const { executor, calls } = createExecutor({
       code: 0,
-      stdout: JSON.stringify([
+      stdout: JSON.stringify({ data: { search: { nodes: [
         {
           number: 51,
           title: "Batch pull request checks",
+          stack: { number: 42, size: 5 },
+          stackEntry: { position: 2 },
           isDraft: false,
-          statusCheckRollup: [
+          commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
             {
               __typename: "CheckRun",
               name: "CI",
-              workflowName: "Build",
+              checkSuite: { workflowRun: { workflow: { name: "Build" } } },
               status: "COMPLETED",
               conclusion: "CANCELLED",
               startedAt: "2026-05-17T11:00:00Z",
@@ -1477,7 +1473,7 @@ describe("fetchOpenPullRequests", () => {
             {
               __typename: "CheckRun",
               name: "CI",
-              workflowName: "Build",
+              checkSuite: { workflowRun: { workflow: { name: "Build" } } },
               status: "COMPLETED",
               conclusion: "SUCCESS",
               startedAt: "2026-05-17T12:00:00Z",
@@ -1489,10 +1485,10 @@ describe("fetchOpenPullRequests", () => {
               state: "PENDING",
               startedAt: "2026-05-17T12:01:00Z",
             },
-          ],
+          ] } } } }] },
           url: "https://github.com/getsentry/sentry/pull/51",
         },
-      ]),
+      ] } } }),
       stderr: "",
     });
 
@@ -1504,6 +1500,7 @@ describe("fetchOpenPullRequests", () => {
       ),
     ).resolves.toMatchObject([
       {
+        stack: { number: 42, position: 2, size: 5 },
         checkSnapshot: {
           status: "in_progress",
           conclusion: null,
@@ -1514,25 +1511,12 @@ describe("fetchOpenPullRequests", () => {
         },
       },
     ]);
-    expect(calls).toEqual([
-      {
-        program: "gh",
-        args: [
-          "pr",
-          "list",
-          "-R",
-          "getsentry/sentry",
-          "--state",
-          "open",
-          "--limit",
-          "100",
-          "--author",
-          "@me",
-          "--json",
-          "number,title,isDraft,author,headRefName,updatedAt,url,statusCheckRollup",
-        ],
-      },
-    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toContain("search=repo:getsentry/sentry is:pr is:open author:@me sort:updated-desc");
+    expect(calls[0].args[3]).toContain("search(query: $search, type: ISSUE, first: 100)");
+    expect(calls[0].args[3]).toContain("stack { number size } stackEntry { position }");
+    expect(calls[0].args[3]).toContain("commits(last: 1)");
+    expect(calls[0].args[3]).toContain("contexts(first: 100)");
   });
 
   it("classifies stale and startup failure check conclusions as failures", async () => {
@@ -1542,21 +1526,21 @@ describe("fetchOpenPullRequests", () => {
     ];
     const { executor } = createExecutor({
       code: 0,
-      stdout: JSON.stringify(targets.map(({ number, conclusion }) => ({
+      stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: targets.map(({ number, conclusion }) => ({
         number,
         title: `Pull request ${String(number)}`,
         isDraft: false,
-        statusCheckRollup: [{
+        commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{
           __typename: "CheckRun",
           name: "CI",
-          workflowName: "Build",
+          checkSuite: { workflowRun: { workflow: { name: "Build" } } },
           status: "COMPLETED",
           conclusion,
           startedAt: "2026-05-17T12:00:00Z",
           completedAt: "2026-05-17T12:02:00Z",
-        }],
+        }] } } } }] },
         url: `https://github.com/getsentry/sentry/pull/${String(number)}`,
-      }))),
+      })) } } } }),
       stderr: "",
     });
 
@@ -1575,11 +1559,11 @@ describe("fetchOpenPullRequests", () => {
   it("drops malformed pull requests from the gh response", async () => {
     const { executor } = createExecutor({
       code: 0,
-      stdout: JSON.stringify([
+      stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: [
         { number: 51, title: "Valid PR", isDraft: false, url: "https://github.com/getsentry/sentry/pull/51" },
         { number: 0, title: "Invalid number", isDraft: false, url: "https://github.com/getsentry/sentry/pull/0" },
         { number: 52, title: "", isDraft: false, url: "https://github.com/getsentry/sentry/pull/52" },
-      ]),
+      ] } } } }),
       stderr: "",
     });
 

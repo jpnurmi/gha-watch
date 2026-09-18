@@ -1,5 +1,6 @@
 import type { WatchState } from "../domain/status";
 import type { PrSourceState, WatchMetadata, WatchTiming } from "../domain/watches";
+import type { PullRequestStack } from "../domain/pullRequestStack";
 
 export type RerunMode = "all" | "failed";
 
@@ -21,6 +22,7 @@ export type OpenPullRequest = {
   isDraft: boolean;
   authorLogin?: string;
   headBranch?: string;
+  stack?: PullRequestStack;
   state?: PrSourceState;
   checkSnapshot?: WatchSnapshot;
   updatedAt?: string;
@@ -39,6 +41,7 @@ export type AuthoredOpenPullRequest = OpenPullRequest & {
 export type PullRequestDetails = {
   authorLogin?: string;
   branchName?: string;
+  stack?: PullRequestStack;
   state: PrSourceState;
   title: string;
 };
