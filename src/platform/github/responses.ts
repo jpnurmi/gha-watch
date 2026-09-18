@@ -53,6 +53,8 @@ export type PullRequestDetailsResponse = {
   isDraft?: boolean;
   state?: string;
   title?: string;
+  stack?: { number?: number; size?: number } | null;
+  stackEntry?: { position?: number } | null;
 };
 
 export type PullRequestDetailsQueryResponse = {
@@ -83,7 +85,7 @@ export type UserViewResponse = {
   login?: string;
 };
 
-export type PullRequestListResponse = {
+export type PullRequestListResponse = PullRequestDetailsResponse & {
   author?: {
     login?: string;
   };
@@ -93,7 +95,22 @@ export type PullRequestListResponse = {
   title?: string;
   updatedAt?: string;
   url?: string;
-  statusCheckRollup?: PullRequestCheckResponse[];
+  commits?: {
+    nodes?: Array<{
+      commit?: {
+        statusCheckRollup?: {
+          contexts?: { nodes?: PullRequestCheckResponse[] };
+        } | null;
+      };
+    }>;
+  };
+};
+
+export type PullRequestListQueryResponse = {
+  data?: {
+    repository?: { pullRequests?: { nodes?: Array<PullRequestListResponse | null> } } | null;
+    search?: { nodes?: Array<PullRequestListResponse | null> };
+  };
 };
 
 export type PullRequestCheckResponse = {
@@ -105,7 +122,7 @@ export type PullRequestCheckResponse = {
   startedAt?: string | null;
   state?: string;
   status?: string;
-  workflowName?: string;
+  checkSuite?: { workflowRun?: { workflow?: { name?: string } } | null };
 };
 
 export type PullRequestSearchResponse = PullRequestListResponse & {

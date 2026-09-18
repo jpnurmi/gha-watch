@@ -1,6 +1,7 @@
 import { getRepositoryKey } from "./identity";
 import type { PrWatchTarget, RunWatchTarget, WatchTarget } from "./githubUrl";
 import type { WatchState } from "./status";
+import type { PullRequestStack } from "./pullRequestStack";
 
 export type PrSourceState = "draft" | "ready" | "merged" | "closed";
 export type WatchTriageState = "inbox" | "saved" | "done";
@@ -23,6 +24,7 @@ export type WatchMetadata = {
   jobName?: string;
   branchName?: string;
   commitSha?: string;
+  prStack?: PullRequestStack;
 };
 
 export type WatchRecord = {

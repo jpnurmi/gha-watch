@@ -1,6 +1,7 @@
 import { type ActiveWorkflowRun, type AuthoredOpenPullRequest, type OpenPullRequest, type PullRequestDetails, type RepositoryCiStatus, type RepositoryCiStatusTone, type RepositoryCiWorkflowStatus, type RerunMode, type WatchSnapshot, type WorkflowDefinition, type WorkflowRunPullRequest, type WorkflowRunSummary } from "../../app/githubPort";
 import { type ParsedWatchTarget, type PrWatchTarget, type WatchTarget } from "../../domain/githubUrl";
 import { type WatchState } from "../../domain/status";
+import { decodePullRequestStack } from "../../domain/pullRequestStack";
 import { type PrSourceState, type WatchMetadata, type WatchTiming } from "../../domain/watches";
 import { requiredString } from "../ghProtocol";
 import { type JobViewResponse, type PrCheckResponse, type PullRequestCheckResponse, type PullRequestDetailsResponse, type PullRequestListResponse, type PullRequestReference, type PullRequestSearchResponse, type RunJobsResponse, type RunViewResponse, type WorkflowListResponse, type WorkflowRunApiResponse, type WorkflowRunListResponse, type WorkflowRunPullRequestResponse } from "./responses";
@@ -135,9 +136,9 @@ export function normalizeOpenPullRequest(
   const target = repo
     ? { kind: "pr" as const, ...repo, prNumber: number, url }
     : undefined;
-  const checks = response.statusCheckRollup
-    ? normalizePullRequestChecks(response.statusCheckRollup)
-    : undefined;
+  const contexts = response.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes;
+  const checks = response.commits ? normalizePullRequestChecks(contexts ?? []) : undefined;
+  const stack = decodePullRequestStack({ ...response.stack, position: response.stackEntry?.position });
 
   return {
     number,
@@ -145,6 +146,7 @@ export function normalizeOpenPullRequest(
     isDraft: response.isDraft === true,
     ...(response.author?.login?.trim() ? { authorLogin: response.author.login.trim() } : {}),
     ...(response.headRefName?.trim() ? { headBranch: response.headRefName.trim() } : {}),
+    ...(stack ? { stack } : {}),
     ...(target && checks ? { checkSnapshot: toPrSnapshot(target, checks) } : {}),
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
     url,
@@ -187,7 +189,7 @@ function getPullRequestCheckKey(response: PullRequestCheckResponse): string | un
     return undefined;
   }
 
-  return `check:${response.workflowName?.trim() ?? ""}:${name}`;
+  return `check:${response.checkSuite?.workflowRun?.workflow?.name?.trim() ?? ""}:${name}`;
 }
 
 function getPullRequestCheckBucket(response: PullRequestCheckResponse): string {
@@ -719,7 +721,7 @@ function getExtremeTimestamp(
   return new Date(select(...timestamps)).toISOString();
 }
 
-function compactMetadata(metadata: WatchMetadata): WatchMetadata | undefined {
+function compactMetadata(metadata: Omit<WatchMetadata, "prStack">): WatchMetadata | undefined {
   const entries = Object.entries(metadata)
     .map(([key, value]) => [key, value?.trim()] as const)
     .filter((entry): entry is [keyof WatchMetadata, string] => {
@@ -808,7 +810,7 @@ export function createPullRequestDetailsQuery(targets: PrWatchTarget[]): { args:
     variableDefinitions.push(`$owner${index}: String!`, `$repo${index}: String!`, `$number${index}: Int!`);
     selections.push(
       `repository${index}: repository(owner: $owner${index}, name: $repo${index}) { ` +
-        `pullRequest(number: $number${index}) { title state isDraft headRefName author { login } } }`,
+        `pullRequest(number: $number${index}) { title state isDraft headRefName author { login } stack { number size } stackEntry { position } } }`,
     );
   });
 
@@ -837,10 +839,12 @@ export function normalizePullRequestDetails(
 
   try {
     const branchName = response.headRefName?.trim();
+    const stack = decodePullRequestStack({ ...response.stack, position: response.stackEntry?.position });
 
     return {
       ...(response.author?.login?.trim() ? { authorLogin: response.author.login.trim() } : {}),
       ...(branchName ? { branchName } : {}),
+      ...(stack ? { stack } : {}),
       state: getPullRequestState(response),
       title: requiredString(response.title?.trim(), "pull request title"),
     };

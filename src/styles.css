@@ -1932,6 +1932,23 @@ button.watch-workflow-status:focus-visible {
   text-overflow: ellipsis;
 }
 
+.watch-stack {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: rgb(238 241 245 / 52%);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.watch-stack svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
 .watch-actions {
   position: absolute;
   z-index: 1;

@@ -3,7 +3,7 @@ import { type ParsedWatchTarget, type PrWatchTarget } from "../../domain/githubU
 import { assertSuccessfulGhResult, normalizeGhError, parseJson } from "../ghProtocol";
 import { createTauriShellExecutor, type ShellExecutor } from "../shell";
 import { comparePullRequestsByUpdatedAt, createPullRequestDetailsQuery, normalizeAuthoredOpenPullRequest, normalizeOpenPullRequest, normalizePullRequestDetails } from "./normalize";
-import { type PullRequestDetailsQueryResponse, type PullRequestListResponse, type PullRequestSearchResponse } from "./responses";
+import { type PullRequestDetailsQueryResponse, type PullRequestListQueryResponse, type PullRequestSearchResponse } from "./responses";
 import { executeGraphql } from "./rateLimit";
 
 export async function fetchOpenPullRequests(
@@ -28,25 +28,34 @@ async function fetchOpenPullRequestList(
   executor: ShellExecutor,
 ): Promise<OpenPullRequest[]> {
   try {
-    const args = [
-      "pr",
-      "list",
-      "-R",
-      `${target.owner}/${target.repo}`,
-      "--state",
-      "open",
-      "--limit",
-      "100",
-      ...(author ? ["--author", author] : []),
-      "--json",
-      `number,title,isDraft,author,headRefName,updatedAt,url${includeChecks ? ",statusCheckRollup" : ""}`,
-    ];
-    const result = await executor.execute("gh", args);
+    const fields = `number title isDraft author { login } headRefName updatedAt url
+      stack { number size } stackEntry { position }
+      ${includeChecks ? `commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+        ... on CheckRun { name status conclusion startedAt completedAt checkSuite { workflowRun { workflow { name } } } }
+        ... on StatusContext { context state }
+      } } } } } }` : ""}`;
+    const args = author
+      ? [
+          "api", "graphql", "-f",
+          `query=query($search: String!) { search(query: $search, type: ISSUE, first: 100) { nodes { ... on PullRequest { ${fields} } } } }`,
+          "-f", `search=repo:${target.owner}/${target.repo} is:pr is:open author:${author} sort:updated-desc`,
+        ]
+      : [
+          "api", "graphql", "-f",
+          `query=query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) {
+            pullRequests(states: OPEN, first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) { nodes { ${fields} } }
+          } }`,
+          "-f", `owner=${target.owner}`, "-f", `repo=${target.repo}`,
+        ];
+    const result = await executeGraphql(executor, args);
 
     assertSuccessfulGhResult(result);
 
-    return parseJson<PullRequestListResponse[]>(result.stdout)
-      .map((response) => normalizeOpenPullRequest(response, includeChecks ? target : undefined))
+    const response = parseJson<PullRequestListQueryResponse>(result.stdout);
+    const nodes = response.data?.repository?.pullRequests?.nodes ?? response.data?.search?.nodes ?? [];
+
+    return nodes
+      .map((node) => node ? normalizeOpenPullRequest(node, includeChecks ? target : undefined) : undefined)
       .filter((pullRequest): pullRequest is OpenPullRequest => Boolean(pullRequest))
       .sort(comparePullRequestsByUpdatedAt);
   } catch (error) {

@@ -789,6 +789,33 @@ describe("watchController", () => {
     expect(saves).toHaveLength(saveCount);
   });
 
+  it("updates stack positions and clears removed membership", async () => {
+    const { deps, saves } = createDeps([]);
+    let stack: { number?: number; position: number; size: number } | undefined = { position: 2, size: 5 };
+    deps.fetchPullRequestDetails = async () => [{ state: "ready", title: "Stacked PR", stack }];
+    const controller = createWatchController(deps, [{
+      ...existingWatch(), id: getWatchId(prTarget), target: prTarget,
+    }]);
+
+    await controller.refreshWatchMetadata();
+    expect(controller.getWatches()[0].metadata?.prStack).toEqual({ position: 2, size: 5 });
+    const saveCount = saves.length;
+    stack = { position: 2, size: 5 };
+    await controller.refreshWatchMetadata();
+    expect(saves).toHaveLength(saveCount);
+
+    stack = { number: 42, position: 2, size: 5 };
+    await controller.refreshWatchMetadata();
+    expect(controller.getWatches()[0].metadata?.prStack).toEqual({ number: 42, position: 2, size: 5 });
+
+    stack = { position: 1, size: 4 };
+    await controller.refreshWatchMetadata();
+    expect(controller.getWatches()[0].metadata?.prStack).toEqual({ position: 1, size: 4 });
+    stack = undefined;
+    await controller.refreshWatchMetadata();
+    expect(controller.getWatches()[0].metadata?.prStack).toBeUndefined();
+  });
+
   it("reorders watches inside one repository without changing other repository slots", () => {
     const { deps, saves } = createDeps([]);
     const first = existingWatch();
@@ -2351,6 +2378,7 @@ describe("watchController", () => {
         isDraft: false,
         authorLogin: "jpnurmi",
         updatedAt,
+        stack: { position: 2, size: 5 },
         checkSnapshot: snapshot,
         url: prTarget.url,
       }];
@@ -2388,6 +2416,7 @@ describe("watchController", () => {
     expect(fetches).toEqual([]);
     expect(checkOptions).toEqual({ author: "@me" });
     expect(detailFetches).toBe(0);
+    expect(controller.getWatches()[0].metadata?.prStack).toEqual({ position: 2, size: 5 });
     expect(pollResult.successfulWatchIds).toEqual([getWatchId(prTarget)]);
     expect(controller.getWatches()[0]).toMatchObject({
       status: "completed:failure",
