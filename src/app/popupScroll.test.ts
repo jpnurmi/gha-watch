@@ -69,4 +69,22 @@ describe("popup updates", () => {
     expect(Array.from(root.querySelectorAll('li'))).toEqual([second, first]);
     expect(second?.textContent).toBe("Updated");
   });
+
+  it("keeps a note draft and cursor during refresh without leaking it to another item", () => {
+    const editor = (id: string, note: string) => `<textarea name="note" data-draft-key="${id}">${note}</textarea>`;
+    replacePopupHtmlPreservingScroll(root, editor("run/1", "Saved note"));
+    const input = root.querySelector('textarea')!;
+    input.value = "New reminder\nStill typing";
+    input.focus();
+    input.setSelectionRange(4, 12, "backward");
+
+    replacePopupHtmlPreservingScroll(root, editor("run/1", "Remote edit"));
+    expect(root.querySelector('textarea')).toBe(input);
+    expect(input.value).toBe("New reminder\nStill typing");
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([4, 12, "backward"]);
+
+    replacePopupHtmlPreservingScroll(root, editor("run/2", "Other note"));
+    expect(root.querySelector('textarea')!.value).toBe("Other note");
+  });
 });

@@ -19,4 +19,12 @@ describe("watch documents", () => {
   it("preserves legacy status without a snapshot and isolates corrupt records", () => {
     expect(decodeStoredWatches([null, {}, ...encodeStoredWatches([watch])])).toEqual([watch]);
   });
+
+  it("persists notes as user intent", () => {
+    const record = { ...watch, note: "Deploy after CI passes\nCheck the release tag" };
+    const stored = encodeStoredWatches([record]);
+    expect(stored[0].intent.note).toBe(record.note);
+    expect(stored[0].observation).not.toHaveProperty("note");
+    expect(decodeStoredWatches(JSON.parse(JSON.stringify(stored)))).toEqual([record]);
+  });
 });

@@ -35,6 +35,7 @@ export function createWatchNotification(
   const row = createWatchRowViewModel(watch, now);
   const repoLabel = getNotificationRepoLabel(watch);
   const lines = [
+    watch.note?.trim() || undefined,
     repoLabel,
     `${row.statusLabel} - ${row.description}`,
     row.timingText,

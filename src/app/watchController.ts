@@ -92,6 +92,7 @@ export type WatchController = {
   reorderGroupWithinRepo(draggedIds: string[], targetIds: string[], position: WatchDropPosition): void;
   reorderWithinRepo(draggedId: string, targetId: string, position: WatchDropPosition): void;
   markSeen(id: string): void;
+  setNote(id: string, note: string): void;
   markAllSeen(): void;
   markAllDone(state: WatchTriageState): void;
   markFinishedDone(state: WatchTriageState): void;
@@ -1751,6 +1752,25 @@ export function createWatchController(
       setWatches(markWatchSeen(watchState.get(), id));
     },
 
+    setNote(id, note) {
+      const watch = watchState.get().find((item) => item.id === id);
+      const value = note.trim() || undefined;
+
+      if (!watch || watch.note === value) {
+        return;
+      }
+
+      updateWatch(id, (current) => {
+        const next = { ...current };
+        if (value) {
+          next.note = value;
+        } else {
+          delete next.note;
+        }
+        return next;
+      });
+    },
+
     markAllSeen() {
       setWatches(markAllWatchesSeen(watchState.get()));
     },
@@ -1982,7 +2002,7 @@ export function createWatchController(
         ? await hydrateLegacyWatchMetadata(triageState)
         : emptyMetadataRefreshResult();
 
-      const rowNotifications: Array<{ notification: WatchNotification; status: string }> = [];
+      const rowNotifications: Array<{ watchId: string; status: string }> = [];
       const successfulWatchIds = [...metadataRefresh.successfulWatchIds];
       const watchFailures: WatchPollFailure[] = [];
       const metadataFailures = [...metadataRefresh.failures];
@@ -2049,7 +2069,7 @@ export function createWatchController(
         });
 
         if (transition.notify && shouldSendWatchNotification(nextWatch)) {
-          rowNotifications.push({ notification: createWatchNotification(nextWatch, notificationTime), status });
+          rowNotifications.push({ watchId: nextWatch.id, status });
         }
 
         return nextWatch;
@@ -2073,16 +2093,16 @@ export function createWatchController(
       metadataFailures.push(...pullRequestRefresh.failures);
 
       if (!deps.notificationsPaused?.()) {
-        for (const { notification, status } of rowNotifications) {
-          const current = watchState.get().find((watch) => watch.id === notification.watchId);
+        for (const { watchId, status } of rowNotifications) {
+          const current = watchState.get().find((watch) => watch.id === watchId);
           if (!current || current.status !== status || !shouldSendWatchNotification(current) || rerunningWatchIds.has(current.id)) {
             continue;
           }
           try {
-            await deps.notify(notification);
+            await deps.notify(createWatchNotification(current, notificationTime));
           } catch (error) {
             notificationFailures.push({
-              watchId: notification.watchId,
+              watchId,
               kind: classifyNotificationFailure(error),
               message: normalizeFailureMessage(error),
             });

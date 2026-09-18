@@ -52,7 +52,7 @@ describe("watch rerun menu layout", () => {
       /\.watch:hover \.watch-action-button,[^{]*\.watch:focus-within \.watch-action-button,[^{]*\.watch-action-button\[aria-expanded="true"\]\s*\{[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;/s,
     );
     expect(styles).toMatch(
-      /\.watch\.has-actions \.watch-actions::before\s*\{[^}]*right:\s*0;[^}]*width:\s*84px;[^}]*background:\s*linear-gradient\(90deg, transparent, var\(--watch-row-bg\) 24px\);[^}]*opacity:\s*0;/s,
+      /\.watch\.has-actions \.watch-actions::before\s*\{[^}]*right:\s*0;[^}]*width:\s*104px;[^}]*background:\s*linear-gradient\(90deg, transparent, var\(--watch-row-bg\) 24px\);[^}]*opacity:\s*0;/s,
     );
     expect(styles).toMatch(
       /\.watch\.has-actions:hover \.watch-actions::before,[^{]*\.watch\.has-actions:focus-within \.watch-actions::before,[^{]*\.watch\.has-confirmation \.watch-actions::before\s*\{[^}]*opacity:\s*1;/s,

@@ -7,7 +7,7 @@ import { getRerunActionIconSvg } from "../app/actionIcon";
 import { renderTitleMarkup } from "../app/titleMarkup";
 import { escapeHtml, renderBranchBadge, renderPrStateIcon, renderWatchSubjectIcon, renderTriageButtons } from "./markup";
 
-export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: PendingWatchAction): string {
+export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: PendingWatchAction, editingNoteId?: string): string {
   const hasConfirmation = pendingWatchAction?.id === row.id;
   const hasActions = true;
   const hasDoneCandidate = row.triageState !== "done" && row.doneCandidate;
@@ -31,8 +31,9 @@ export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: Pending
           )}
         </span>
         ${renderMetadata(row)}
+        ${renderNote(row, editingNoteId === row.id)}
       </div>
-      ${renderWatchActions(row, hasDoneCandidate, pendingWatchAction)}
+      ${renderWatchActions(row, hasDoneCandidate, pendingWatchAction, editingNoteId === row.id)}
     </li>
   `;
 }
@@ -182,11 +183,16 @@ function getMetadataDetail(row: WatchRowViewModel): string | undefined {
   return row.tone === "error" ? row.description : undefined;
 }
 
-function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean, pendingWatchAction?: PendingWatchAction): string {
+function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean, pendingWatchAction?: PendingWatchAction, editingNote = false): string {
   const rerunMenuOpen = pendingWatchAction?.id === row.id;
 
   return `
     <div class="watch-actions">
+      <button class="watch-action-button" type="button" data-action="edit-note" data-id="${escapeHtml(row.id)}" title="${row.note ? "Edit note" : "Add note"}" aria-label="${row.note ? "Edit note" : "Add note"} for ${escapeHtml(row.label)}" aria-expanded="${editingNote}">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M9.5 14H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6.5L9.5 14Zm0 0V9.5H14M5 5h6M5 8h3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
       ${
         row.canRerun
           ? `<span class="repo-action-menu repo-action-menu-container watch-rerun-control">
@@ -215,4 +221,23 @@ function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean, p
       ${renderTriageButtons(row.triageState, [row.id], "watch-action-button", row.label, hasDoneCandidate)}
     </div>
   `;
+}
+
+function renderNote(row: WatchRowViewModel, editing: boolean): string {
+  if (editing) {
+    return `
+      <form class="watch-note-form" data-action="save-note" data-id="${escapeHtml(row.id)}">
+        <textarea name="note" rows="2" data-draft-key="${escapeHtml(row.id)}" aria-label="Note for ${escapeHtml(row.label)}" placeholder="Add a reminder for the notification…">${escapeHtml(row.note ?? "")}</textarea>
+        <div class="watch-note-actions">
+          <button class="add-form-submit" type="submit">Save</button>
+          <button type="button" data-action="cancel-note">Cancel</button>
+          ${row.note ? `<button type="button" data-action="remove-note" data-id="${escapeHtml(row.id)}">Remove</button>` : ""}
+        </div>
+      </form>
+    `;
+  }
+
+  return row.note
+    ? `<button class="watch-note" type="button" data-action="edit-note" data-id="${escapeHtml(row.id)}" title="${escapeHtml(row.note)}" aria-label="Edit note for ${escapeHtml(row.label)}: ${escapeHtml(row.note)}">${escapeHtml(row.note)}</button>`
+    : "";
 }

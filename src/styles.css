@@ -30,7 +30,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -599,7 +600,7 @@ input {
   --tree-chevron-width: 10px;
   --tree-leading-width: 22px;
   --tree-column-gap: 4px;
-  --tree-actions-width: 63px;
+  --tree-actions-width: 83px;
   --repo-actions-width: 120px;
   --scrollbar-gutter-width: 14px;
 
@@ -1695,6 +1696,68 @@ button.repo-ci-status:focus-visible {
   text-align: left;
 }
 
+.watch-note {
+  overflow: hidden;
+  border: 0;
+  padding: 2px 0 0;
+  background: transparent;
+  color: #b5c3d4;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-note:hover {
+  color: #eef1f5;
+}
+
+.watch-note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.watch-note-form textarea {
+  width: 100%;
+  resize: none;
+  border: 1px solid rgb(139 148 158 / 35%);
+  border-radius: 5px;
+  padding: 6px 8px;
+  background: #0d1117;
+  color: #eef1f5;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.watch-note-form textarea:focus {
+  outline: 1px solid #79c0ff;
+  outline-offset: -1px;
+}
+
+.watch-note-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.watch-note-actions button[type="button"] {
+  border: 0;
+  border-radius: 5px;
+  padding: 4px 8px;
+  background: transparent;
+  color: #b5c3d4;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.watch-note-actions button[type="button"]:hover {
+  background: rgb(255 255 255 / 7%);
+  color: #eef1f5;
+}
+
 .watch.has-done-candidate .watch-title-text {
   opacity: 0.55;
 }
@@ -1889,7 +1952,7 @@ button.watch-workflow-status:focus-visible {
   position: absolute;
   top: 0;
   right: 0;
-  width: 84px;
+  width: 104px;
   height: 100%;
   background: linear-gradient(90deg, transparent, var(--watch-row-bg) 24px);
   content: "";

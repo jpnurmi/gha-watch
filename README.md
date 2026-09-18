@@ -27,6 +27,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Clear finished watches or clear all watches from the menu.
 - Automatically retain Done history for one month, capped at the 100 newest items.
 - Open watched runs or jobs in GitHub.
+- Add quick notes to individual workflows, jobs, or pull requests and show them in notification banners.
 
 ## Requirements
 
@@ -41,6 +42,8 @@ gh auth login
 Clicking a notification shows the GHA Watch popup; the Open action opens the watched item in GitHub. Notification action placement varies by platform: macOS may place actions in a menu, Windows exposes toast buttons, and Linux actions depend on the notification daemon's capabilities. The same actions remain available in the popup when a desktop does not display them.
 
 On Windows and Linux, tray and notification behavior depends on the desktop environment, notification daemon, and tray support.
+
+Use the note button on a watched item to add a reminder. Save it with **Save** or **Ctrl+Enter** (**Cmd+Enter** on macOS); **Escape** cancels editing. Saved notes appear below the item and at the top of its notification body. Click a note to edit or remove it. Notes persist across app restarts and follow the item's existing sync behavior: Drafts and Done sync between machines, while Inbox stays local.
 
 ## Supported Links
 

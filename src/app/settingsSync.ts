@@ -245,7 +245,7 @@ function mergeWatches(
         const remoteWatch = merged.get(id);
         merged.set(
           id,
-          remoteWatch ? mergeWatchTriage(localWatch, remoteWatch) : localWatch,
+          remoteWatch ? mergeWatchTriage(localWatch, remoteWatch, previousWatch) : localWatch,
         );
       } else {
         merged.delete(id);
@@ -278,7 +278,7 @@ function mergeWatches(
     });
 }
 
-function mergeWatchTriage(local: WatchRecord, remote: WatchRecord): WatchRecord {
+function mergeWatchTriage(local: WatchRecord, remote: WatchRecord, previous?: WatchRecord): WatchRecord {
   const merged: WatchRecord = {
     ...remote,
     triageState: getWatchTriageState(local),
@@ -288,6 +288,13 @@ function mergeWatchTriage(local: WatchRecord, remote: WatchRecord): WatchRecord 
     merged.doneAt = local.doneAt;
   } else {
     delete merged.doneAt;
+  }
+
+  const note = mergeChangedValue(previous?.note, local.note, remote.note);
+  if (note !== undefined) {
+    merged.note = note;
+  } else {
+    delete merged.note;
   }
 
   return merged;

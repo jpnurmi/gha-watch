@@ -112,7 +112,7 @@ describe("watch layout", () => {
     expect(styles).toMatch(
       /\.watch\.has-unseen-change \.watch-title-text\s*\{[^}]*color:\s*#58a6ff;/s,
     );
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*63px;/s);
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*83px;/s);
     expect(styles).toMatch(
       /\.watch \.watch-action-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
     );

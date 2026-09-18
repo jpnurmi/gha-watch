@@ -50,6 +50,7 @@ export type WatchRowViewModel = {
   draftLike: boolean;
   triageState: WatchTriageState;
   url: string;
+  note?: string;
 };
 
 export type WatchGroupItemViewModel = { kind: "row"; row: WatchRowViewModel };
@@ -149,6 +150,7 @@ export function createWatchRowViewModel(
       draftLike: isDraftPullRequestWatch(watch),
       triageState: getWatchTriageState(watch),
       url: watch.target.url,
+      note: watch.note,
     };
   }
 
@@ -220,6 +222,7 @@ function createRow(
     draftLike: isDraftPullRequestWatch(watch),
     triageState: getWatchTriageState(watch),
     url: watch.target.url,
+    note: watch.note,
   };
 }
 
