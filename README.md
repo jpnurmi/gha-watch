@@ -25,7 +25,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 - Re-run all jobs or only failed jobs for workflow runs and pull requests.
 - Open in GitHub, finish, or re-run directly from completion notifications when the desktop supports notification actions.
 - Mark all or only finished watches done from each repository's menu.
-- Automatically retain Done history for one month, capped at the 100 newest items.
+- Retain detailed Done history for one month, capped at the 100 newest items, with compact IDs kept indefinitely to prevent old items from returning after sync.
 - Open watched runs or jobs in GitHub.
 - Add quick notes to individual workflows, jobs, or pull requests and show them in notification banners.
 
@@ -46,6 +46,8 @@ On Windows and Linux, tray and notification behavior depends on the desktop envi
 Use **Add note…** in a watched item's **⋮** menu to add a reminder. The menu also contains re-run and move/remove actions; **Done** remains a separate quick button. Save a note with **Save** or **Ctrl+Enter** (**Cmd+Enter** on macOS); **Escape** cancels editing. Saved notes appear below the item and at the top of its notification body. Click a note to edit or remove it. Notes persist across app restarts and follow the item's existing sync behavior: Drafts and Done sync between machines, while Inbox stays local.
 
 Use a repository's **⋮** menu to move all its items in the current tab to Drafts, Inbox, or Done, or remove them from Done. **Mark finished done** moves only items that are no longer active.
+
+Clearing Done items or pruning their details preserves their IDs and timestamps in synced history, without an age or item-count limit. Manually adding an item again overrides this history. The compact Gist format reads existing history automatically; update every computer to this version to continue syncing after the Gist is upgraded. Older versions reject the new format so they cannot silently discard the retained IDs. IDs already forgotten by older versions cannot be recovered automatically.
 
 ## Supported Links
 

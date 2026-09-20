@@ -1,6 +1,5 @@
 import { normalizeAppSettings } from "../domain/settings";
 import {
-  clearExpiredWatchSuppressions,
   normalizeWatchSuppressions,
   type WatchSuppression,
 } from "../domain/watchSuppressions";
@@ -50,9 +49,17 @@ export function createSettingsSync(remote: SettingsRemote, journal?: SettingsSyn
       persistPendingState();
       const nextState = pendingState;
       const remoteState = await remote.load();
+      const suppressedIds = new Set(remoteState?.watchSuppressions?.map((item) => item.id));
       const mergedState = previousLocalState && remoteState
         ? mergeSyncedStates(previousLocalState, nextState, remoteState)
-        : nextState;
+        : toSyncedState({
+          ...nextState,
+          watches: nextState.watches.filter((watch) => !suppressedIds.has(watch.id)),
+          watchSuppressions: combineWatchSuppressions(
+            nextState.watchSuppressions,
+            remoteState?.watchSuppressions,
+          ),
+        });
 
       if (!remoteState || !statesEqual(mergedState, remoteState)) {
         await remote.save(mergedState);
@@ -341,7 +348,7 @@ function combineWatchSuppressions(
     }
   }
 
-  return clearExpiredWatchSuppressions([...combined.values()]);
+  return [...combined.values()];
 }
 
 function mergeWatchChanges(

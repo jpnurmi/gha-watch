@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { createRequestQueue } from "./requestQueue";
 import { executeShellCommand } from "./shellCommand";
 import { assertSuccessfulGhResult, isMissingProgramError, requiredString } from "./ghProtocol";
@@ -10,7 +11,7 @@ export type ShellResult = {
 
 export type ShellExecutor = {
   getAccount?(): Promise<string>;
-  execute(program: string, args: string[]): Promise<ShellResult>;
+  execute(program: string, args: string[], input?: string): Promise<ShellResult>;
 };
 
 let sharedTauriShellExecutor: ShellExecutor | undefined;
@@ -35,9 +36,11 @@ export function createTauriShellExecutor(): ShellExecutor {
       });
       try { return await checking; } finally { checking = undefined; }
     },
-    execute(program, args) {
+    execute(program, args, input) {
       return run(async () => {
         const { Command } = await import("@tauri-apps/plugin-shell");
+        const inputPath = input === undefined ? undefined
+          : await invoke<string>("create_command_input", { content: input });
         const commands =
           program === "gh"
             ? [
@@ -51,25 +54,30 @@ export function createTauriShellExecutor(): ShellExecutor {
             : [program];
         let lastError: unknown;
 
-        for (const command of commands) {
-          try {
-            const output = await executeShellCommand(Command.create(command, args));
+        try {
+          for (const command of commands) {
+            try {
+              const output = await executeShellCommand(Command.create(
+                command, inputPath ? [...args, "--input", inputPath] : args,
+              ));
 
-            return {
-              code: output.code ?? 1,
-              stdout: output.stdout,
-              stderr: output.stderr,
-            };
-          } catch (error) {
-            lastError = error;
+              return {
+                code: output.code ?? 1,
+                stdout: output.stdout,
+                stderr: output.stderr,
+              };
+            } catch (error) {
+              lastError = error;
 
-            if (!isMissingProgramError(error)) {
-              throw error;
+              if (!isMissingProgramError(error)) {
+                throw error;
+              }
             }
           }
+          throw lastError;
+        } finally {
+          if (inputPath) await invoke("remove_command_input", { path: inputPath });
         }
-
-        throw lastError;
       });
     },
   };

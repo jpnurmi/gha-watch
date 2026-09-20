@@ -2025,9 +2025,9 @@ describe("watchController", () => {
     expect(controller.getWatches()).toEqual([]);
   });
 
-  it("allows subscription sync after a suppression expires", async () => {
+  it("keeps old suppressions across startup and subscription sync", async () => {
     let now = new Date("2026-05-01T00:00:00Z");
-    const { deps, suppressionSaves } = createDeps([
+    const { deps, fetches } = createDeps([
       {
         status: "queued",
         conclusion: null,
@@ -2058,10 +2058,11 @@ describe("watchController", () => {
       },
     ]);
 
-    expect(controller.getWatches().map((watch) => watch.id)).toEqual([
-      "getsentry/sentry/run/123",
+    expect(controller.getWatches()).toEqual([]);
+    expect(fetches).toEqual([]);
+    expect(controller.getWatchSuppressions()).toEqual([
+      { id: "getsentry/sentry/run/123", clearedAt: "2026-01-01T00:00:00.000Z" },
     ]);
-    expect(suppressionSaves.at(-1)).toEqual([]);
   });
 
   it("lets a manual add override a cleared-watch suppression", async () => {

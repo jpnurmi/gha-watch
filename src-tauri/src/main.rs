@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod command_input;
 mod desktop;
 mod notifications;
 mod tray;
@@ -42,12 +43,15 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .manage(tray::TrayIndicatorState::default())
+        .manage(command_input::CommandInputState::default())
         .invoke_handler(tauri::generate_handler![
             get_build_sha,
             desktop::open_github_url,
             tray::set_tray_indicator,
             notifications::show_desktop_notification,
-            notifications::clear_desktop_notifications
+            notifications::clear_desktop_notifications,
+            command_input::create_command_input,
+            command_input::remove_command_input
         ])
         .on_window_event(|window, event| match event {
             #[cfg(target_os = "linux")]

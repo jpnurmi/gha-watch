@@ -40,15 +40,15 @@ const state: SyncedState = {
 
 function createSequenceExecutor(results: ShellResult[]): {
   executor: ShellExecutor;
-  calls: Array<{ program: string; args: string[] }>;
+  calls: Array<{ program: string; args: string[]; input?: string }>;
 } {
-  const calls: Array<{ program: string; args: string[] }> = [];
+  const calls: Array<{ program: string; args: string[]; input?: string }> = [];
 
   return {
     calls,
     executor: {
-      async execute(program, args) {
-        calls.push({ program, args });
+      async execute(program, args, input) {
+        calls.push({ program, args, ...(input !== undefined ? { input } : {}) });
         const result = results.shift();
 
         if (!result) {
@@ -145,15 +145,14 @@ describe("settings Gist", () => {
         "--method",
         "POST",
         "/gists",
-        "--raw-field",
-        "description=GHA Watch synced settings",
-        "--field",
-        "public=false",
-        "--raw-field",
-        expect.stringContaining("files[gha-watch-settings.json][content]="),
       ],
     });
-    expect(calls[1].args.at(-1)).not.toContain("repoIconUrl");
+    expect(JSON.parse(calls[1].input!)).toEqual({
+      description: "GHA Watch synced settings",
+      public: false,
+      files: { "gha-watch-settings.json": { content: serializeSettingsDocument(state) } },
+    });
+    expect(calls[1].input).not.toContain("repoIconUrl");
   });
 
   it("updates a discovered Gist and reuses its id", async () => {
@@ -192,9 +191,10 @@ describe("settings Gist", () => {
       "--method",
       "PATCH",
       "/gists/existing",
-      "--raw-field",
-      expect.stringContaining("files[gha-watch-settings.json][content]="),
     ]);
+    expect(JSON.parse(calls[1].input!)).toEqual({
+      files: { "gha-watch-settings.json": { content: serializeSettingsDocument(state) } },
+    });
     expect(calls[2].args).toEqual(["api", "/gists/existing"]);
   });
 
@@ -204,7 +204,7 @@ describe("settings Gist", () => {
     );
     expect(() => parseSettingsDocument(JSON.stringify({
       format: "dev.jpnurmi.gha-watch/settings",
-      version: 2,
+      version: 3,
       settings: state.settings,
     }))).toThrow("unsupported version");
   });
@@ -321,6 +321,65 @@ describe("settings Gist", () => {
     await remote.load();
 
     expect(requests).toEqual(["/gists/second", "/gists/second"]);
+  });
+
+  it("migrates legacy suppressions to an ID and timestamp map", () => {
+    const watchSuppressions = [
+      { id: savedWatch.id, clearedAt: "2025-01-01T00:00:00.000Z" },
+    ];
+    const legacy = JSON.stringify({
+      format: "dev.jpnurmi.gha-watch/settings", version: 1,
+      ...state, watchSuppressions,
+    });
+    const migrated = JSON.parse(serializeSettingsDocument(parseSettingsDocument(legacy)));
+
+    expect(migrated.version).toBe(2);
+    expect(migrated.watchSuppressions).toEqual({ [savedWatch.id]: Date.parse(watchSuppressions[0].clearedAt) });
+    expect(parseSettingsDocument(JSON.stringify(migrated)).watchSuppressions).toEqual(watchSuppressions);
+  });
+
+  it("uploads a large compact history outside command arguments", async () => {
+    const watchSuppressions = Array.from({ length: 20_000 }, (_, index) => ({
+      id: `jpnurmi/gha-watch/run/${index}`,
+      clearedAt: "2025-01-01T00:00:00.000Z",
+    }));
+    const { executor, calls } = createSequenceExecutor([
+      gistList("existing"),
+      { code: 0, stdout: "{}", stderr: "" },
+    ]);
+    await createSettingsGistRemote(executor).save({ ...state, watchSuppressions });
+    const content = JSON.parse(calls[1].input!).files["gha-watch-settings.json"].content;
+
+    expect(content.length).toBeLessThan(1_200_000);
+    expect(content.length).toBeGreaterThan(128_000);
+    expect(calls[1].args).toEqual(["api", "--method", "PATCH", "/gists/existing"]);
+    expect(parseSettingsDocument(content).watchSuppressions).toEqual(watchSuppressions);
+  });
+
+  it("loads full content when GitHub truncates the Gist response", async () => {
+    const rawUrl = "https://gist.githubusercontent.com/octocat/6cad326836d38bd3a7ae/raw/db9c55113504e46fa076e7df3a04ce592e2e86d8/hello_world.rb";
+    const { executor, calls } = createSequenceExecutor([
+      gistList("existing"),
+      { code: 0, stdout: JSON.stringify({ files: { "gha-watch-settings.json": {
+        content: "{", truncated: true, raw_url: rawUrl,
+      } } }), stderr: "" },
+      { code: 0, stdout: serializeSettingsDocument(state), stderr: "" },
+    ]);
+
+    expect(await createSettingsGistRemote(executor).load()).toEqual(parseSettingsDocument(serializeSettingsDocument(state)));
+    expect(calls[2].args).toEqual(["api", rawUrl]);
+  });
+
+  it("does not follow an untrusted raw URL", async () => {
+    const { executor, calls } = createSequenceExecutor([
+      gistList("existing"),
+      { code: 0, stdout: JSON.stringify({ files: { "gha-watch-settings.json": {
+        truncated: true, raw_url: "https://github.com/jpnurmi/gha-watch",
+      } } }), stderr: "" },
+    ]);
+
+    await expect(createSettingsGistRemote(executor).load()).rejects.toThrow("invalid raw URL");
+    expect(calls).toHaveLength(2);
   });
 });
 
