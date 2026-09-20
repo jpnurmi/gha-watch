@@ -236,6 +236,36 @@ describe("settings Gist", () => {
     })).watchSuppressions).toEqual(watchSuppressions);
   });
 
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["non-record", "invalid"],
+    ["array", []],
+    ["invalid entry", { [savedWatch.id]: "invalid" }],
+    ["invalid timestamp", { [savedWatch.id]: Number.MAX_VALUE }],
+  ])("rejects %s compact watch suppressions", (_label, watchSuppressions) => {
+    const document = JSON.parse(serializeSettingsDocument(state));
+    if (watchSuppressions === undefined) {
+      delete document.watchSuppressions;
+    } else {
+      document.watchSuppressions = watchSuppressions;
+    }
+
+    expect(() => parseSettingsDocument(JSON.stringify(document))).toThrow("invalid document");
+  });
+
+  it("normalizes compact watch suppressions", () => {
+    const document = JSON.parse(serializeSettingsDocument(state));
+    document.watchSuppressions = {
+      "JPNURMI/GHA-WATCH/run/123": Date.parse("2026-08-31T12:00:00.000Z"),
+    };
+
+    expect(parseSettingsDocument(JSON.stringify(document)).watchSuppressions).toEqual([{
+      id: "jpnurmi/gha-watch/run/123",
+      clearedAt: "2026-08-31T12:00:00.000Z",
+    }]);
+  });
+
   it("ignores malformed and inbox watch records", () => {
     expect(normalizeSyncedWatches([
       savedWatch,

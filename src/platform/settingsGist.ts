@@ -249,9 +249,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function decodeCompactSuppressions(value: unknown): WatchSuppression[] {
-  if (!isRecord(value)) return [];
-  return normalizeWatchSuppressions(Object.entries(value).flatMap(([id, timestamp]) => {
-    if (typeof timestamp !== "number" || !Number.isFinite(new Date(timestamp).getTime())) return [];
-    return [{ id, clearedAt: new Date(timestamp).toISOString() }];
+  if (!isRecord(value) || Array.isArray(value)) {
+    throw new Error("The GHA Watch settings Gist contains an invalid document.");
+  }
+
+  return normalizeWatchSuppressions(Object.entries(value).map(([id, timestamp]) => {
+    if (typeof timestamp !== "number" || !Number.isFinite(new Date(timestamp).getTime())) {
+      throw new Error("The GHA Watch settings Gist contains an invalid document.");
+    }
+    return { id, clearedAt: new Date(timestamp).toISOString() };
   }));
 }
