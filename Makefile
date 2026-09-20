@@ -1,6 +1,6 @@
 NPM ?= npm
 
-.PHONY: help deps dev typecheck test check web-build build tauri-build clean
+.PHONY: help deps dev typecheck test check web-build build tauri-build install clean
 
 help:
 	@printf '%s\n' \
@@ -12,6 +12,7 @@ help:
 		'  check        Run typecheck and test' \
 		'  web-build    Build the web UI' \
 		'  build        Build the release app bundle' \
+		'  install      Install and restart the release app bundle' \
 		'  clean        Remove generated build output'
 
 deps:
@@ -51,7 +52,7 @@ build: | node_modules
 				'    Install' \
 				'and' \
 				'restart' \
-				"        pkill -x gha-watch || true; sudo dpkg -i '$$deb' && (nohup gha-watch >/dev/null 2>&1 &)"; \
+				'        make install'; \
 			;; \
 		MINGW*|MSYS*|CYGWIN*) \
 			$(NPM) run tauri -- build --config src-tauri/tauri.windows.conf.json; \
@@ -67,7 +68,7 @@ build: | node_modules
 				'    Install' \
 				'and' \
 				'restart' \
-				"        MSYS_NO_PATHCONV=1 '$$installer' /S /R"; \
+				'        make install'; \
 			;; \
 		*) \
 			$(NPM) run tauri build; \
@@ -75,11 +76,56 @@ build: | node_modules
 				'    Install' \
 				'and' \
 				'restart' \
-				'        pkill -x gha-watch || true; ditto "$(CURDIR)/src-tauri/target/release/bundle/macos/GHA Watch.app" ~/Applications/"GHA Watch.app" && open ~/Applications/"GHA Watch.app"'; \
+				'        make install'; \
 			;; \
 	esac
 
 tauri-build: build
+
+install:
+	@set -eu; \
+	case "$$(uname -s)" in \
+		Linux*) \
+			bundle=''; \
+			for candidate in "$(CURDIR)"/src-tauri/target/release/bundle/deb/*.deb; do \
+				if [ -f "$$candidate" ]; then bundle=$$candidate; break; fi; \
+			done; \
+			if [ -z "$$bundle" ]; then \
+				printf '%s\n' 'No Linux .deb package found under src-tauri/target/release/bundle/deb/' >&2; \
+				exit 1; \
+			fi; \
+			command sudo -v; \
+			pkill -x gha-watch || true; \
+			sudo dpkg -i "$$bundle"; \
+			nohup gha-watch >/dev/null 2>&1 & \
+			;; \
+		MINGW*|MSYS*|CYGWIN*) \
+			installer=''; \
+			for candidate in "$(CURDIR)"/src-tauri/target/release/bundle/nsis/*.exe; do \
+				if [ -f "$$candidate" ]; then installer=$$candidate; break; fi; \
+			done; \
+			if [ -z "$$installer" ]; then \
+				printf '%s\n' 'No Windows NSIS installer found under src-tauri/target/release/bundle/nsis/' >&2; \
+				exit 1; \
+			fi; \
+			MSYS_NO_PATHCONV=1 "$$installer" /S /R; \
+			;; \
+		Darwin*) \
+			bundle="$(CURDIR)/src-tauri/target/release/bundle/macos/GHA Watch.app"; \
+			if [ ! -d "$$bundle" ]; then \
+				printf '%s\n' 'No macOS app found under src-tauri/target/release/bundle/macos/' >&2; \
+				exit 1; \
+			fi; \
+			mkdir -p "$$HOME/Applications"; \
+			pkill -x gha-watch || true; \
+			ditto "$$bundle" "$$HOME/Applications/GHA Watch.app"; \
+			open "$$HOME/Applications/GHA Watch.app"; \
+			;; \
+		*) \
+			printf 'Unsupported platform: %s\n' "$$(uname -s)" >&2; \
+			exit 1; \
+			;; \
+	esac
 
 clean:
 	rm -rf dist src-tauri/target
