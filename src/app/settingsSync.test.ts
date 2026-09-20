@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WatchRecord, WatchTriageState } from "../domain/watches";
 import type { SettingsRemote, SyncedState } from "../platform/settingsGist";
+import { parseSettingsDocument, serializeSettingsDocument } from "../platform/settingsGist";
+import { createWatchController } from "./watchController";
 import {
   createSettingsSync,
   mergeSyncedStates,
@@ -374,6 +376,69 @@ describe("settings sync", () => {
     expect(recovered.settings).toEqual(edited.settings);
     expect(recovered.watches).toEqual([...edited.watches, watch("3", "saved")]);
     expect(storedState).toEqual(toSyncedState(recovered));
+  });
+
+  it("keeps thousands of completions suppressed after months offline", async () => {
+    const inbox = Array.from({ length: 2_000 }, (_, index) => watch(String(index + 1), "inbox"));
+    let stored = serializeSettingsDocument(toSyncedState({
+      ...localState,
+      watches: inbox.map((item) => ({ ...item, triageState: "done", doneAt: new Date().toISOString() })),
+    }));
+    const remote: SettingsRemote = {
+      load: async () => parseSettingsDocument(stored),
+      save: async (state) => { stored = serializeSettingsDocument(state); },
+    };
+    expect((await remote.load())?.watches).toHaveLength(100);
+    expect((await remote.load())?.watchSuppressions).toHaveLength(1_900);
+
+    vi.setSystemTime(new Date("2027-03-01T00:00:00.000Z"));
+    const sync = createSettingsSync(remote);
+    const received = await sync.sync({ ...localState, watches: inbox });
+    expect(received.watches).toEqual([]);
+    expect(received.watchSuppressions).toHaveLength(2_000);
+
+    const controller = createWatchController({
+      save: async () => {}, saveSuppressions: async () => {},
+      fetchState: vi.fn(), notify: vi.fn(),
+    }, inbox);
+    controller.replaceSyncedWatches(received.watches, received.watchSuppressions);
+    expect(controller.getWatches()).toEqual([]);
+    expect(controller.getWatchSuppressions()).toHaveLength(2_000);
+
+    const restarted = createSettingsSync(remote);
+    const reloaded = await restarted.sync({ ...localState, watches: [] });
+    await restarted.push({ ...reloaded, watches: [watch("new", "saved")] });
+    expect((await remote.load())?.watchSuppressions).toEqual(received.watchSuppressions);
+  });
+
+  it("preserves remote compact history when uploading before the first sync", async () => {
+    const suppression = { id: watch("2", "done").id, clearedAt: "2025-01-01T00:00:00.000Z" };
+    let stored: SyncedState = { ...remoteState, watchSuppressions: [suppression] };
+    const sync = createSettingsSync({
+      load: async () => stored,
+      save: async (state) => { stored = state; },
+    });
+
+    await sync.push(localState);
+
+    expect(stored.watchSuppressions).toEqual([suppression]);
+    expect(stored.watches).toEqual([]);
+  });
+
+  it("preserves remote completions while uploading stale local history", async () => {
+    const previous = toSyncedState({ ...localState, watches: [watch("2", "saved")] });
+    const suppression = { id: watch("2", "done").id, clearedAt: "2025-01-01T00:00:00.000Z" };
+    let stored: SyncedState = { ...remoteState, watches: [], watchSuppressions: [suppression] };
+    const sync = createSettingsSync({
+      load: async () => stored,
+      save: async (state) => { stored = state; },
+    });
+    sync.acknowledge(previous);
+
+    await sync.push({ ...previous, watches: [...previous.watches, watch("3", "saved")] });
+
+    expect(stored.watches).toEqual([watch("3", "saved")]);
+    expect(stored.watchSuppressions).toEqual([suppression]);
   });
 });
 

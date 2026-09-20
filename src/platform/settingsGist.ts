@@ -10,10 +10,12 @@ import { createTauriShellExecutor, type ShellExecutor, type ShellResult } from "
 const gistDescription = "GHA Watch synced settings";
 const gistFilename = "gha-watch-settings.json";
 const settingsFormat = "dev.jpnurmi.gha-watch/settings";
-const settingsFormatVersion = 1;
+const settingsFormatVersion = 2;
 
 type GistFile = {
   content?: string;
+  truncated?: boolean;
+  raw_url?: string;
 };
 
 type GistResponse = {
@@ -28,7 +30,7 @@ type SyncedSettingsDocument = {
   version: typeof settingsFormatVersion;
   settings: AppSettings;
   watches?: WatchRecord[];
-  watchSuppressions?: WatchSuppression[];
+  watchSuppressions: Record<string, number>;
 };
 
 export type SyncedState = {
@@ -109,7 +111,18 @@ export function createSettingsGistRemote(
 
       const result = await executor.execute("gh", ["api", `/gists/${id}`]);
       assertSuccessfulResult(result);
-      return parseSettingsDocument(getGistContent(parseJson<GistResponse>(result.stdout)));
+      const file = parseJson<GistResponse>(result.stdout).files?.[gistFilename];
+      if (file?.truncated) {
+        const url = new URL(requiredString(file.raw_url, `${gistFilename} raw URL`));
+        if (url.protocol !== "https:" || url.hostname !== "gist.githubusercontent.com" ||
+            url.port || url.username || url.password) {
+          throw new Error("The GHA Watch settings Gist has an invalid raw URL.");
+        }
+        const raw = await executor.execute("gh", ["api", url.href]);
+        assertSuccessfulResult(raw);
+        return parseSettingsDocument(raw.stdout);
+      }
+      return parseSettingsDocument(requiredString(file?.content, `${gistFilename} content`));
     },
 
     async save(state) {
@@ -119,6 +132,7 @@ export function createSettingsGistRemote(
         discovery = await discoverGistId();
       }
       const { id } = discovery;
+      const files = { [gistFilename]: { content } };
 
       if (id) {
         const result = await executor.execute("gh", [
@@ -126,9 +140,7 @@ export function createSettingsGistRemote(
           "--method",
           "PATCH",
           `/gists/${id}`,
-          "--raw-field",
-          `files[${gistFilename}][content]=${content}`,
-        ]);
+        ], JSON.stringify({ files }));
         assertSuccessfulResult(result);
         return;
       }
@@ -138,13 +150,7 @@ export function createSettingsGistRemote(
         "--method",
         "POST",
         "/gists",
-        "--raw-field",
-        `description=${gistDescription}`,
-        "--field",
-        "public=false",
-        "--raw-field",
-        `files[${gistFilename}][content]=${content}`,
-      ]);
+      ], JSON.stringify({ description: gistDescription, public: false, files }));
       assertSuccessfulResult(result);
       const created = requiredString(parseJson<GistResponse>(result.stdout).id, "created Gist id");
       await refreshAccount();
@@ -164,7 +170,8 @@ export function serializeSettingsDocument(state: SyncedState): string {
       dismissedPullRequests: normalized.dismissedPullRequests,
     },
     watches: normalizeSyncedWatches(state.watches).map(({ repoIconUrl: _repoIconUrl, ...watch }) => watch),
-    watchSuppressions: normalizeWatchSuppressions(state.watchSuppressions),
+    watchSuppressions: Object.fromEntries(normalizeWatchSuppressions(state.watchSuppressions)
+      .map(({ id, clearedAt }) => [id, Date.parse(clearedAt)])),
   };
   return `${JSON.stringify(document, null, 2)}\n`;
 }
@@ -176,7 +183,7 @@ export function parseSettingsDocument(content: string): LoadedSyncedState {
     throw new Error("The GHA Watch settings Gist has an unsupported format.");
   }
 
-  if (document.version !== settingsFormatVersion) {
+  if (document.version !== 1 && document.version !== settingsFormatVersion) {
     throw new Error("The GHA Watch settings Gist has an unsupported version.");
   }
 
@@ -187,7 +194,9 @@ export function parseSettingsDocument(content: string): LoadedSyncedState {
   return {
     settings: normalizeAppSettings(document.settings),
     watches: normalizeSyncedWatches(document.watches),
-    watchSuppressions: normalizeWatchSuppressions(document.watchSuppressions),
+    watchSuppressions: document.version === 1
+      ? normalizeWatchSuppressions(document.watchSuppressions)
+      : decodeCompactSuppressions(document.watchSuppressions),
     ...(!Object.hasOwn(document, "watches") ? { historyInitialized: false } : {}),
   };
 }
@@ -206,11 +215,6 @@ function normalizeGistPages(value: unknown): GistResponse[] {
 
   const pages = value.every(Array.isArray) ? value : [value];
   return pages.flatMap((page) => page.filter(isRecord) as GistResponse[]);
-}
-
-function getGistContent(gist: GistResponse): string {
-  const content = gist.files?.[gistFilename]?.content;
-  return requiredString(content, `${gistFilename} content`);
 }
 
 function getTimestamp(value: string | undefined): number {
@@ -242,4 +246,17 @@ function assertSuccessfulResult(result: ShellResult): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function decodeCompactSuppressions(value: unknown): WatchSuppression[] {
+  if (!isRecord(value) || Array.isArray(value)) {
+    throw new Error("The GHA Watch settings Gist contains an invalid document.");
+  }
+
+  return normalizeWatchSuppressions(Object.entries(value).map(([id, timestamp]) => {
+    if (typeof timestamp !== "number" || !Number.isFinite(new Date(timestamp).getTime())) {
+      throw new Error("The GHA Watch settings Gist contains an invalid document.");
+    }
+    return { id, clearedAt: new Date(timestamp).toISOString() };
+  }));
 }

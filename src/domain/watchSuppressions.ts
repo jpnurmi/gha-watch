@@ -1,5 +1,4 @@
 import { canonicalWatchId } from "./identity";
-import { isWatchRetentionExpired } from "./watches";
 
 export type WatchSuppression = {
   id: string;
@@ -18,7 +17,11 @@ export function normalizeWatchSuppressions(value: unknown): WatchSuppression[] {
       continue;
     }
 
-    suppressions.set(item.id, item);
+    const id = canonicalWatchId(item.id);
+    const existing = suppressions.get(id);
+    if (!existing || Date.parse(item.clearedAt) > Date.parse(existing.clearedAt)) {
+      suppressions.set(id, { id, clearedAt: item.clearedAt });
+    }
   }
 
   return [...suppressions.values()];
@@ -34,7 +37,8 @@ export function addWatchSuppressions(
 
   for (const id of ids) {
     if (id) {
-      next.set(id, { id, clearedAt: timestamp });
+      const key = canonicalWatchId(id);
+      next.set(key, { id: key, clearedAt: timestamp });
     }
   }
 
@@ -45,17 +49,7 @@ export function removeWatchSuppression(
   suppressions: WatchSuppression[],
   id: string,
 ): WatchSuppression[] {
-  const next = suppressions.filter((suppression) => suppression.id !== id);
-  return next.length === suppressions.length ? suppressions : next;
-}
-
-export function clearExpiredWatchSuppressions(
-  suppressions: WatchSuppression[],
-  now = new Date(),
-): WatchSuppression[] {
-  const next = suppressions.filter(
-    (suppression) => !isWatchRetentionExpired(suppression.clearedAt, now),
-  );
+  const next = suppressions.filter((suppression) => canonicalWatchId(suppression.id) !== canonicalWatchId(id));
   return next.length === suppressions.length ? suppressions : next;
 }
 

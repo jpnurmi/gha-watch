@@ -16,7 +16,6 @@ import type { CheckWatchTarget, ParsedWatchTarget, PrWatchTarget, WatchTarget } 
 import { formatWatchState, getStatusTransition, shouldPollWatch } from "../domain/status";
 import {
   addWatchSuppressions,
-  clearExpiredWatchSuppressions,
   isWatchSuppressed,
   removeWatchSuppression,
   type WatchSuppression,
@@ -367,7 +366,7 @@ export function createWatchController(
     return normalized;
   });
   const watchState = createWatchState(clearExpiredDoneWatches(normalizedWatches, initialNow), deps.save);
-  let suppressions = clearExpiredWatchSuppressions(initialSuppressions, initialNow);
+  let suppressions = initialSuppressions;
   let workflowDiscoveryState = initialWorkflowDiscoveryState;
   let discoveryStateUpdate = Promise.resolve();
   const suppressionPersistence = createPersistenceQueue(deps.saveSuppressions);
@@ -482,10 +481,6 @@ export function createWatchController(
       setSuppressions(addWatchSuppressions(suppressions, clearedIds, now));
       setWatches(next);
     }
-  }
-
-  function pruneExpiredSuppressions(now = getNow()): void {
-    setSuppressions(clearExpiredWatchSuppressions(suppressions, now));
   }
 
   async function refreshRepositoryIcon(target: ParsedWatchTarget): Promise<void> {
@@ -1695,9 +1690,8 @@ export function createWatchController(
       const prunedSyncedIds = normalizedSyncedWatches
         .filter((watch) => !syncedIds.has(watch.id))
         .map((watch) => watch.id);
-      const retainedSyncedSuppressions = clearExpiredWatchSuppressions(
-        addWatchSuppressions(syncedSuppressions, prunedSyncedIds, now),
-        now,
+      const retainedSyncedSuppressions = addWatchSuppressions(
+        syncedSuppressions, prunedSyncedIds, now,
       ).filter((suppression) => !syncedIds.has(suppression.id));
       const suppressedIds = new Set(
         retainedSyncedSuppressions.map((suppression) => suppression.id),
@@ -1875,7 +1869,6 @@ export function createWatchController(
     },
 
     async syncWorkflowSubscriptions(watchedRepos) {
-      pruneExpiredSuppressions();
       await updateDiscoveryState((state) => pruneWorkflowDiscoveryState(state, watchedRepos));
 
       const outcomes = await mapWithConcurrency(
@@ -1957,7 +1950,6 @@ export function createWatchController(
       const watchIdSet = pollOptions.watchIds ? new Set(pollOptions.watchIds) : undefined;
       const prefetchedPullRequestDetails = pollOptions.prefetchedPullRequestDetails ?? new Map();
       const prefetchedWatchSnapshots = pollOptions.prefetchedWatchSnapshots ?? new Map();
-      pruneExpiredSuppressions(notificationTime);
       pruneExpiredDoneWatches(notificationTime);
       const polledWatches = watchState.get().filter(
         (watch) =>
