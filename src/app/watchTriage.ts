@@ -11,19 +11,19 @@ export function getWatchTriageActions(
   if (currentState === "saved") {
     return [
       { label: "Move to Inbox", state: "inbox" },
-      { label: "Done", state: "done" },
+      { label: "Mark done", state: "done" },
     ];
   }
 
   if (currentState === "done") {
     return [
       { label: "Move to Inbox", state: "inbox" },
-      { label: "Move to Drafts", state: "saved" },
+      { label: "Make draft", state: "saved" },
     ];
   }
 
   return [
-    { label: "Move to Drafts", state: "saved" },
-    { label: "Done", state: "done" },
+    { label: "Make draft", state: "saved" },
+    { label: "Mark done", state: "done" },
   ];
 }

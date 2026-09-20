@@ -4,7 +4,7 @@ import { getWatchSubjectIconSvg } from "./app/watchSubjectIcon";
 import { renderWatch } from "./ui/watchRow";
 import { renderAddForm, type PullRequestDiscoveryState } from "./ui/addPanel";
 import { fitWorkflowTargetSummaries, renderRepositorySettings, type RepositoryWatchMenuState } from "./ui/repositorySettings";
-import { escapeHtml, renderBranchBadge, renderChevronIcon, renderTriageButtons } from "./ui/markup";
+import { escapeHtml, renderBranchBadge, renderChevronIcon } from "./ui/markup";
 import { createSettingsJournal } from "./platform/settingsJournal";
 import { invokeDesktop } from "./platform/desktop";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
@@ -40,11 +40,8 @@ import {
 } from "./app/repoReorderInteraction";
 import { renderTitleMarkup } from "./app/titleMarkup";
 import { createWatchController, type WatchPollResult } from "./app/watchController";
-import {
-  getWatchRerunMode,
-  shouldDismissPendingWatchActionOnRowLeave,
-  type PendingWatchAction,
-} from "./app/watchActionConfirmation";
+import { getWatchRerunMode } from "./app/watchActionConfirmation";
+import { moveWatchMenuFocus, positionWatchMenu, renderRepoMenu } from "./ui/watchMenu";
 import { getClickedUnseenWatchIds } from "./app/watchSeenAction";
 import { getRepositoryUrl } from "./app/watchLinks";
 import {
@@ -183,7 +180,7 @@ let autoStartBusy = true;
 let updateAvailable = false;
 let popupHeight = popupMinHeight;
 const collapsedGroups = createCollapsedGroups();
-let pendingWatchAction: PendingWatchAction | undefined;
+let watchMenuId: string | undefined;
 let editingNoteId: string | undefined;
 let currentWatchView: WatchTriageState = "inbox";
 let activeWorkflowRunMenu: ActiveWorkflowRunMenuState | undefined;
@@ -439,12 +436,16 @@ document.addEventListener("click", (event) => {
     render();
   }
 
-  if (pendingWatchAction || activeWorkflowRunMenu || pullRequestMenu || repositoryWatchMenu || repoCiStatusMenu) {
+  if (watchMenuId && !(target instanceof Element && target.closest(".watch-menu-control"))) {
+    closeWatchMenu();
+  }
+
+  if (activeWorkflowRunMenu || pullRequestMenu || repositoryWatchMenu || repoCiStatusMenu) {
     if (target instanceof Element && target.closest(".repo-action-menu")) {
       return;
     }
 
-    pendingWatchAction = undefined;
+    watchMenuId = undefined;
     activeWorkflowRunMenu = undefined;
     pullRequestMenu = undefined;
     repositoryWatchMenu = undefined;
@@ -461,9 +462,8 @@ window.addEventListener("keydown", (event) => {
       return;
     }
 
-    if (pendingWatchAction) {
-      pendingWatchAction = undefined;
-      render();
+    if (watchMenuId) {
+      closeWatchMenu(true);
       event.preventDefault();
       return;
     }
@@ -564,7 +564,6 @@ function renderNow(): void {
     showRepositoryTools ? repoCiStatuses : {},
   );
   const hasWatches = watches.length > 0;
-  const hasFinishedWatches = currentWatchView !== "done" && watches.some((watch) => !watch.active);
 
   replacePopupHtmlPreservingScroll(app, `
     <section class="shell">
@@ -613,7 +612,7 @@ function renderNow(): void {
               </button>
               ${
                 isClearMenuOpen
-                  ? renderClearMenu(hasWatches, hasFinishedWatches)
+                  ? renderClearMenu(hasWatches)
                   : ""
               }
             </div>
@@ -630,6 +629,7 @@ function renderNow(): void {
   `);
 
   fitWorkflowTargetSummaries(app);
+  positionWatchMenu(app);
   void resizePopupToContent();
 }
 
@@ -748,7 +748,7 @@ function renderWatchGroup(group: WatchGroupViewModel): string {
 }
 
 function renderWatchGroupItem(item: WatchGroupViewModel["items"][number]): string {
-  return renderWatch(item.row, pendingWatchAction, editingNoteId);
+  return renderWatch(item.row, watchMenuId, editingNoteId);
 }
 
 function renderRepoCiStatus(group: WatchGroupViewModel): string {
@@ -860,15 +860,11 @@ function renderRepoGroupChevron(
 }
 
 function renderRepoGroupActions(group: WatchGroupViewModel, actions: RepoHeaderActions): string {
-  const rowIds = group.rows.map((row) => row.id);
-  const doneCandidate =
-    actions.isCollapsed && group.rows.length > 0 && group.rows.every((row) => row.doneCandidate);
-
   return `
     <div class="watch-group-actions">
       ${actions.showOpenPullRequests ? renderPullRequestMenu(group) : ""}
       ${actions.showActiveWorkflowRuns ? renderActiveWorkflowRunMenu(group) : ""}
-      ${rowIds.length > 0 ? renderTriageButtons(currentWatchView, rowIds, "watch-group-triage-button", group.repoLabel, doneCandidate) : ""}
+      ${renderRepoMenu(group, currentWatchView, watchMenuId === getWatchedRepoKey(group))}
     </div>
   `;
 }
@@ -1044,6 +1040,34 @@ function renderRepoIcon(group: WatchGroupViewModel): string {
 }
 
 function bindEvents(): void {
+  on("click", '.watch-menu-popover [role="menuitem"]', () => closeWatchMenu(true));
+
+  on("keydown", '.watch-menu-popover', (event, menu) => {
+    if (moveWatchMenuFocus(menu, event.key)) {
+      event.preventDefault();
+    } else if (event.key === "Tab") {
+      closeWatchMenu(true);
+    }
+  });
+
+  on("keydown", '[data-action="toggle-watch-menu"]', (event, button: HTMLButtonElement) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (watchMenuId !== button.dataset.id) toggleWatchMenu(button.dataset.id || "");
+      const menu = app.querySelector<HTMLElement>(".watch-menu-popover");
+      if (menu) moveWatchMenuFocus(menu, event.key === "ArrowUp" ? "End" : "Home");
+    }
+  });
+
+  on("focusout", '.watch-menu-control', (event, control) => {
+    if (event.relatedTarget instanceof Node && !control.contains(event.relatedTarget)) closeWatchMenu();
+  });
+
+  app.addEventListener("scroll", (event) => {
+    if (event.target instanceof Element && event.target.matches(".watch-list")) closeWatchMenu();
+  }, true);
+  window.addEventListener("resize", () => positionWatchMenu(app));
+
   on("click", '[data-action="toggle-add"]', (_event, _button: HTMLButtonElement) => {
     const wasAdding = isAdding && currentWatchView === "inbox";
     currentWatchView = "inbox";
@@ -1065,10 +1089,10 @@ function bindEvents(): void {
     }
 
     currentWatchView = view;
+    watchMenuId = undefined;
     editingNoteId = undefined;
     isAdding = false;
     isClearMenuOpen = false;
-    pendingWatchAction = undefined;
     activeWorkflowRunMenu = undefined;
     pullRequestMenu = undefined;
     repositoryWatchMenu = undefined;
@@ -1171,18 +1195,6 @@ function bindEvents(): void {
         console.error("Could not open GitHub workflow.", error);
       }
     }
-  });
-
-  on("click", '[data-action="done-finished"]', (_event) => {
-    isClearMenuOpen = false;
-    controller.markFinishedDone(currentWatchView);
-    queueSyncedStateUpload();
-  });
-
-  on("click", '[data-action="done-all"]', (_event) => {
-    isClearMenuOpen = false;
-    controller.markAllDone(currentWatchView);
-    queueSyncedStateUpload();
   });
 
   on("click", '[data-action="clear-done"]', (_event) => {
@@ -1352,8 +1364,8 @@ function bindEvents(): void {
     });
   });
 
-  on("click", '[data-action="arm-rerun"]', (_event, button: HTMLButtonElement) => {
-    armWatchAction(button.dataset.id || "", "rerun");
+  on("click", '[data-action="toggle-watch-menu"]', (_event, button: HTMLButtonElement) => {
+    toggleWatchMenu(button.dataset.id || "");
   });
 
   on("click", '[data-action^="rerun-"]', (_event, button: HTMLButtonElement) => {
@@ -1396,13 +1408,9 @@ function bindEvents(): void {
     queueSyncedStateUploadForWatchIds(ids);
   });
 
-  on("mouseleave", ".watch", (_event, row: HTMLElement) => {
-    dismissWatchActionOnRowLeave(row.dataset.id);
-  });
-
   on("click", '[data-action="edit-note"]', (_event, button: HTMLButtonElement) => {
     editingNoteId = button.dataset.id;
-    pendingWatchAction = undefined;
+    watchMenuId = undefined;
     renderNow();
     app.querySelector<HTMLTextAreaElement>('.watch-note-form textarea')?.focus();
   });
@@ -1446,14 +1454,13 @@ function bindEvents(): void {
   bindWatchReorderEvents();
 }
 
-function renderClearMenu(hasWatches: boolean, hasFinishedWatches: boolean): string {
+function renderClearMenu(hasWatches: boolean): string {
   return `
     <div class="clear-menu-popover" role="menu">
       ${getOverflowMenuItems({
         autoStartEnabled,
         autoStartBusy,
         hasWatches,
-        hasFinishedWatches,
         isDoneView: currentWatchView === "done",
       })
         .map(renderClearMenuItem)
@@ -2415,31 +2422,25 @@ async function watchPullRequest(
   void updateTrayIndicator();
 }
 
-function armWatchAction(id: string, kind: PendingWatchAction["kind"]): void {
-  if (!id) {
-    return;
-  }
+function toggleWatchMenu(id: string): void {
+  if (!id) return;
 
-  pendingWatchAction = pendingWatchAction?.id === id && pendingWatchAction.kind === kind
-    ? undefined
-    : { id, kind };
+  watchMenuId = watchMenuId === id ? undefined : id;
   isClearMenuOpen = false;
+  activeWorkflowRunMenu = undefined;
+  pullRequestMenu = undefined;
+  repositoryWatchMenu = undefined;
   repoCiStatusMenu = undefined;
-  render();
-
-  if (pendingWatchAction) {
-    window.requestAnimationFrame(() => {
-      app.querySelector<HTMLButtonElement>(".watch-rerun-popover .repo-action-item")?.focus();
-    });
-  }
+  renderNow();
+  app.querySelector<HTMLButtonElement>('.watch-menu-popover [role="menuitem"]')?.focus();
 }
 
-function dismissWatchActionOnRowLeave(rowId: string | undefined): void {
-  if (!shouldDismissPendingWatchActionOnRowLeave(pendingWatchAction, rowId)) {
-    return;
+function closeWatchMenu(restoreFocus = false): void {
+  if (!watchMenuId) return;
+  if (restoreFocus) {
+    app.querySelector<HTMLButtonElement>('[data-action="toggle-watch-menu"][aria-expanded="true"]')?.focus();
   }
-
-  pendingWatchAction = undefined;
+  watchMenuId = undefined;
   render();
 }
 
@@ -2476,7 +2477,7 @@ async function confirmRerun(id: string, mode: RerunMode): Promise<void> {
     return;
   }
 
-  pendingWatchAction = undefined;
+  watchMenuId = undefined;
   const removesSyncedWatch = controller.getWatches().some(
     (watch) => watch.id === id && getWatchTriageState(watch) !== "inbox",
   );
@@ -2557,6 +2558,7 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 async function acknowledgePopupDismissal(): Promise<void> {
+  watchMenuId = undefined;
   cancelRepoPointerDrag();
   cancelWatchPointerDrag();
   const dismissedState = dismissPopupUi({

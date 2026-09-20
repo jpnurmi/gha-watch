@@ -3229,7 +3229,7 @@ describe("watchController", () => {
     ]);
   });
 
-  it("marks all watches in the selected view done", async () => {
+  it("marks only selected watches done", async () => {
     const { deps } = createDeps([
       {
         status: "queued",
@@ -3247,7 +3247,7 @@ describe("watchController", () => {
     ]);
 
     await controller.add(runTarget);
-    controller.markAllDone("inbox");
+    controller.setTriageState(["getsentry/sentry/run/123"], "done");
 
     expect(controller.getWatches()).toMatchObject([
       {
@@ -3283,7 +3283,7 @@ describe("watchController", () => {
       { ...createDeps([]).deps, now: () => now },
       inboxWatches,
     );
-    source.markAllDone("inbox");
+    source.setTriageState(inboxWatches.map((watch) => watch.id), "done");
 
     expect(source.getWatches()).toHaveLength(100);
     expect(source.getWatchSuppressions()).toHaveLength(18);
@@ -3302,40 +3302,6 @@ describe("watchController", () => {
       saved: { total: 0, unseen: 0 },
       done: { total: 100, unseen: 0 },
     });
-  });
-
-  it("marks only finished watches done", async () => {
-    const { deps } = createDeps([
-      {
-        status: "completed",
-        conclusion: "success",
-        title: "CI: tests",
-        url: runTarget.url,
-      },
-      {
-        status: "queued",
-        conclusion: null,
-        title: "CI: job",
-        url: jobTarget.url,
-      },
-    ]);
-    const controller = createWatchController(deps);
-
-    await controller.add(runTarget);
-    await controller.add(jobTarget);
-    controller.markFinishedDone("inbox");
-
-    expect(controller.getWatches()).toMatchObject([
-      {
-        id: "getsentry/sentry/run/123",
-        active: false,
-        triageState: "done",
-      },
-      {
-        id: "getsentry/sentry/job/456",
-        active: true,
-      },
-    ]);
   });
 
   it("marks completed watches inactive after polling", async () => {

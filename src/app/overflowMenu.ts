@@ -8,7 +8,7 @@ export type OverflowMenuItem =
       label: string;
     }
   | {
-      action: "clear-done" | "done-all" | "done-finished";
+      action: "clear-done";
       disabled: boolean;
       kind: "action";
       label: string;
@@ -18,7 +18,6 @@ export type OverflowMenuOptions = {
   autoStartEnabled: boolean;
   autoStartBusy: boolean;
   hasWatches: boolean;
-  hasFinishedWatches: boolean;
   isDoneView: boolean;
 };
 
@@ -32,20 +31,7 @@ export function getOverflowMenuItems(options: OverflowMenuOptions): OverflowMenu
           label: "Clear all done",
         },
       ]
-    : [
-        {
-          action: "done-all",
-          disabled: !options.hasWatches,
-          kind: "action",
-          label: "Mark all done",
-        },
-        {
-          action: "done-finished",
-          disabled: !options.hasFinishedWatches,
-          kind: "action",
-          label: "Mark finished done",
-        },
-      ];
+    : [];
 
   return [
     ...triageActions,

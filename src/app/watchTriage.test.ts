@@ -7,22 +7,22 @@ const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 describe("getWatchTriageActions", () => {
   it("offers drafts and done actions from the inbox", () => {
     expect(getWatchTriageActions("inbox")).toEqual([
-      { label: "Move to Drafts", state: "saved" },
-      { label: "Done", state: "done" },
+      { label: "Make draft", state: "saved" },
+      { label: "Mark done", state: "done" },
     ]);
   });
 
   it("offers inbox and done actions from saved", () => {
     expect(getWatchTriageActions("saved")).toEqual([
       { label: "Move to Inbox", state: "inbox" },
-      { label: "Done", state: "done" },
+      { label: "Mark done", state: "done" },
     ]);
   });
 
   it("offers inbox and drafts actions from done", () => {
     expect(getWatchTriageActions("done")).toEqual([
       { label: "Move to Inbox", state: "inbox" },
-      { label: "Move to Drafts", state: "saved" },
+      { label: "Make draft", state: "saved" },
     ]);
   });
 

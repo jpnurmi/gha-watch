@@ -1,20 +1,19 @@
 import type { WatchRowViewModel, RowTone } from "../app/viewModel";
-import type { PendingWatchAction } from "../app/watchActionConfirmation";
 import { renderWatchLeadingSlot } from "../app/dragGlyph";
 import { getStatusIconSvg } from "../app/statusIcon";
 import { getWatchActionsUrl } from "../app/watchLinks";
-import { getRerunActionIconSvg } from "../app/actionIcon";
 import { renderTitleMarkup } from "../app/titleMarkup";
-import { escapeHtml, renderBranchBadge, renderPrStateIcon, renderWatchSubjectIcon, renderTriageButtons } from "./markup";
+import { escapeHtml, renderBranchBadge, renderPrStateIcon, renderWatchSubjectIcon, renderTriageIcon, renderMoreIcon } from "./markup";
+import { renderWatchMenu } from "./watchMenu";
 
-export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: PendingWatchAction, editingNoteId?: string): string {
-  const hasConfirmation = pendingWatchAction?.id === row.id;
+export function renderWatch(row: WatchRowViewModel, watchMenuId?: string, editingNoteId?: string): string {
+  const menuOpen = watchMenuId === row.id;
   const hasActions = true;
   const hasDoneCandidate = row.triageState !== "done" && row.doneCandidate;
 
   return `
     <li
-      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.draftLike ? " is-draft-like" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${hasDoneCandidate ? " has-done-candidate" : ""}${hasConfirmation ? " has-confirmation" : ""}"
+      class="watch is-${row.tone}${row.prState ? " has-pr-state" : ""}${row.draftLike ? " is-draft-like" : ""}${row.unseenStatusChange ? " has-unseen-change" : ""}${hasActions ? " has-actions" : ""}${hasDoneCandidate ? " has-done-candidate" : ""}${menuOpen ? " has-open-menu" : ""}"
       data-id="${escapeHtml(row.id)}"
       data-reorder-key="${escapeHtml(row.id)}"
       data-row-ids="${escapeHtml(row.id)}"
@@ -34,7 +33,7 @@ export function renderWatch(row: WatchRowViewModel, pendingWatchAction?: Pending
         ${renderMetadata(row)}
         ${renderNote(row, editingNoteId === row.id)}
       </div>
-      ${renderWatchActions(row, hasDoneCandidate, pendingWatchAction, editingNoteId === row.id)}
+      ${renderWatchActions(row, menuOpen)}
     </li>
   `;
 }
@@ -184,42 +183,22 @@ function getMetadataDetail(row: WatchRowViewModel): string | undefined {
   return row.tone === "error" ? row.description : undefined;
 }
 
-function renderWatchActions(row: WatchRowViewModel, hasDoneCandidate: boolean, pendingWatchAction?: PendingWatchAction, editingNote = false): string {
-  const rerunMenuOpen = pendingWatchAction?.id === row.id;
-
+function renderWatchActions(row: WatchRowViewModel, menuOpen: boolean): string {
   return `
     <div class="watch-actions">
-      <button class="watch-action-button" type="button" data-action="edit-note" data-id="${escapeHtml(row.id)}" title="${row.note ? "Edit note" : "Add note"}" aria-label="${row.note ? "Edit note" : "Add note"} for ${escapeHtml(row.label)}" aria-expanded="${editingNote}">
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M9.5 14H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6.5L9.5 14Zm0 0V9.5H14M5 5h6M5 8h3" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </button>
       ${
-        row.canRerun
-          ? `<span class="repo-action-menu repo-action-menu-container watch-rerun-control">
-              <button class="watch-action-button rerun-button" type="button" data-action="arm-rerun" data-id="${escapeHtml(row.id)}" title="Re-run" aria-label="Re-run ${escapeHtml(row.label)}" aria-haspopup="menu" aria-expanded="${rerunMenuOpen ? "true" : "false"}">
-                ${getRerunActionIconSvg()}
-              </button>
-              ${
-                rerunMenuOpen
-                  ? `<div class="repo-action-popover watch-rerun-popover" role="menu" aria-label="Re-run options for ${escapeHtml(row.label)}">
-                      <button class="repo-action-item" type="button" role="menuitem" data-action="rerun-all" data-id="${escapeHtml(row.id)}">
-                        <span class="repo-action-title">Re-run all jobs</span>
-                      </button>
-                      ${
-                        row.canRerunFailed
-                          ? `<button class="repo-action-item" type="button" role="menuitem" data-action="rerun-failed" data-id="${escapeHtml(row.id)}">
-                              <span class="repo-action-title">Re-run failed jobs</span>
-                            </button>`
-                          : ""
-                      }
-                    </div>`
-                  : ""
-              }
-            </span>`
+        row.triageState !== "done"
+          ? `<button class="watch-action-button watch-triage-button is-done" type="button" data-action="triage-watch" data-triage-state="done" data-row-ids="${escapeHtml(row.id)}" title="Done" aria-label="Done ${escapeHtml(row.label)}">
+              ${renderTriageIcon("done")}
+            </button>`
           : ""
       }
-      ${renderTriageButtons(row.triageState, [row.id], "watch-action-button", row.label, hasDoneCandidate)}
+      <span class="repo-action-menu repo-action-menu-container watch-menu-control">
+        <button class="watch-action-button" type="button" data-action="toggle-watch-menu" data-id="${escapeHtml(row.id)}" title="More" aria-label="More actions for ${escapeHtml(row.label)}" aria-haspopup="menu" aria-expanded="${menuOpen}">
+          ${renderMoreIcon()}
+        </button>
+        ${menuOpen ? renderWatchMenu(row) : ""}
+      </span>
     </div>
   `;
 }

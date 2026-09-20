@@ -20,14 +20,14 @@ describe("UI regions", () => {
     expect(html).not.toContain('<CI>');
     expect(html).toContain('&lt;CI&gt;');
     expect(html).toContain('data-action="open-github-url"');
-    expect(html).toContain('data-triage-state="saved"');
+    expect(html).not.toContain('data-triage-state="saved"');
     expect(html).toContain('data-triage-state="done"');
-    expect(html).not.toContain('watch-rerun-popover');
+    expect(html).not.toContain('watch-menu-popover');
   });
 
-  it("opens rerun choices only for the selected row", () => {
-    expect(renderWatch(row, { id: row.id, kind: "rerun" })).toContain('data-action="rerun-failed"');
-    expect(renderWatch(row, { id: "other", kind: "rerun" })).not.toContain('data-action="rerun-failed"');
+  it("opens actions only for the selected row", () => {
+    expect(renderWatch(row, row.id)).toContain('data-action="rerun-failed"');
+    expect(renderWatch(row, "other")).not.toContain('data-action="rerun-failed"');
   });
 
   it("highlights unseen changes on the title and leading dot", () => {
@@ -39,7 +39,7 @@ describe("UI regions", () => {
   });
 
   it("shows removal only in Done and preserves the PR lifecycle icon", () => {
-    expect(renderWatch({ ...row, triageState: "done" })).toContain('title="Remove from Done"');
+    expect(renderWatch({ ...row, triageState: "done" }, row.id)).toContain('data-action="clear-done-watch"');
     expect(renderWatch(row)).not.toContain('data-action="clear-done-watch"');
     expect(renderWatch({ ...row, subject: "pull-request", prState: { label: "Merged", tone: "merged" } }))
       .toContain('pr-state-icon-merged');
@@ -154,12 +154,12 @@ describe("UI regions", () => {
       expect(html).toContain('&lt;/textarea&gt;&lt;script&gt;&quot;reminder&quot;&lt;/script&gt;');
       expect(html).not.toContain('<script>');
     }
-    expect(renderWatch(noted)).toContain('title="Edit note"');
+    expect(renderWatch(noted, row.id)).toContain('>Edit note…</span>');
     expect(renderWatch(noted, undefined, row.id)).toContain('data-action="remove-note"');
   });
 
   it("opens a note editor only for the selected item", () => {
-    expect(renderWatch(row)).toContain('title="Add note"');
+    expect(renderWatch(row, row.id)).toContain('>Add note…</span>');
     expect(renderWatch(row, undefined, row.id)).toContain('<textarea name="note"');
     expect(renderWatch(row, undefined, "other")).not.toContain('<textarea');
     expect(renderWatch(row, undefined, row.id)).not.toContain('data-action="remove-note"');
