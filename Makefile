@@ -1,4 +1,5 @@
 NPM ?= npm
+NODE ?= node
 
 .PHONY: help deps dev typecheck test check web-build build tauri-build install clean
 
@@ -86,25 +87,30 @@ install:
 	@set -eu; \
 	case "$$(uname -s)" in \
 		Linux*) \
-			bundle=''; \
-			for candidate in "$(CURDIR)"/src-tauri/target/release/bundle/deb/*.deb; do \
-				if [ -f "$$candidate" ]; then bundle=$$candidate; break; fi; \
-			done; \
-			if [ -z "$$bundle" ]; then \
+			product_name=$$($(NODE) -p "require('./src-tauri/tauri.conf.json').productName"); \
+			version=$$($(NODE) -p "require('./src-tauri/tauri.conf.json').version"); \
+			arch=$$(dpkg --print-architecture); \
+			bundle="$(CURDIR)/src-tauri/target/release/bundle/deb/$${product_name}_$${version}_$${arch}.deb"; \
+			if [ ! -f "$$bundle" ]; then \
 				printf '%s\n' 'No Linux .deb package found under src-tauri/target/release/bundle/deb/' >&2; \
 				exit 1; \
 			fi; \
 			command sudo -v; \
-			pkill -x gha-watch || true; \
 			sudo dpkg -i "$$bundle"; \
+			pkill -x gha-watch || true; \
 			nohup gha-watch >/dev/null 2>&1 & \
 			;; \
 		MINGW*|MSYS*|CYGWIN*) \
-			installer=''; \
-			for candidate in "$(CURDIR)"/src-tauri/target/release/bundle/nsis/*.exe; do \
-				if [ -f "$$candidate" ]; then installer=$$candidate; break; fi; \
-			done; \
-			if [ -z "$$installer" ]; then \
+			product_name=$$($(NODE) -p "require('./src-tauri/tauri.conf.json').productName"); \
+			version=$$($(NODE) -p "require('./src-tauri/tauri.conf.json').version"); \
+			case "$$(uname -m)" in \
+				x86_64|amd64) arch=x64 ;; \
+				aarch64|arm64) arch=arm64 ;; \
+				i686|i386) arch=x86 ;; \
+				*) printf 'Unsupported Windows architecture: %s\n' "$$(uname -m)" >&2; exit 1 ;; \
+			esac; \
+			installer="$(CURDIR)/src-tauri/target/release/bundle/nsis/$${product_name}_$${version}_$${arch}-setup.exe"; \
+			if [ ! -f "$$installer" ]; then \
 				printf '%s\n' 'No Windows NSIS installer found under src-tauri/target/release/bundle/nsis/' >&2; \
 				exit 1; \
 			fi; \
