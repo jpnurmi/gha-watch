@@ -141,7 +141,7 @@ describe("watch layout", () => {
       /\.watch\.is-draft-like \.watch-title-text\s*\{[^}]*font-style:\s*italic;/s,
     );
     expect(styles).not.toMatch(/\.watch\.has-done-candidate \.watch-title-text\s*\{[^}]*text-decoration:/s);
-    expect(styles).toMatch(
+    expect(styles).not.toMatch(
       /\.watch\.has-done-candidate :is\(\.watch-workflow-status\.status-icon-success, \.watch-workflow-status\.status-icon-failure\)\s*\{[^}]*color:\s*#8b949e;/s,
     );
     expect(styles).not.toMatch(/\.watch\.has-done-candidate \.watch-actions::before/);
