@@ -1,6 +1,5 @@
 import type { WatchRowViewModel } from "../app/viewModel";
 import type { WatchTriageState } from "../domain/watches";
-import { getWatchTriageActions } from "../app/watchTriage";
 import { getPrStateIconSvg } from "../app/prStateIcon";
 import { getWatchSubjectIconSvg } from "../app/watchSubjectIcon";
 
@@ -65,52 +64,7 @@ export function renderWatchSubjectIcon(
   `;
 }
 
-export function renderTriageButtons(
-  currentState: WatchTriageState,
-  rowIds: string[],
-  className: string,
-  subjectLabel: string,
-  doneCandidate = false,
-): string {
-  const triageButtons = getWatchTriageActions(currentState)
-    .map(
-      (action) => `
-        <button
-          class="${className} watch-triage-button is-${action.state}${action.state === "done" && doneCandidate ? " is-done-candidate" : ""}"
-          type="button"
-          data-action="triage-watch"
-          data-triage-state="${action.state}"
-          data-row-ids="${escapeHtml(rowIds.join("\n"))}"
-          title="${action.label}"
-          aria-label="${action.label} ${escapeHtml(subjectLabel)}"
-        >
-          ${renderTriageIcon(action.state)}
-        </button>
-      `,
-    )
-    .join("");
-
-  if (currentState !== "done") {
-    return triageButtons;
-  }
-
-  return `${triageButtons}
-    <button
-      class="${className} watch-clear-done-button"
-      type="button"
-      data-action="clear-done-watch"
-      data-row-ids="${escapeHtml(rowIds.join("\n"))}"
-      title="Remove from Done"
-      aria-label="Remove ${escapeHtml(subjectLabel)} from Done"
-    >
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/>
-      </svg>
-    </button>
-  `;
-}
-
-function renderTriageIcon(state: WatchTriageState): string {
+export function renderTriageIcon(state: WatchTriageState): string {
   if (state === "inbox") {
     return `
       <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -130,6 +84,16 @@ function renderTriageIcon(state: WatchTriageState): string {
   return `
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <path d="m3.25 8.25 3 3 6.5-6.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+    </svg>
+  `;
+}
+
+export function renderMoreIcon(): string {
+  return `
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="3.75" r="1.25" fill="currentColor"/>
+      <circle cx="8" cy="8" r="1.25" fill="currentColor"/>
+      <circle cx="8" cy="12.25" r="1.25" fill="currentColor"/>
     </svg>
   `;
 }

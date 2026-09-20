@@ -94,8 +94,6 @@ export type WatchController = {
   markSeen(id: string): void;
   setNote(id: string, note: string): void;
   markAllSeen(): void;
-  markAllDone(state: WatchTriageState): void;
-  markFinishedDone(state: WatchTriageState): void;
   clearDone(ids: string[]): void;
   refreshRepositoryIcons(): Promise<void>;
   refreshWatchMetadata(): Promise<void>;
@@ -1779,33 +1777,6 @@ export function createWatchController(
 
     markAllSeen() {
       setWatches(markAllWatchesSeen(watchState.get()));
-    },
-
-    markAllDone(state) {
-      const now = getNow();
-      const ids = watchState.get()
-        .filter((watch) => state !== "done" && getWatchTriageState(watch) === state)
-        .map((watch) => watch.id);
-      const next = setWatchesTriageState(watchState.get(), ids, "done", now);
-
-      if (next !== watchState.get()) {
-        setWatchesWithDonePruning(next, now);
-      }
-    },
-
-    markFinishedDone(state) {
-      const now = getNow();
-      const ids = watchState.get()
-        .filter(
-          (watch) =>
-            state !== "done" && getWatchTriageState(watch) === state && !watch.active,
-        )
-        .map((watch) => watch.id);
-      const next = setWatchesTriageState(watchState.get(), ids, "done", now);
-
-      if (next !== watchState.get()) {
-        setWatchesWithDonePruning(next, now);
-      }
     },
 
     clearDone(ids) {

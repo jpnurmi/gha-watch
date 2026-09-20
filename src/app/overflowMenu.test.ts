@@ -2,16 +2,15 @@ import { describe, expect, it } from "vitest";
 import { getOverflowMenuItems } from "./overflowMenu";
 
 describe("getOverflowMenuItems", () => {
-  it("places done actions before lower-frequency settings", () => {
+  it("only offers settings outside the Done view", () => {
     expect(
       getOverflowMenuItems({
         autoStartEnabled: true,
         autoStartBusy: false,
         hasWatches: true,
-        hasFinishedWatches: true,
         isDoneView: false,
       }).map((item) => item.action),
-    ).toEqual(["done-all", "done-finished", "toggle-autostart"]);
+    ).toEqual(["toggle-autostart"]);
   });
 
   it("shows Auto-start as a checkable menu item", () => {
@@ -20,9 +19,8 @@ describe("getOverflowMenuItems", () => {
         autoStartEnabled: false,
         autoStartBusy: false,
         hasWatches: true,
-        hasFinishedWatches: true,
         isDoneView: false,
-      }).slice(2),
+      }),
     ).toEqual([
       {
         action: "toggle-autostart",
@@ -35,28 +33,15 @@ describe("getOverflowMenuItems", () => {
     ]);
   });
 
-  it("keeps done actions disabled until they apply and disables Auto-start while loading", () => {
+  it("disables Auto-start while loading", () => {
     expect(
       getOverflowMenuItems({
         autoStartEnabled: false,
         autoStartBusy: true,
         hasWatches: false,
-        hasFinishedWatches: false,
         isDoneView: false,
       }),
     ).toEqual([
-      {
-        action: "done-all",
-        disabled: true,
-        kind: "action",
-        label: "Mark all done",
-      },
-      {
-        action: "done-finished",
-        disabled: true,
-        kind: "action",
-        label: "Mark finished done",
-      },
       {
         action: "toggle-autostart",
         checked: false,
@@ -73,7 +58,6 @@ describe("getOverflowMenuItems", () => {
       autoStartEnabled: false,
       autoStartBusy: false,
       hasWatches: true,
-      hasFinishedWatches: false,
       isDoneView: true,
     });
 

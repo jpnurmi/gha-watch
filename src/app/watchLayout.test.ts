@@ -84,15 +84,15 @@ describe("watch layout", () => {
   });
 
   it("renders repository triage controls and hides repo quick actions until hover", () => {
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*120px;/s);
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--repo-actions-width:\s*66px;/s);
     expect(styles).toMatch(
-      /\.watch-group-watch,[^{]*\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-triage-button\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*flex:\s*0 0 auto;/s,
+      /\.watch-group-watch,[^{]*\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-menu-button\s*\{[^}]*width:\s*18px;[^}]*height:\s*18px;[^}]*flex:\s*0 0 auto;/s,
     );
     expect(styles).toMatch(
-      /\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-triage-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
+      /\.watch-group-workflow-button,[^{]*\.watch-group-pr-button,[^{]*\.watch-group-menu-button\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;[^}]*visibility:\s*hidden;/s,
     );
     expect(styles).toMatch(
-      /\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-triage-button/s,
+      /\.watch-group-header:hover \.watch-group-workflow-button,[^{]*\.watch-group-header:hover \.watch-group-pr-button,[^{]*\.watch-group-header:hover \.watch-group-menu-button/s,
     );
   });
 
@@ -112,7 +112,7 @@ describe("watch layout", () => {
     expect(styles).toMatch(
       /\.watch\.has-unseen-change \.watch-title-text\s*\{[^}]*color:\s*#58a6ff;/s,
     );
-    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*83px;/s);
+    expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*43px;/s);
     expect(styles).toMatch(
       /\.watch \.watch-action-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
     );
@@ -132,13 +132,8 @@ describe("watch layout", () => {
     expect(styles).not.toMatch(/\.watch\.has-unseen-change \.watch-action-button/);
   });
 
-  it("keeps suggested Done actions visible without duplicating them in expanded repository headers", () => {
-    expect(styles).toMatch(
-      /\.is-done-candidate:hover,[^{]*\.is-done-candidate:focus-visible\s*\{[^}]*background:\s*rgb\(255 255 255 \/ 7%\);[^}]*opacity:\s*0\.72;/s,
-    );
-    expect(styles).toMatch(
-      /\.watch:hover \.watch-action-button\.is-done-candidate,[^{]*\.watch:focus-within \.watch-action-button\.is-done-candidate\s*\{[^}]*opacity:\s*0\.72;/s,
-    );
+  it("dims done candidates without revealing their actions", () => {
+    expect(styles).not.toContain(".is-done-candidate");
     expect(styles).toMatch(
       /\.watch\.has-done-candidate \.watch-title-text\s*\{[^}]*opacity:\s*0\.55;/s,
     );
@@ -149,7 +144,7 @@ describe("watch layout", () => {
     expect(styles).toMatch(
       /\.watch\.has-done-candidate :is\(\.watch-workflow-status\.status-icon-success, \.watch-workflow-status\.status-icon-failure\)\s*\{[^}]*color:\s*#8b949e;/s,
     );
-    expect(styles).toMatch(/\.watch\.has-done-candidate \.watch-actions::before/);
+    expect(styles).not.toMatch(/\.watch\.has-done-candidate \.watch-actions::before/);
   });
 
   it("uses the same neutral treatment for every triage action", () => {

@@ -33,6 +33,7 @@ export type WatchSubject = "pull-request" | "workflow" | "job";
 
 export type WatchRowViewModel = {
   id: string;
+  active: boolean;
   label: string;
   subject: WatchSubject;
   referenceLabel?: string;
@@ -134,6 +135,7 @@ export function createWatchRowViewModel(
   if (watch.error) {
     return {
       id: watch.id,
+      active: watch.active,
       label: getWatchDisplayLabel(watch),
       subject: getWatchSubject(watch),
       referenceLabel: getWatchReference(watch),
@@ -207,6 +209,7 @@ function createRow(
 ): WatchRowViewModel {
   return {
     id: watch.id,
+    active: watch.active,
     label: getWatchDisplayLabel(watch),
     subject: getWatchSubject(watch),
     referenceLabel: getWatchReference(watch),
