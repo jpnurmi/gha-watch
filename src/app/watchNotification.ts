@@ -34,14 +34,15 @@ export function createWatchNotification(
 ): WatchNotification {
   const row = createWatchRowViewModel(watch, now);
   const repoLabel = getNotificationRepoLabel(watch);
+  const note = watch.note?.trim() || undefined;
   const lines = [
-    watch.note?.trim() || undefined,
+    note,
     repoLabel,
     `${row.statusLabel} - ${row.description}`,
     row.timingText,
   ].filter(isString);
   const body = lines.join("\n");
-  const persistent = isPersistentNotification(row.tone);
+  const persistent = isPersistentNotification(row.tone, note);
 
   return {
     watchId: watch.id,
@@ -79,8 +80,8 @@ function getNotificationRepoLabel(watch: WatchRecord): string {
   return watch.target.prNumber ? `${repoLabel} #${watch.target.prNumber}` : repoLabel;
 }
 
-function isPersistentNotification(tone: string): boolean {
-  return tone === "failure";
+function isPersistentNotification(tone: string, note: string | undefined): boolean {
+  return tone === "failure" || (tone === "success" && note !== undefined);
 }
 
 function isString(value: string | undefined): value is string {

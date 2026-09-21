@@ -107,6 +107,13 @@ describe("createWatchNotification", () => {
     expect(notification).not.toHaveProperty("timeoutMs");
   });
 
+  it("keeps successful notifications with notes persistent", () => {
+    const notification = createWatchNotification(watch({ note: "Deploy after CI passes" }));
+
+    expect(notification.persistent).toBe(true);
+    expect(notification).not.toHaveProperty("timeoutMs");
+  });
+
   it("offers Done for a done candidate", () => {
     expect(
       createWatchNotification(watch()),
