@@ -184,12 +184,18 @@ function getMetadataDetail(row: WatchRowViewModel): string | undefined {
 }
 
 function renderWatchActions(row: WatchRowViewModel, menuOpen: boolean): string {
+  const quickAction = row.triageState === "saved"
+    ? { state: "inbox" as const, title: "Move to Inbox", ariaLabel: `Move ${row.label} to Inbox` }
+    : row.triageState === "inbox"
+      ? { state: "done" as const, title: "Done", ariaLabel: `Done ${row.label}` }
+      : undefined;
+
   return `
     <div class="watch-actions">
       ${
-        row.triageState !== "done"
-          ? `<button class="watch-action-button watch-triage-button is-done" type="button" data-action="triage-watch" data-triage-state="done" data-row-ids="${escapeHtml(row.id)}" title="Done" aria-label="Done ${escapeHtml(row.label)}">
-              ${renderTriageIcon("done")}
+        quickAction
+          ? `<button class="watch-action-button watch-triage-button is-${quickAction.state}" type="button" data-action="triage-watch" data-triage-state="${quickAction.state}" data-row-ids="${escapeHtml(row.id)}" title="${quickAction.title}" aria-label="${escapeHtml(quickAction.ariaLabel)}">
+              ${renderTriageIcon(quickAction.state)}
             </button>`
           : ""
       }

@@ -34,4 +34,13 @@ describe("settings sync wiring", () => {
     );
     expect(mainSource).toContain("watchSuppressions: controller.getWatchSuppressions()");
   });
+
+  it("immediately refreshes items moved to Inbox", () => {
+    expect(mainSource).toMatch(
+      /triageState === "inbox"[\s\S]*?refreshMovedToInbox\(ids\)/,
+    );
+    expect(mainSource).toMatch(
+      /function refreshMovedToInbox[\s\S]*?controller\.pollNow\(\{[\s\S]*?watchIds: ids,[\s\S]*?includeInactive: true,[\s\S]*?triageState: "inbox"/,
+    );
+  });
 });

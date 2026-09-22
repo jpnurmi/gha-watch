@@ -1383,8 +1383,13 @@ function bindEvents(): void {
     const triageState = parseWatchTriageState(button.dataset.triageState);
 
     if (triageState) {
-      controller.setTriageState(getWatchReorderRowIds(button), triageState);
+      const ids = getWatchReorderRowIds(button);
+      controller.setTriageState(ids, triageState);
       queueSyncedStateUpload();
+
+      if (triageState === "inbox") {
+        void refreshMovedToInbox(ids);
+      }
     }
   });
 
@@ -2470,6 +2475,23 @@ function handleTargetedPollResult(result: WatchPollResult): void {
 
   render();
   void updateTrayIndicator();
+}
+
+async function refreshMovedToInbox(ids: string[]): Promise<void> {
+  if (isDemoMode) {
+    return;
+  }
+
+  try {
+    const result = await controller.pollNow({
+      watchIds: ids,
+      includeInactive: true,
+      triageState: "inbox",
+    });
+    handleTargetedPollResult(result);
+  } catch (error) {
+    console.warn("Could not refresh items moved to Inbox.", error);
+  }
 }
 
 async function confirmRerun(id: string, mode: RerunMode): Promise<void> {

@@ -18,12 +18,18 @@ beforeEach(() => {
 });
 
 describe("watch action menu", () => {
-  it.each(["inbox", "saved", "done"] as const)("keeps only Done and More as shortcuts in %s", (triageState) => {
+  it.each(["inbox", "saved", "done"] as const)("keeps only the prioritized action and More as shortcuts in %s", (triageState) => {
     const current = { ...row, triageState, canRerun: true, canRerunFailed: true };
     document.body.innerHTML = renderWatch(current);
     const shortcuts = Array.from(document.querySelectorAll<HTMLButtonElement>(".watch-action-button"));
     expect(shortcuts.map((button) => button.dataset.action)).toEqual(
       triageState === "done" ? ["toggle-watch-menu"] : ["triage-watch", "toggle-watch-menu"],
+    );
+    expect(shortcuts[0]?.dataset.triageState).toBe(
+      triageState === "inbox" ? "done" : triageState === "saved" ? "inbox" : undefined,
+    );
+    expect(shortcuts[0]?.title).toBe(
+      triageState === "inbox" ? "Done" : triageState === "saved" ? "Move to Inbox" : "More",
     );
     expect(document.querySelector('[data-action="edit-note"]')).toBeNull();
     expect(document.querySelector('[data-action="rerun-all"]')).toBeNull();
