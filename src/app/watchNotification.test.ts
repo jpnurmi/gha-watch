@@ -125,6 +125,48 @@ describe("createWatchNotification", () => {
     });
   });
 
+  it.each(["ready", "draft", "merged", "closed"] as const)(
+    "offers Done and Open for a %s pull request",
+    (sourceState) => {
+      expect(createWatchNotification(watch({
+        id: "getsentry/sentry/pull/51",
+        target: {
+          kind: "pr",
+          owner: "getsentry",
+          repo: "sentry",
+          prNumber: "51",
+          url: "https://github.com/getsentry/sentry/pull/51",
+        },
+        sourceState,
+        status: "completed:failure",
+        lastState: { status: "completed", conclusion: "failure" },
+      })).actions).toEqual([
+        { id: "done", label: "Done" },
+        { id: "open", label: "Open" },
+      ]);
+    },
+  );
+
+  it("keeps rerun actions for a failed run linked to a pull request", () => {
+    expect(createWatchNotification(watch({
+      target: {
+        kind: "run",
+        owner: "getsentry",
+        repo: "sentry",
+        runId: "123",
+        prNumber: "51",
+        url: "https://github.com/getsentry/sentry/actions/runs/123",
+      },
+      sourceState: "ready",
+      status: "completed:failure",
+      lastState: { status: "completed", conclusion: "failure" },
+    })).actions).toEqual([
+      { id: "rerun-all", label: "Re-run all" },
+      { id: "rerun-failed", label: "Re-run failed" },
+      { id: "open", label: "Open" },
+    ]);
+  });
+
   it("uses the exact watched URL for the Open action", () => {
     expect(
       createWatchNotification(

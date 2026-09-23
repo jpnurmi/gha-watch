@@ -54,14 +54,19 @@ export function createWatchNotification(
     ...(!persistent ? { timeoutMs: transientNotificationTimeoutMs } : {}),
     summary: repoLabel,
     group: repoLabel,
-    actions: getNotificationActions(row.canRerunFailed, row.doneCandidate),
+    actions: getNotificationActions(watch.target.kind === "pr", row.canRerunFailed, row.doneCandidate),
   };
 }
 
 function getNotificationActions(
+  isPullRequest: boolean,
   canRerunFailed: boolean,
   doneCandidate: boolean,
 ): WatchNotificationAction[] {
+  if (isPullRequest) {
+    return [{ id: "done", label: "Done" }, { id: "open", label: "Open" }];
+  }
+
   return [
     ...(canRerunFailed
       ? [
