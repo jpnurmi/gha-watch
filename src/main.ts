@@ -1417,7 +1417,11 @@ function bindEvents(): void {
     editingNoteId = button.dataset.id;
     watchMenuId = undefined;
     renderNow();
-    app.querySelector<HTMLTextAreaElement>('.watch-note-form textarea')?.focus();
+    const input = app.querySelector<HTMLTextAreaElement>('.watch-note-form textarea');
+    if (input) {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
   });
 
   on("submit", '[data-action="save-note"]', (event, form: HTMLFormElement) => {
@@ -1434,7 +1438,7 @@ function bindEvents(): void {
   });
 
   on("keydown", '.watch-note-form textarea', (event, input: HTMLTextAreaElement) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       input.form?.requestSubmit();
     }

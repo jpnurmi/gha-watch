@@ -43,7 +43,7 @@ Clicking a notification shows the GHA Watch popup; the Open action opens the wat
 
 On Windows and Linux, tray and notification behavior depends on the desktop environment, notification daemon, and tray support.
 
-Use **Add note…** in a watched item's **⋮** menu to add a reminder. The menu also contains re-run and move/remove actions; **Done** remains a separate quick button. Save a note with **Save** or **Ctrl+Enter** (**Cmd+Enter** on macOS); **Escape** cancels editing. Saved notes appear below the item and at the top of its notification body. Click a note to edit or remove it. Notes persist across app restarts and follow the item's existing sync behavior: Drafts and Done sync between machines, while Inbox stays local.
+Use **Add note…** in a watched item's **⋮** menu to add a reminder. The menu also contains re-run and move/remove actions; **Done** remains a separate quick button. Save a note with **Save** or **Enter**; use **Shift+Enter** for a line break. **Escape** cancels editing. Saved notes appear below the item and at the top of its notification body. Click a note to edit or remove it. Notes persist across app restarts and follow the item's existing sync behavior: Drafts and Done sync between machines, while Inbox stays local.
 
 Use a repository's **⋮** menu to move all its items in the current tab to Drafts, Inbox, or Done, or remove them from Done. **Mark finished done** moves only items that are no longer active.
 
