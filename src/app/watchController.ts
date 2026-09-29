@@ -655,15 +655,20 @@ export function createWatchController(
 
     const successfulWatchIds: string[] = [];
     const nextWatches = watchState.get().map((watch) => {
-      if (getWatchTriageState(watch) === "done") {
-        return watch;
-      }
-
       const target = getWatchPullRequestTarget(watch);
       const details = target ? detailsByKey.get(getPullRequestKey(target)) : undefined;
 
       if (!target || !details) {
         return watch;
+      }
+
+      if (getWatchTriageState(watch) === "done") {
+        if (!needsPullRequestLabels(watch) || !details.labels) {
+          return watch;
+        }
+
+        successfulWatchIds.push(watch.id);
+        return { ...watch, metadata: mergeWatchMetadata(watch.metadata, { prLabels: details.labels }) };
       }
 
       successfulWatchIds.push(watch.id);
@@ -1260,6 +1265,7 @@ export function createWatchController(
           : {}),
         ...(detail?.state ? { state: detail.state } : {}),
         ...(detail?.stack ? { stack: detail.stack } : {}),
+        ...(detail?.labels ? { labels: detail.labels } : {}),
         url: target.url,
       });
     });
@@ -1309,6 +1315,7 @@ export function createWatchController(
       metadata: mergeWatchMetadata(existingWatch?.metadata, {
         prTitle: pullRequest.title,
         prStack: pullRequest.stack,
+        prLabels: pullRequest.labels,
         ...(pullRequest.headBranch ? { branchName: pullRequest.headBranch } : {}),
       }),
       sourceState: pullRequest.state ?? (pullRequest.isDraft ? "draft" : "ready"),
@@ -1482,6 +1489,7 @@ export function createWatchController(
     const metadata = mergeWatchMetadata(currentWatch.metadata, {
       prTitle: pullRequest.title,
       prStack: pullRequest.stack,
+      prLabels: pullRequest.labels,
       ...(pullRequest.updatedAt ? { prUpdatedAt: pullRequest.updatedAt } : {}),
       ...(pullRequest.headBranch ? { branchName: pullRequest.headBranch } : {}),
     });
@@ -1495,6 +1503,7 @@ export function createWatchController(
       currentWatch.metadata?.prStack?.position === metadata?.prStack?.position &&
       currentWatch.metadata?.prStack?.size === metadata?.prStack?.size &&
       currentWatch.metadata?.prStack?.number === metadata?.prStack?.number &&
+      JSON.stringify(currentWatch.metadata?.prLabels) === JSON.stringify(metadata?.prLabels) &&
       currentWatch.sourceState === sourceState
     )) {
       updateWatch(id, (watch) => withDefaultDraftTriage({
@@ -2052,7 +2061,7 @@ export function createWatchController(
         getTrackedPullRequestTargets(
           watchState.get().filter(
             (watch) =>
-              getWatchTriageState(watch) === triageState &&
+              (getWatchTriageState(watch) === triageState || needsPullRequestLabels(watch)) &&
               (!watchIdSet || watchIdSet.has(watch.id)),
           ),
         ),
@@ -2270,9 +2279,13 @@ function mergeWatchMetadata(
 
 function getTrackedPullRequestTargets(watches: WatchRecord[]): PrWatchTarget[] {
   return watches
-    .filter((watch) => getWatchTriageState(watch) !== "done")
+    .filter((watch) => getWatchTriageState(watch) !== "done" || needsPullRequestLabels(watch))
     .map(getWatchPullRequestTarget)
     .filter((target): target is PrWatchTarget => Boolean(target));
+}
+
+function needsPullRequestLabels(watch: WatchRecord): boolean {
+  return watch.target.kind === "pr" && watch.metadata?.prLabels === undefined;
 }
 
 function getWatchPullRequestTarget(watch: WatchRecord): PrWatchTarget | undefined {
@@ -2307,6 +2320,7 @@ function withPullRequestDetails(
   const metadata = mergeWatchMetadata(watch.metadata, {
     prTitle: details.title,
     prStack: details.stack,
+    prLabels: details.labels,
     ...(details.branchName ? { branchName: details.branchName } : {}),
   });
 
@@ -2318,6 +2332,7 @@ function withPullRequestDetails(
     watch.metadata?.prStack?.position === metadata?.prStack?.position &&
     watch.metadata?.prStack?.size === metadata?.prStack?.size &&
     watch.metadata?.prStack?.number === metadata?.prStack?.number &&
+    JSON.stringify(watch.metadata?.prLabels) === JSON.stringify(metadata?.prLabels) &&
     watch.source === source
   ) {
     return watch;
@@ -2341,6 +2356,7 @@ function toPullRequestDetails(pullRequest: OpenPullRequest): PullRequestDetails 
     ...(pullRequest.authorLogin ? { authorLogin: pullRequest.authorLogin } : {}),
     ...(pullRequest.headBranch ? { branchName: pullRequest.headBranch } : {}),
     ...(pullRequest.stack ? { stack: pullRequest.stack } : {}),
+    ...(pullRequest.labels ? { labels: pullRequest.labels } : {}),
     state: pullRequest.state ?? (pullRequest.isDraft ? "draft" : "ready"),
     title: pullRequest.title,
   };

@@ -164,4 +164,27 @@ describe("UI regions", () => {
     expect(renderWatch(row, undefined, "other")).not.toContain('<textarea');
     expect(renderWatch(row, undefined, row.id)).not.toContain('data-action="remove-note"');
   });
+
+  it.each(["inbox", "saved", "done"] as const)("shows colored PR labels in %s even when checks fail to load", (triageState) => {
+    const metadata = { prLabels: [{ name: '<bug> "urgent"', color: "d73a4a", description: "Fix <this>" }] };
+    const pr = {
+      ...watch,
+      target: { kind: "pr" as const, owner: "owner", repo: "repo", prNumber: "1", url: "https://github.com/owner/repo/pull/1" },
+      metadata,
+      triageState,
+    };
+    for (const error of [undefined, "Could not load checks"]) {
+      const html = renderWatch(createPopupViewModel([{ ...pr, error }]).rows[0]);
+      expect(html).toContain('class="watch-label-chip" style="--label-color: #d73a4a"');
+      expect(html).toContain('title="&lt;bug&gt; &quot;urgent&quot;: Fix &lt;this&gt;"');
+      expect(html).toContain('>&lt;bug&gt; &quot;urgent&quot;</span>');
+      expect(html).not.toContain("<bug>");
+    }
+    expect(renderWatch(row)).not.toContain('class="watch-labels"');
+    expect(renderWatch({ ...row, labels: [] })).not.toContain('class="watch-labels"');
+    expect(renderWatch(createPopupViewModel([{ ...watch, metadata }]).rows[0]))
+      .not.toContain('class="watch-labels"');
+    expect(renderWatch({ ...row, labels: [{ name: "bug", color: 'red; background: url("bad")' }] }))
+      .toContain('style="--label-color: #8b949e"');
+  });
 });

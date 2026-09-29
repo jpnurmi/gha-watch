@@ -3,6 +3,7 @@ import { isDoneCandidate, isDraftPullRequestWatch, getWatchDisplayLabel, canReru
 export { canRerun, canRerunFailed, isDraftPullRequestWatch } from "../domain/watchPolicy";
 import type { WatchedRepo } from "../domain/watchedRepos";
 import type { PullRequestStack } from "../domain/pullRequestStack";
+import type { PullRequestLabel } from "../domain/pullRequestLabels";
 import {
   getWatchState,
   getWatchTriageState,
@@ -40,6 +41,7 @@ export type WatchRowViewModel = {
   pullRequestReferenceLabel?: string;
   prState?: PrStateViewModel;
   stack?: PullRequestStack;
+  labels?: PullRequestLabel[];
   branchName?: string;
   statusLabel: string;
   description: string;
@@ -142,6 +144,7 @@ export function createWatchRowViewModel(
       pullRequestReferenceLabel: getRunPullRequestReference(watch),
       prState: getPullRequestState(watch),
       stack: watch.target.kind === "pr" ? watch.metadata?.prStack : undefined,
+      labels: watch.target.kind === "pr" ? watch.metadata?.prLabels : undefined,
       branchName: getBranchName(watch),
       statusLabel: "Errored",
       description: watch.error,
@@ -216,6 +219,7 @@ function createRow(
     pullRequestReferenceLabel: getRunPullRequestReference(watch),
     prState: getPullRequestState(watch),
     stack: watch.target.kind === "pr" ? watch.metadata?.prStack : undefined,
+    labels: watch.target.kind === "pr" ? watch.metadata?.prLabels : undefined,
     branchName: getBranchName(watch),
     statusLabel,
     description,

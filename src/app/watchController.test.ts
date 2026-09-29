@@ -2380,6 +2380,7 @@ describe("watchController", () => {
         authorLogin: "jpnurmi",
         updatedAt,
         stack: { position: 2, size: 5 },
+        labels: [{ name: "bug", color: "d73a4a" }],
         checkSnapshot: snapshot,
         url: prTarget.url,
       }];
@@ -2418,6 +2419,7 @@ describe("watchController", () => {
     expect(checkOptions).toEqual({ author: "@me" });
     expect(detailFetches).toBe(0);
     expect(controller.getWatches()[0].metadata?.prStack).toEqual({ position: 2, size: 5 });
+    expect(controller.getWatches()[0].metadata?.prLabels).toEqual([{ name: "bug", color: "d73a4a" }]);
     expect(pollResult.successfulWatchIds).toEqual([getWatchId(prTarget)]);
     expect(controller.getWatches()[0]).toMatchObject({
       status: "completed:failure",
@@ -4558,5 +4560,82 @@ describe("watch notes", () => {
     expect(notificationRecords).toHaveLength(1);
     expect(notificationRecords[0].body).not.toContain("Old reminder");
     expect(notificationRecords[0].body.startsWith("Updated reminder\n")).toBe(Boolean(note));
+  });
+});
+
+describe("pull request labels", () => {
+  it("updates labels and clears removed labels without redundant saves", async () => {
+    const { deps, saves } = createDeps([]);
+    let labels = [{ name: "bug", color: "d73a4a", description: "Needs a fix" }];
+    deps.fetchPullRequestDetails = async () => [{ state: "ready", title: "Labeled PR", labels }];
+    const controller = createWatchController(deps, [{
+      ...existingWatch(), id: getWatchId(prTarget), target: prTarget,
+    }]);
+
+    await controller.refreshWatchMetadata();
+    expect(controller.getWatches()[0].metadata?.prLabels).toEqual(labels);
+    const saveCount = saves.length;
+    labels = labels.map((label) => ({ ...label }));
+    await controller.refreshWatchMetadata();
+    expect(saves).toHaveLength(saveCount);
+
+    labels = [{ ...labels[0], color: "ff0000" }];
+    await controller.refreshWatchMetadata();
+    expect(controller.getWatches()[0].metadata?.prLabels).toEqual(labels);
+    labels = [{ ...labels[0], name: "regression", description: "Previously worked" }];
+    await controller.refreshWatchMetadata();
+    expect(controller.getWatches()[0].metadata?.prLabels).toEqual(labels);
+    labels = [];
+    await controller.refreshWatchMetadata();
+    expect(controller.getWatches()[0].metadata?.prLabels).toEqual([]);
+  });
+
+  it.each(["saved", "done"] as const)("backfills labels once for %s PRs during Inbox polling", async (triageState) => {
+    for (const labels of [[], [{ name: "bug", color: "d73a4a" }]]) {
+      const { deps, fetches, notificationRecords } = createDeps([]);
+      const now = new Date("2026-08-12T12:00:00.000Z");
+      const parked: WatchRecord = {
+        ...existingWatch(), id: getWatchId(prTarget), target: prTarget,
+        label: "Archived title", metadata: { prTitle: "Archived title" },
+        sourceState: "draft", triageState,
+        ...(triageState === "done" ? { doneAt: now.toISOString() } : {}),
+      };
+      deps.fetchPullRequestDetails = vi.fn(async () => [{ state: "ready" as const, title: "Current title", labels }]);
+      const controller = createWatchController({ ...deps, now: () => now }, [parked]);
+
+      await controller.pollNow({ triageState: "inbox" });
+
+      expect(deps.fetchPullRequestDetails).toHaveBeenCalledWith([prTarget]);
+      expect(controller.getWatches()[0]).toMatchObject({
+        metadata: { prLabels: labels }, triageState, status: parked.status,
+        lastState: parked.lastState, lastSeenStatus: parked.lastSeenStatus, active: parked.active,
+      });
+      if (triageState === "done") {
+        expect(controller.getWatches()[0]).toEqual({
+          ...parked, metadata: { ...parked.metadata, prLabels: labels },
+        });
+      }
+      expect(fetches).toEqual([]);
+      expect(notificationRecords).toEqual([]);
+
+      await controller.pollNow({ triageState: "inbox" });
+
+      expect(deps.fetchPullRequestDetails).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("retains labels when a PR moves between views", () => {
+    const { deps } = createDeps([]);
+    const labels = [{ name: "bug", color: "d73a4a" }];
+    const now = new Date("2026-08-12T12:00:00.000Z");
+    const controller = createWatchController({ ...deps, now: () => now }, [{
+      ...existingWatch(), id: getWatchId(prTarget), target: prTarget,
+      metadata: { prLabels: labels },
+    }]);
+
+    for (const triageState of ["saved", "done", "inbox"] as const) {
+      controller.setTriageState([getWatchId(prTarget)], triageState);
+      expect(controller.getWatches()[0]).toMatchObject({ triageState, metadata: { prLabels: labels } });
+    }
   });
 });

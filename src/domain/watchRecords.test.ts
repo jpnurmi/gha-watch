@@ -45,4 +45,20 @@ describe("watch records", () => {
         .toEqual([{ ...watch, metadata: { runTitle: "Build" } }]);
     }
   });
+
+  it("restores labels and discards malformed label data", () => {
+    const labels = [{ name: "bug", color: "d73a4a", description: "Something is not working" }];
+    const labeled = { ...watch, metadata: { prLabels: labels } };
+    expect(decodeWatchRecords([labeled])).toEqual([labeled]);
+    expect(decodeWatchRecords([{ ...watch, metadata: { prLabels: [] } }]))
+      .toEqual([{ ...watch, metadata: { prLabels: [] } }]);
+    expect(decodeWatchRecords([{ ...watch, metadata: { prLabels: [
+      ...labels, null, {}, { name: "", color: "ffffff" }, { name: "unsafe", color: 'red; background: url("bad")' },
+      { name: "enhancement", color: "A2EEEF", description: 123, extra: true },
+    ] } }])).toEqual([{ ...watch, metadata: { prLabels: [
+      ...labels, { name: "enhancement", color: "a2eeef" },
+    ] } }]);
+    expect(decodeWatchRecords([{ ...watch, metadata: { prLabels: "bad" } }]))
+      .toEqual([{ ...watch, metadata: {} }]);
+  });
 });

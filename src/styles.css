@@ -1854,6 +1854,31 @@ button.repo-ci-status:focus-visible {
   white-space: nowrap;
 }
 
+.watch-labels {
+  display: flex;
+  min-width: 0;
+  max-width: 40%;
+  flex: 0 0 auto;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.watch-label-chip {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--label-color) 45%, transparent);
+  border-radius: 999px;
+  padding: 0 6px;
+  background: color-mix(in srgb, var(--label-color) 18%, transparent);
+  color: color-mix(in srgb, var(--label-color) 45%, #fff);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .watch-meta .watch-branch-badge {
   min-width: 0;
   max-width: max-content;

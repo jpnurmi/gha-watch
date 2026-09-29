@@ -477,10 +477,11 @@ describe("fetchWatchState", () => {
               title: "Draft pull request",
               stack: { number: 42, size: 5 },
               stackEntry: { position: 2 },
+              labels: { nodes: [{ name: "bug", color: "d73a4a", description: "Something is not working" }] },
             },
           },
           repository1: {
-            pullRequest: { isDraft: false, state: "OPEN", title: "Ready pull request" },
+            pullRequest: { isDraft: false, state: "OPEN", title: "Ready pull request", labels: { nodes: [] } },
           },
           repository2: {
             pullRequest: { isDraft: false, state: "MERGED", title: "Merged pull request" },
@@ -501,8 +502,8 @@ describe("fetchWatchState", () => {
     }));
 
     await expect(fetchPullRequestDetails(targets, executor)).resolves.toEqual([
-      { authorLogin: "jpnurmi", branchName: "feature/draft", state: "draft", title: "Draft pull request", stack: { number: 42, position: 2, size: 5 } },
-      { state: "ready", title: "Ready pull request" },
+      { authorLogin: "jpnurmi", branchName: "feature/draft", state: "draft", title: "Draft pull request", stack: { number: 42, position: 2, size: 5 }, labels: [{ name: "bug", color: "d73a4a", description: "Something is not working" }] },
+      { state: "ready", title: "Ready pull request", labels: [] },
       { state: "merged", title: "Merged pull request" },
       { state: "closed", title: "Closed pull request" },
     ]);
@@ -517,6 +518,7 @@ describe("fetchWatchState", () => {
     expect(calls[0].args).toContain("number3=54");
     expect(calls[0].args[3]).toContain("headRefName");
     expect(calls[0].args[3]).toContain("author { login }");
+    expect(calls[0].args[3]).toContain("labels(first: 100) { nodes { name color description } }");
     expect(calls[0].args[3]).toContain("stack { number size } stackEntry { position }");
   });
 
@@ -1457,6 +1459,7 @@ describe("fetchOpenPullRequests", () => {
         {
           number: 51,
           title: "Batch pull request checks",
+          labels: { nodes: [{ name: "enhancement", color: "A2EEEF", description: null }] },
           stack: { number: 42, size: 5 },
           stackEntry: { position: 2 },
           isDraft: false,
@@ -1501,6 +1504,7 @@ describe("fetchOpenPullRequests", () => {
     ).resolves.toMatchObject([
       {
         stack: { number: 42, position: 2, size: 5 },
+        labels: [{ name: "enhancement", color: "a2eeef" }],
         checkSnapshot: {
           status: "in_progress",
           conclusion: null,
@@ -1517,6 +1521,7 @@ describe("fetchOpenPullRequests", () => {
     expect(calls[0].args[3]).toContain("stack { number size } stackEntry { position }");
     expect(calls[0].args[3]).toContain("commits(last: 1)");
     expect(calls[0].args[3]).toContain("contexts(first: 100)");
+    expect(calls[0].args[3]).toContain("labels(first: 100) { nodes { name color description } }");
   });
 
   it("classifies stale and startup failure check conclusions as failures", async () => {

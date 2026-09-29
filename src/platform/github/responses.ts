@@ -55,6 +55,7 @@ export type PullRequestDetailsResponse = {
   title?: string;
   stack?: { number?: number; size?: number } | null;
   stackEntry?: { position?: number } | null;
+  labels?: { nodes?: Array<{ name?: string; color?: string; description?: string | null } | null> } | null;
 };
 
 export type PullRequestDetailsQueryResponse = {
