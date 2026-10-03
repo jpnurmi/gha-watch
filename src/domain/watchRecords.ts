@@ -2,6 +2,7 @@ import { canonicalWatchId } from "./identity";
 import type { WatchTarget } from "./githubUrl";
 import { getWatchId, type WatchRecord } from "./watches";
 import { decodePullRequestStack } from "./pullRequestStack";
+import { decodePullRequestLabels } from "./pullRequestLabels";
 
 export function decodeWatchRecords(value: unknown): WatchRecord[] {
   if (!Array.isArray(value)) {
@@ -69,6 +70,8 @@ function decodeWatchRecord(value: unknown): WatchRecord | undefined {
     watch.metadata = {};
     const stack = decodePullRequestStack(value.metadata.prStack);
     if (stack) watch.metadata.prStack = stack;
+    const labels = decodePullRequestLabels(value.metadata.prLabels);
+    if (labels) watch.metadata.prLabels = labels;
     for (const key of ["prTitle", "prUpdatedAt", "workflowName", "runTitle", "runNumber", "jobName", "branchName", "commitSha"] as const) {
       if (key === "prUpdatedAt") {
         if (isTimestamp(value.metadata[key])) watch.metadata[key] = value.metadata[key];

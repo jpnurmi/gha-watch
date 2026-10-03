@@ -1,6 +1,7 @@
 import type { WatchState } from "../domain/status";
 import type { PrSourceState, WatchMetadata, WatchTiming } from "../domain/watches";
 import type { PullRequestStack } from "../domain/pullRequestStack";
+import type { PullRequestLabel } from "../domain/pullRequestLabels";
 
 export type RerunMode = "all" | "failed";
 
@@ -23,6 +24,7 @@ export type OpenPullRequest = {
   authorLogin?: string;
   headBranch?: string;
   stack?: PullRequestStack;
+  labels?: PullRequestLabel[];
   state?: PrSourceState;
   checkSnapshot?: WatchSnapshot;
   updatedAt?: string;
@@ -42,6 +44,7 @@ export type PullRequestDetails = {
   authorLogin?: string;
   branchName?: string;
   stack?: PullRequestStack;
+  labels?: PullRequestLabel[];
   state: PrSourceState;
   title: string;
 };

@@ -29,6 +29,7 @@ export function renderWatch(row: WatchRowViewModel, watchMenuId?: string, editin
             row.unseenStatusChange,
           )}
           ${row.stack ? renderStackBadge(row.stack) : ""}
+          ${renderLabels(row.labels)}
         </span>
         ${renderMetadata(row)}
         ${renderNote(row, editingNoteId === row.id)}
@@ -236,4 +237,16 @@ function renderStackBadge(stack: NonNullable<WatchRowViewModel["stack"]>): strin
       <path d="m8 1.5 6 3.25L8 8 2 4.75Zm-6 6.75 6 3.25 6-3.25M2 11.75 8 15l6-3.25" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.3"/>
     </svg><span aria-hidden="true">${stack.position}/${stack.size}</span>
   </span>`;
+}
+
+function renderLabels(labels: WatchRowViewModel["labels"]): string {
+  if (!labels?.length) {
+    return "";
+  }
+
+  return `<span class="watch-labels" title="${escapeHtml(labels.map((label) => label.name).join(", "))}">${labels.map((label) => {
+    const color = /^[0-9a-f]{6}$/i.test(label.color) ? label.color : "8b949e";
+    const title = label.description ? `${label.name}: ${label.description}` : label.name;
+    return `<span class="watch-label-chip" style="--label-color: #${color}" title="${escapeHtml(title)}">${escapeHtml(label.name)}</span>`;
+  }).join("")}</span>`;
 }
