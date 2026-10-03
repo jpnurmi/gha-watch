@@ -4,11 +4,49 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      tauri:
+        patterns:
+          - "@tauri-apps/*"
+        update-types:
+          - minor
+          - patch
+      vite:
+        patterns:
+          - vite
+          - vitest
+          - happy-dom
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:
       interval: weekly
+    groups:
+      tauri:
+        patterns:
+          - tauri
+          - "tauri-*"
+        exclude-patterns:
+          - tauri-winrt-notification
+        update-types:
+          - minor
+          - patch
+      macos-bindings:
+        patterns:
+          - "objc2*"
+        update-types:
+          - minor
+          - patch
+      windows:
+        patterns:
+          - "windows*"
+          - tauri-winrt-notification
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
