@@ -1866,6 +1866,7 @@ button.repo-ci-status:focus-visible {
 .watch-label-chip {
   min-width: 0;
   max-width: 100%;
+  flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--label-color) 45%, transparent);
   border-radius: 999px;
