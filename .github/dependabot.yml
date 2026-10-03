@@ -3,6 +3,18 @@ multi-ecosystem-groups:
   tauri:
     schedule:
       interval: weekly
+  tauri-plugin-autostart:
+    schedule:
+      interval: weekly
+  tauri-plugin-notification:
+    schedule:
+      interval: weekly
+  tauri-plugin-opener:
+    schedule:
+      interval: weekly
+  tauri-plugin-shell:
+    schedule:
+      interval: weekly
 
 updates:
   - package-ecosystem: npm
@@ -10,7 +22,11 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      - dependency-name: "@tauri-apps/*"
+      - dependency-name: "@tauri-apps/api"
+      - dependency-name: "@tauri-apps/plugin-autostart"
+      - dependency-name: "@tauri-apps/plugin-notification"
+      - dependency-name: "@tauri-apps/plugin-opener"
+      - dependency-name: "@tauri-apps/plugin-shell"
     groups:
       vite:
         patterns:
@@ -27,8 +43,10 @@ updates:
       interval: weekly
     ignore:
       - dependency-name: tauri
-      - dependency-name: tauri-build
-      - dependency-name: "tauri-plugin-*"
+      - dependency-name: tauri-plugin-notification
+      - dependency-name: tauri-plugin-opener
+      - dependency-name: tauri-plugin-shell
+      - dependency-name: tauri-plugin-autostart
     groups:
       macos-bindings:
         patterns:
@@ -52,13 +70,59 @@ updates:
   - package-ecosystem: npm
     directory: /
     patterns:
-      - "@tauri-apps/*"
+      - "@tauri-apps/api"
     multi-ecosystem-group: tauri
 
   - package-ecosystem: cargo
     directory: /src-tauri
     patterns:
       - tauri
-      - tauri-build
-      - "tauri-plugin-*"
     multi-ecosystem-group: tauri
+
+  - package-ecosystem: npm
+    directory: /
+    patterns:
+      - "@tauri-apps/plugin-autostart"
+    multi-ecosystem-group: tauri-plugin-autostart
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    patterns:
+      - tauri-plugin-autostart
+    multi-ecosystem-group: tauri-plugin-autostart
+
+  - package-ecosystem: npm
+    directory: /
+    patterns:
+      - "@tauri-apps/plugin-notification"
+    multi-ecosystem-group: tauri-plugin-notification
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    patterns:
+      - tauri-plugin-notification
+    multi-ecosystem-group: tauri-plugin-notification
+
+  - package-ecosystem: npm
+    directory: /
+    patterns:
+      - "@tauri-apps/plugin-opener"
+    multi-ecosystem-group: tauri-plugin-opener
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    patterns:
+      - tauri-plugin-opener
+    multi-ecosystem-group: tauri-plugin-opener
+
+  - package-ecosystem: npm
+    directory: /
+    patterns:
+      - "@tauri-apps/plugin-shell"
+    multi-ecosystem-group: tauri-plugin-shell
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    patterns:
+      - tauri-plugin-shell
+    multi-ecosystem-group: tauri-plugin-shell
