@@ -1,16 +1,17 @@
 version: 2
+multi-ecosystem-groups:
+  tauri:
+    schedule:
+      interval: weekly
+
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "@tauri-apps/*"
     groups:
-      tauri:
-        patterns:
-          - "@tauri-apps/*"
-        update-types:
-          - minor
-          - patch
       vite:
         patterns:
           - vite
@@ -24,16 +25,11 @@ updates:
     directory: /src-tauri
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: tauri
+      - dependency-name: tauri-build
+      - dependency-name: "tauri-plugin-*"
     groups:
-      tauri:
-        patterns:
-          - tauri
-          - "tauri-*"
-        exclude-patterns:
-          - tauri-winrt-notification
-        update-types:
-          - minor
-          - patch
       macos-bindings:
         patterns:
           - "objc2*"
@@ -52,3 +48,17 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  - package-ecosystem: npm
+    directory: /
+    patterns:
+      - "@tauri-apps/*"
+    multi-ecosystem-group: tauri
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    patterns:
+      - tauri
+      - tauri-build
+      - "tauri-plugin-*"
+    multi-ecosystem-group: tauri
