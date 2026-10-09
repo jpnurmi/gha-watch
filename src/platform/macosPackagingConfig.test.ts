@@ -14,5 +14,6 @@ describe("macOS packaging configuration", () => {
       visible: false,
       backgroundThrottling: "disabled",
     });
+    expect(config.bundle.macOS.minimumSystemVersion).toBe("14.0");
   });
 });
