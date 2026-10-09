@@ -18,6 +18,7 @@
         "width": 460,
         "height": 360,
         "visible": false,
+        "backgroundThrottling": "disabled",
         "resizable": false,
         "decorations": false,
         "transparent": true,

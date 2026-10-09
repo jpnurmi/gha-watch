@@ -8,4 +8,11 @@ describe("macOS packaging configuration", () => {
       width: 460,
     });
   });
+
+  it("keeps polling while the popup is hidden", () => {
+    expect(config.app.windows[0]).toMatchObject({
+      visible: false,
+      backgroundThrottling: "disabled",
+    });
+  });
 });
