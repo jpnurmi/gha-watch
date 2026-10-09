@@ -8,6 +8,7 @@
         "width": 460,
         "height": 360,
         "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --disable-background-timer-throttling",
         "resizable": false,
         "decorations": false,
         "transparent": false,

@@ -36,4 +36,18 @@ describe("Windows packaging configuration", () => {
     expect(commands).toContain("C:\\Program Files\\GitHub CLI\\gh.exe");
     expect(commands).toContain("C:\\ProgramData\\chocolatey\\bin\\gh.exe");
   });
+
+  it("keeps polling while the popup is hidden", () => {
+    const args = config.app.windows[0].additionalBrowserArgs.split(" ");
+
+    expect(config.app.windows[0].visible).toBe(false);
+    expect(args).toContain("--disable-background-timer-throttling");
+  });
+
+  it("preserves the default WebView2 browser arguments", () => {
+    const args = config.app.windows[0].additionalBrowserArgs.split(" ");
+
+    expect(args).toContain("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+    expect(args).toContain("--autoplay-policy=no-user-gesture-required");
+  });
 });
