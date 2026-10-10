@@ -19,7 +19,7 @@
     "@tauri-apps/plugin-shell": "2.4.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.0",
+    "@tauri-apps/cli": "2.12.1",
     "happy-dom": "20.14.5",
     "typescript": "7.0.2",
     "vite": "8.3.3",
