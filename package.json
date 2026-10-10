@@ -14,7 +14,7 @@
   "dependencies": {
     "@tauri-apps/api": "2.12.1",
     "@tauri-apps/plugin-autostart": "2.7.0",
-    "@tauri-apps/plugin-notification": "2.5.0",
+    "@tauri-apps/plugin-notification": "2.5.1",
     "@tauri-apps/plugin-opener": "2.7.0",
     "@tauri-apps/plugin-shell": "2.4.0"
   },
