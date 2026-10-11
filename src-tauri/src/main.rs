@@ -3,6 +3,8 @@
 mod command_input;
 mod desktop;
 mod notifications;
+#[cfg(feature = "screenshots")]
+mod screenshot;
 mod tray;
 mod window;
 
@@ -24,6 +26,25 @@ fn get_build_sha() -> &'static str {
 }
 
 fn main() {
+    #[cfg(not(feature = "screenshots"))]
+    if std::env::args_os().any(|arg| arg == "--screenshot") {
+        eprintln!("rebuild with --features screenshots to use --screenshot");
+        std::process::exit(2);
+    }
+
+    let context = tauri::generate_context!();
+
+    #[cfg(feature = "screenshots")]
+    if let Some(path) =
+        screenshot::output_path(std::env::args_os().skip(1)).unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2);
+        })
+    {
+        screenshot::run(path, context);
+        return;
+    }
+
     let builder = tauri::Builder::default();
 
     // Hidden GTK windows can report invalid geometry, so restore and save explicitly.
@@ -92,7 +113,7 @@ fn main() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building GHA Watch")
         .run(|app, event| {
             #[cfg(target_os = "linux")]

@@ -6,6 +6,9 @@ authors = ["jpnurmi"]
 license = "MIT"
 edition = "2021"
 
+[features]
+screenshots = ["dep:block2", "dep:objc2-web-kit", "dep:webview2-com", "windows/Win32_System_Com", "windows/Win32_UI_Shell", "objc2-app-kit/NSBitmapImageRep", "objc2-app-kit/NSImage", "objc2-app-kit/NSImageRep"]
+
 [build-dependencies]
 tauri-build = { version = "2.6.1", features = [] }
 
@@ -18,11 +21,13 @@ tauri-plugin-shell = "2.3.5"
 tempfile = "3.27.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = { version = "0.6.2", optional = true }
 mac-notification-sys = "0.6.12"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSView", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CALayer", "objc2-core-foundation"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSEnumerator", "NSKeyValueCoding", "NSString", "NSUUID", "NSUserNotification", "NSValue"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["WKWebView", "WKSnapshotConfiguration", "block2", "objc2-app-kit"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
@@ -31,6 +36,7 @@ notify-rust = "4.17.0"
 zbus = "5.15.0"
 
 [target.'cfg(windows)'.dependencies]
+webview2-com = { version = "0.39.1", optional = true }
 tauri-winrt-notification = "0.8.1"
 windows = { version = "0.62.2", features = ["Data_Xml_Dom", "UI_Notifications", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Controls"] }
 

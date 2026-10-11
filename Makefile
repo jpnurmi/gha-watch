@@ -1,7 +1,8 @@
 NPM ?= npm
 NODE ?= node
+SCREENSHOT_DIR ?= $(CURDIR)/dist/screenshots
 
-.PHONY: help deps dev typecheck test check web-build build tauri-build install clean
+.PHONY: help deps dev typecheck test check web-build build tauri-build install clean screenshot
 
 help:
 	@printf '%s\n' \
@@ -14,7 +15,8 @@ help:
 		'  web-build    Build the web UI' \
 		'  build        Build the release app bundle' \
 		'  install      Install and restart the release app bundle' \
-		'  clean        Remove generated build output'
+		'  clean        Remove generated build output' \
+		'  screenshot   Capture a screenshot'
 
 deps:
 	$(NPM) install
@@ -135,3 +137,23 @@ install:
 
 clean:
 	rm -rf dist src-tauri/target
+
+screenshot: | node_modules
+	$(NPM) run tauri -- build --features screenshots --no-bundle
+	@set -eu; \
+	case "$$(uname -s)" in \
+		Linux*) \
+			dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
+				$(NPM) run screenshot -- "$(SCREENSHOT_DIR)/linux.png"; \
+			;; \
+		MINGW*|MSYS*|CYGWIN*) \
+			$(NPM) run screenshot -- "$(SCREENSHOT_DIR)/windows.png"; \
+			;; \
+		Darwin*) \
+			$(NPM) run screenshot -- "$(SCREENSHOT_DIR)/macos.png"; \
+			;; \
+		*) \
+			printf 'Unsupported platform: %s\n' "$$(uname -s)" >&2; \
+			exit 1; \
+			;; \
+	esac

@@ -16,6 +16,8 @@ import {
 } from "./app/desktopNotificationActions";
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
+import { createScreenshotWatches, screenshotNow, captureScreenshot } from "./app/screenshot";
+import { defaultAppSettings } from "./domain/settings";
 import { getRefreshHealth } from "./app/refreshHealth";
 import { createApplicationSession } from "./app/applicationSession";
 import { createRepositoryIconProvider } from "./app/repositoryIcon";
@@ -160,9 +162,12 @@ function getUiPlatform(userAgent: string): string {
 
 const app = appRoot;
 window.addEventListener("resize", () => fitWorkflowTargetSummaries(app));
+const isScreenshotMode = (window as Window & { __GHA_WATCH_SCREENSHOT__?: boolean }).__GHA_WATCH_SCREENSHOT__ === true;
 const isDemoMode =
-  window.location.hostname === "127.0.0.1" &&
-  new URLSearchParams(window.location.search).get("demo") === "checks";
+  isScreenshotMode || (
+    window.location.hostname === "127.0.0.1" &&
+    new URLSearchParams(window.location.search).get("demo") === "checks"
+  );
 const getAuthenticatedUserLogin = createAuthenticatedUserLoginProvider(
   isDemoMode ? async () => "jpnurmi" : fetchAuthenticatedUserLogin,
 );
@@ -192,10 +197,10 @@ let repoDragState: RepoDragState | undefined;
 let watchPressState: WatchPressState | undefined;
 let watchDragState: WatchDragState | undefined;
 let rateLimit: RateLimit | undefined;
-let lastSuccessfulRefreshAt: Date | undefined;
+let lastSuccessfulRefreshAt: Date | undefined = isScreenshotMode ? screenshotNow : undefined;
 let lastRefreshFailed = false;
 let lastRefreshDegraded = false;
-let settings = loadSettings();
+let settings = isScreenshotMode ? defaultAppSettings : loadSettings();
 const settingsSync = createSettingsSync(createSettingsGistRemote(), createSettingsJournal());
 let repoCiStatuses: Record<string, RepoCiStatusViewModel> = {};
 const repoCiStatusRefreshes = new Set<string>();
@@ -272,10 +277,13 @@ type RepoCiStatusMenuState = {
 const desktopNotificationActionQueue = createDesktopNotificationActionQueue((error) => {
   console.error("Could not process a desktop notification action.", error);
 });
-void listenForDesktopNotificationActions(desktopNotificationActionQueue.receive);
+if (!isScreenshotMode) {
+  void listenForDesktopNotificationActions(desktopNotificationActionQueue.receive);
+}
 
 const controller = createWatchController(
   {
+    now: isScreenshotMode ? () => screenshotNow : undefined,
     fetchState: isDemoMode
       ? async () => {
           throw new Error("Demo mode does not poll GitHub.");
@@ -415,15 +423,20 @@ controller.subscribe(createCoalescedEffect(() => {
 
 bindEvents();
 render();
-void updateTrayIndicator();
-void refreshAutoStartState();
-void controller.refreshRepositoryIcons();
-void refreshListedRepositoryCiStatuses();
-polling.scheduleNext();
-if (!isDemoMode) {
-  updateCheck.start();
+if (isScreenshotMode) {
+  document.documentElement.dataset.screenshot = "true";
+  void captureScreenshot();
+} else {
+  void updateTrayIndicator();
+  void refreshAutoStartState();
+  void controller.refreshRepositoryIcons();
+  void refreshListedRepositoryCiStatuses();
+  polling.scheduleNext();
+  if (!isDemoMode) {
+    updateCheck.start();
+  }
+  void refreshSettingsAndStatuses();
 }
-void refreshSettingsAndStatuses();
 document.addEventListener("click", (event) => {
   const target = event.target;
 
@@ -479,6 +492,7 @@ window.addEventListener("keydown", (event) => {
   }
 });
 void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+  if (isScreenshotMode) return;
   isPopupOpen = focused;
   polling.handleFocusChanged(focused);
 
@@ -537,7 +551,7 @@ function renderFreshnessIndicator(): string {
     isRefreshing: isPolling,
     lastRefreshFailed: lastRefreshFailed || lastRefreshDegraded,
     lastUpdatedAt: lastSuccessfulRefreshAt?.getTime(),
-    now: Date.now(),
+    now: isScreenshotMode ? screenshotNow.getTime() : Date.now(),
     staleAfterMs: polling.getIntervalMs() * 2,
   });
   const refreshTitle = lastSuccessfulRefreshAt
@@ -558,7 +572,7 @@ function renderNow(): void {
   const showRepositoryTools = currentWatchView === "inbox";
   const viewModel = createPopupViewModel(
     watches,
-    new Date(),
+    isScreenshotMode ? screenshotNow : new Date(),
     showRepositoryTools ? settings.watchedRepos : [],
     settings.repoOrder,
     showRepositoryTools ? repoCiStatuses : {},
@@ -2931,6 +2945,7 @@ async function updateTrayIndicator(): Promise<void> {
 }
 
 async function resizePopupToContent(): Promise<void> {
+  if (isScreenshotMode) return;
   if (document.documentElement.dataset.platform === "linux") {
     return;
   }
@@ -3096,6 +3111,10 @@ async function fetchDemoRepositoryDefaultBranchCiStatus(
 }
 
 function loadInitialWatches(): WatchRecord[] {
+  if (isScreenshotMode) {
+    return createScreenshotWatches();
+  }
+
   if (isDemoMode) {
     return [
       createDemoWatch("8", "CI: feat: auto-start", "completed", "success", false, {

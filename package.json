@@ -9,7 +9,8 @@
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "screenshot": "node scripts/screenshot.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",
