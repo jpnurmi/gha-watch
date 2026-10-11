@@ -394,8 +394,8 @@ pub(crate) fn configure_windows_window_frame(window: &tauri::WebviewWindow) -> t
     use windows::Win32::{
         Foundation::HWND,
         Graphics::Dwm::{
-            DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
-            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+            DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_BORDER_COLOR,
+            DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
         },
         UI::Controls::MARGINS,
     };
