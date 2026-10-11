@@ -32,7 +32,7 @@ zbus = "5.15.0"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.8.1"
-windows = { version = "0.62.2", features = ["Data_Xml_Dom", "UI_Notifications"] }
+windows = { version = "0.62.2", features = ["Data_Xml_Dom", "UI_Notifications", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Controls"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-autostart = "2.5.1"

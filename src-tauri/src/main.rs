@@ -6,11 +6,12 @@ mod notifications;
 mod tray;
 mod window;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 use tauri::Manager;
 use tauri::WindowEvent;
 #[cfg(target_os = "macos")]
 use window::configure_macos_window_frame;
+#[cfg(windows)]
+use window::configure_windows_window_frame;
 #[cfg(target_os = "linux")]
 use window::{
     configure_linux_window_controls, configure_linux_window_frame, linux_window_state_label,
@@ -73,6 +74,11 @@ fn main() {
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
                 configure_macos_window_frame(&window)?;
+            }
+
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                configure_windows_window_frame(&window)?;
             }
 
             #[cfg(target_os = "linux")]

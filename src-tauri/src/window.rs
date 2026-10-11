@@ -389,6 +389,51 @@ pub(crate) fn configure_macos_window_frame(window: &tauri::WebviewWindow) -> tau
     Ok(())
 }
 
+#[cfg(windows)]
+pub(crate) fn configure_windows_window_frame(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    use windows::Win32::{
+        Foundation::HWND,
+        Graphics::Dwm::{
+            DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_BORDER_COLOR,
+            DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+        },
+        UI::Controls::MARGINS,
+    };
+
+    let hwnd = HWND(window.hwnd()?.0);
+    let corners = DWMWCP_ROUND;
+    let border = DWMWA_COLOR_NONE;
+    let margins = MARGINS {
+        cxLeftWidth: 1,
+        cxRightWidth: 1,
+        cyTopHeight: 1,
+        cyBottomHeight: 1,
+    };
+
+    // Request DWM shadows without Tao's resize-frame insets.
+    unsafe {
+        if let Err(error) = DwmExtendFrameIntoClientArea(hwnd, &margins) {
+            eprintln!("Could not configure Windows window shadow: {error}");
+        }
+
+        // Windows 10 does not support corner or border attributes.
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            std::ptr::from_ref(&corners).cast(),
+            std::mem::size_of_val(&corners) as u32,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            std::ptr::from_ref(&border).cast(),
+            std::mem::size_of_val(&border) as u32,
+        );
+    }
+
+    Ok(())
+}
+
 #[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug)]
 struct MonitorArea {

@@ -17,7 +17,9 @@ describe("Windows packaging configuration", () => {
       decorations: false,
       transparent: false,
       backgroundColor: "#161b22",
-      shadow: true,
+      theme: "Dark",
+      scrollBarStyle: "fluentOverlay",
+      shadow: false,
       skipTaskbar: true,
     });
     expect(config.app.windows[0]).not.toHaveProperty("windowEffects");
