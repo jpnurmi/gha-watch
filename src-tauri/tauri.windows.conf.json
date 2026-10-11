@@ -9,11 +9,13 @@
         "height": 360,
         "visible": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --disable-background-timer-throttling",
+        "scrollBarStyle": "fluentOverlay",
         "resizable": false,
         "decorations": false,
         "transparent": false,
         "backgroundColor": "#161b22",
-        "shadow": true,
+        "theme": "Dark",
+        "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true
       }
