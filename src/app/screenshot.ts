@@ -1,5 +1,6 @@
 import type { WatchRecord } from "../domain/watches";
 import { invokeDesktop } from "../platform/desktop";
+import type { TrayState } from "./trayState";
 
 export const screenshotNow = new Date("2026-05-17T12:00:00Z");
 
@@ -76,10 +77,11 @@ export function createScreenshotWatches(): WatchRecord[] {
   ];
 }
 
-export async function captureScreenshot(): Promise<void> {
+export async function captureScreenshot(tray: Pick<TrayState, "status" | "tooltip" | "hasUnseenChanges">): Promise<void> {
   await document.fonts.ready;
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => {
     window.requestAnimationFrame(() => resolve());
   }));
-  await invokeDesktop("screenshot_ready");
+  const { status, tooltip, hasUnseenChanges } = tray;
+  await invokeDesktop("screenshot_ready", { status, tooltip, hasUnseenChanges });
 }

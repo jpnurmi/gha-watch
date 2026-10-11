@@ -31,7 +31,8 @@ describe("screenshots", () => {
     vi.mocked(invokeDesktop).mockClear();
 
     try {
-      const capture = captureScreenshot();
+      const tray = { status: "mixed" as const, tooltip: "GHA Watch", hasUnseenChanges: true };
+      const capture = captureScreenshot(tray);
       expect(frames).toHaveLength(0);
       expect(invokeDesktop).not.toHaveBeenCalled();
       fontsReady();
@@ -40,7 +41,7 @@ describe("screenshots", () => {
       expect(invokeDesktop).not.toHaveBeenCalled();
       frames.shift()!(0);
       await capture;
-      expect(invokeDesktop).toHaveBeenCalledWith("screenshot_ready");
+      expect(invokeDesktop).toHaveBeenCalledWith("screenshot_ready", tray);
     } finally {
       vi.unstubAllGlobals();
     }

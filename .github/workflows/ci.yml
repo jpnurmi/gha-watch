@@ -254,6 +254,13 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
         run: |
           mkdir -p .github/screenshots
+          if [ "$PLATFORM" = macos ]; then
+            if [ -f ".github/screenshots/${PLATFORM}.png" ] && cmp -s "dist/screenshots/${PLATFORM}.sha256" ".github/screenshots/${PLATFORM}.sha256"; then
+              exit 0
+            fi
+            cp "dist/screenshots/${PLATFORM}.sha256" .github/screenshots/
+            git add ".github/screenshots/${PLATFORM}.sha256"
+          fi
           cp "dist/screenshots/${PLATFORM}.png" .github/screenshots/
           git add ".github/screenshots/${PLATFORM}.png"
           if git diff --cached --quiet; then

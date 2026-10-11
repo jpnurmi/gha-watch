@@ -425,7 +425,7 @@ bindEvents();
 render();
 if (isScreenshotMode) {
   document.documentElement.dataset.screenshot = "true";
-  void captureScreenshot();
+  void captureScreenshot(createTrayState(controller.getWatches()));
 } else {
   void updateTrayIndicator();
   void refreshAutoStartState();
