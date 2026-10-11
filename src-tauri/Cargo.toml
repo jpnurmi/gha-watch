@@ -7,7 +7,7 @@ license = "MIT"
 edition = "2021"
 
 [features]
-screenshots = ["dep:block2", "dep:objc2-web-kit", "dep:webview2-com", "windows/Win32_System_Com", "windows/Win32_UI_Shell", "objc2-app-kit/NSBitmapImageRep", "objc2-app-kit/NSImage", "objc2-app-kit/NSImageRep"]
+screenshots = ["dep:block2", "dep:objc2-web-kit", "dep:webview2-com", "windows/Win32_System_Com", "windows/Win32_UI_Shell", "objc2-app-kit/NSBitmapImageRep", "objc2-app-kit/NSImage", "objc2-app-kit/NSImageRep", "dep:webkit2gtk", "dep:cairo-rs"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.1", features = [] }
@@ -34,6 +34,8 @@ gtk = "0.18.2"
 tauri-plugin-window-state = "2.4.1"
 notify-rust = "4.17.0"
 zbus = "5.15.0"
+cairo-rs = { version = "0.18.5", features = ["png"], optional = true }
+webkit2gtk = { version = "2.0.2", features = ["v2_16"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = { version = "0.39.1", optional = true }

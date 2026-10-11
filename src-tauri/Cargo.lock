@@ -1279,6 +1279,7 @@ name = "gha-watch"
 version = "0.1.0"
 dependencies = [
  "block2",
+ "cairo-rs",
  "gtk",
  "mac-notification-sys",
  "notify-rust",
@@ -1297,6 +1298,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tauri-winrt-notification",
  "tempfile",
+ "webkit2gtk",
  "webview2-com",
  "windows",
  "zbus",

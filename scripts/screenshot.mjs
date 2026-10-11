@@ -14,25 +14,36 @@ const binary = resolve(root, `src-tauri/target/release/gha-watch${platform === "
 await mkdir(dirname(output), { recursive: true });
 await rm(output, { force: true });
 
-await new Promise((resolve, reject) => {
-  const child = spawn(binary, ["--screenshot", output], { stdio: "inherit" });
-  const timeout = setTimeout(() => {
-    child.kill();
-    reject(new Error("Screenshot timed out after 60 seconds."));
-  }, 60_000);
-  child.on("error", (error) => {
-    clearTimeout(timeout);
-    reject(new Error("Build the screenshot app first: npm run tauri build -- --features screenshots --no-bundle", { cause: error }));
-  });
-  child.on("close", (code, signal) => {
-    clearTimeout(timeout);
-    if (code === 0) resolve();
-    else reject(new Error(`Screenshot app exited with ${signal ?? code}.`));
-  });
-});
+await run(binary, ["--screenshot", output], "Build the screenshot app first: npm run tauri build -- --features screenshots --no-bundle");
+if (platform === "macos") {
+  await run("swift", [
+    fileURLToPath(new URL("screenshot-macos.swift", import.meta.url)),
+    output,
+    resolve(root, "src-tauri/icons/tray-mixed-unseen.png"),
+  ], "Could not run the macOS screenshot renderer.");
+}
 
 const png = await readFile(output);
 if (png.length < 24 || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
   throw new Error(`The app did not produce a PNG: ${output}. Was it built with --features screenshots?`);
 }
 console.log(`Saved ${output} (${png.readUInt32BE(16)} × ${png.readUInt32BE(20)})`);
+
+async function run(command, args, message) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: "inherit" });
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error("Screenshot timed out after 60 seconds."));
+    }, 60_000);
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(new Error(message, { cause: error }));
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timeout);
+      if (code === 0) resolve();
+      else reject(new Error(`Screenshot command exited with ${signal ?? code}.`));
+    });
+  });
+}

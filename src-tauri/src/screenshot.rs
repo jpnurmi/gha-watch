@@ -42,7 +42,7 @@ pub(crate) fn run(path: PathBuf, mut context: tauri::Context<tauri::Wry>) {
                 .data_directory(profile.path().to_path_buf())
                 .incognito(true)
                 .inner_size(460.0, 400.0)
-                .visible(true)
+                .visible(false)
                 .center()
                 .build()?;
 
@@ -52,8 +52,17 @@ pub(crate) fn run(path: PathBuf, mut context: tauri::Context<tauri::Wry>) {
             {
                 crate::window::configure_linux_window_frame(&window);
                 crate::window::configure_linux_window_controls(&window);
+                window.with_webview(|webview| {
+                    use webkit2gtk::{SettingsExt, WebViewExt};
+                    if let Some(settings) = webview.inner().settings() {
+                        settings.set_hardware_acceleration_policy(
+                            webkit2gtk::HardwareAccelerationPolicy::Never,
+                        );
+                    }
+                })?;
             }
 
+            window.show()?;
             window.set_focus()?;
             // retain the isolated profile until the app exits
             app.manage(profile);
@@ -96,6 +105,37 @@ fn finish(app: &AppHandle, result: Result<(), String>) {
     } else {
         app.exit(0);
     }
+}
+
+fn validate_content(image: &tauri::image::Image<'_>) -> Result<(), String> {
+    let width = image.width() as usize;
+    let height = image.height() as usize;
+    let colors: std::collections::HashSet<_> = image
+        .rgba()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+        .filter(|(index, pixel)| {
+            let x = index % width;
+            let y = index / width;
+            x >= width / 10
+                && x < width * 9 / 10
+                && y >= height / 4
+                && y < height * 9 / 10
+                && pixel[3] > 0
+        })
+        .map(|(_, pixel)| &pixel[..3])
+        .collect();
+    if colors.len() < 16 {
+        return Err("screenshot has no rendered app content".into());
+    }
+    Ok(())
+}
+
+fn validate_png(bytes: &[u8]) -> Result<(), String> {
+    let image = tauri::image::Image::from_bytes(bytes).map_err(|error| error.to_string())?;
+    validate_content(&image)
 }
 
 #[cfg(windows)]
@@ -141,6 +181,7 @@ fn capture(window: WebviewWindow, path: PathBuf) -> Result<(), String> {
                                 if read != size {
                                     return Err("incomplete WebView2 screenshot".into());
                                 }
+                                validate_png(&bytes)?;
                                 std::fs::write(&path, bytes).map_err(|error| error.to_string())
                             })();
                             finish(&handle, result);
@@ -192,7 +233,9 @@ fn capture(window: WebviewWindow, path: PathBuf) -> Result<(), String> {
                                 &NSDictionary::new(),
                             )
                             .ok_or("could not encode PNG")?;
-                        std::fs::write(&path, png.to_vec()).map_err(|error| error.to_string())
+                        let bytes = png.to_vec();
+                        validate_png(&bytes)?;
+                        std::fs::write(&path, bytes).map_err(|error| error.to_string())
                     }
                 })();
                 finish(&app, result);
@@ -209,25 +252,55 @@ fn capture(window: WebviewWindow, path: PathBuf) -> Result<(), String> {
 #[cfg(target_os = "linux")]
 fn capture(window: WebviewWindow, path: PathBuf) -> Result<(), String> {
     use gtk::prelude::*;
+    use webkit2gtk::WebViewExt;
 
     let app = window.app_handle().clone();
     let capture_window = window.clone();
     window
-        .run_on_main_thread(move || {
-            let result = (|| -> Result<(), String> {
-                let gtk_window = capture_window
-                    .gtk_window()
-                    .map_err(|error| error.to_string())?;
-                let frame = gtk_window.window().ok_or("GTK window is not realized")?;
-                let (_, _, width, height) = frame.geometry();
-                let image = frame
-                    .pixbuf(0, 0, width, height)
-                    .ok_or("could not capture GTK window")?;
-                image
-                    .savev(&path, "png", &[])
-                    .map_err(|error| error.to_string())
-            })();
-            finish(&app, result);
+        .with_webview(move |webview| {
+            let view = webview.inner();
+            let content_view = view.clone();
+            view.snapshot(
+                webkit2gtk::SnapshotRegion::Visible,
+                webkit2gtk::SnapshotOptions::NONE,
+                None::<&gtk::gio::Cancellable>,
+                move |snapshot| {
+                    let result = (|| -> Result<(), String> {
+                        let content = snapshot.map_err(|error| error.to_string())?;
+                        let mut bytes = Vec::new();
+                        content
+                            .write_to_png(&mut bytes)
+                            .map_err(|error| error.to_string())?;
+                        validate_png(&bytes)?;
+
+                        let frame = capture_window
+                            .gtk_window()
+                            .map_err(|error| error.to_string())?;
+                        let (x, y) = content_view
+                            .translate_coordinates(&frame, 0, 0)
+                            .ok_or("could not locate WebKit content in GTK window")?;
+                        let image = cairo::ImageSurface::create(
+                            cairo::Format::ARgb32,
+                            frame.allocated_width(),
+                            frame.allocated_height(),
+                        )
+                        .map_err(|error| error.to_string())?;
+                        let context =
+                            cairo::Context::new(&image).map_err(|error| error.to_string())?;
+                        frame.draw(&context);
+                        context
+                            .set_source_surface(&content, x as f64, y as f64)
+                            .map_err(|error| error.to_string())?;
+                        context.paint().map_err(|error| error.to_string())?;
+                        let mut output =
+                            std::fs::File::create(&path).map_err(|error| error.to_string())?;
+                        image
+                            .write_to_png(&mut output)
+                            .map_err(|error| error.to_string())
+                    })();
+                    finish(&app, result);
+                },
+            );
         })
         .map_err(|error| error.to_string())
 }
@@ -253,5 +326,26 @@ mod tests {
     fn requires_an_output_path() {
         assert!(output_path(["--screenshot".into()]).is_err());
         assert!(output_path(["--screenshot".into(), "".into()]).is_err());
+    }
+
+    #[test]
+    fn rejects_a_blank_popup() {
+        let mut rgba = [0, 0, 0, 255].repeat(100 * 100);
+        for x in 0..100 {
+            rgba[x * 4] = x as u8;
+        }
+        let image = tauri::image::Image::new_owned(rgba, 100, 100);
+        assert!(validate_content(&image).is_err());
+        let image = tauri::image::Image::new_owned(vec![255; 100 * 100 * 4], 100, 100);
+        assert!(validate_content(&image).is_err());
+    }
+
+    #[test]
+    fn accepts_rendered_app_content() {
+        let image = tauri::image::Image::from_bytes(include_bytes!(
+            "../../.github/screenshots/windows.png"
+        ))
+        .unwrap();
+        assert!(validate_content(&image).is_ok());
     }
 }

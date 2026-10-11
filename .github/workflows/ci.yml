@@ -79,6 +79,10 @@ jobs:
       - name: Test Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --all-features
 
+      - name: Check macOS screenshot renderer
+        if: runner.os == 'macOS'
+        run: swiftc -typecheck scripts/screenshot-macos.swift
+
   vitest:
     name: Vitest
     runs-on: ubuntu-24.04
