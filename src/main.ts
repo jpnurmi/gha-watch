@@ -508,7 +508,7 @@ function renderRateLimitBar(): string {
   const usedPct = rateLimit ? Math.round((rateLimit.used / rateLimit.limit) * 100) : 0;
   const remainingPct = 100 - usedPct;
   const title = rateLimit
-    ? `GitHub API: ${String(rateLimit.remaining)} of ${String(rateLimit.limit)} remaining`
+    ? `GitHub ${rateLimit.resource} API: ${String(rateLimit.remaining)} of ${String(rateLimit.limit)} remaining`
     : "";
 
   return `<div class="rate-limit-bar" title="${title}">
@@ -539,10 +539,10 @@ function renderRateLimitIndicator(): string {
   const resetHours = String(resetTime.getHours()).padStart(2, "0");
   const resetMinutes = String(resetTime.getMinutes()).padStart(2, "0");
   const resetFormatted = `${resetHours}:${resetMinutes}`;
-  const title = `GitHub API rate limit: ${String(rateLimit.used)} / ${String(rateLimit.limit)} used · resets ${resetFormatted}`;
+  const title = `GitHub ${rateLimit.resource} API rate limit: ${String(rateLimit.used)} / ${String(rateLimit.limit)} used · resets ${resetFormatted}`;
 
   return `<span class="rate-limit-indicator is-${tone}" title="${title}">
-    ${String(rateLimit.used)} / ${String(rateLimit.limit)} &middot; ${resetFormatted}
+    ${rateLimit.resource} ${String(rateLimit.used)} / ${String(rateLimit.limit)} &middot; ${resetFormatted}
   </span>`;
 }
 

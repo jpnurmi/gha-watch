@@ -5,11 +5,11 @@ import type { ShellExecutor } from "../shell";
 
 const reset = 2_000_000_000;
 const body = '{"errors":[{"message":"API rate limit exceeded"}]}';
-function response(used = 5000, ending = "\n") {
+function response(used = 5000, ending = "\n", resetAt = reset) {
   return [
     "HTTP/2.0 200 OK", "X-Ratelimit-Limit: 5000",
     `X-Ratelimit-Remaining: ${5000 - used}`, `X-Ratelimit-Used: ${used}`,
-    `X-Ratelimit-Reset: ${reset}`, "", body,
+    `X-Ratelimit-Reset: ${resetAt}`, "", body,
   ].join(ending);
 }
 
@@ -79,5 +79,62 @@ describe("GraphQL quota headers", () => {
     const executor = { execute: async () => ({ code: 0, stdout: `HTTP/2.0 200 OK\n\n${body}`, stderr: "" }) };
     await expect(executeGraphql(executor, ["api", "graphql"])).resolves.toEqual({ code: 0, stdout: body, stderr: "" });
     expect(await getGraphqlRateLimit(executor)).toBeUndefined();
+  });
+
+  it.each([false, true])("keeps exhaustion across overlapping windows (healthy response first: %s)", async (healthyFirst) => {
+    vi.useFakeTimers();
+    vi.setSystemTime((reset - 1) * 1000);
+    const exhausted = { code: 1, stdout: response(), stderr: "quota exceeded" };
+    const healthy = { code: 0, stdout: response(568, "\n", reset + 120), stderr: "" };
+    const execute = vi.fn<ShellExecutor["execute"]>()
+      .mockResolvedValueOnce(healthyFirst ? healthy : exhausted)
+      .mockResolvedValueOnce(healthyFirst ? exhausted : healthy)
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout: JSON.stringify({ resources: {
+          core: { limit: 5000, used: 3072, remaining: 1928, reset },
+          graphql: { limit: 5000, used: 568, remaining: 4432, reset: reset + 120 },
+        } }),
+        stderr: "",
+      });
+    const executor = { execute };
+
+    await executeGraphql(executor, ["api", "graphql"]);
+    await executeGraphql(executor, ["api", "graphql"]);
+
+    await expect(fetchRateLimit(executor)).resolves.toEqual({
+      resource: "GraphQL", limit: 5000, remaining: 0, used: 5000, reset,
+    });
+  });
+
+  it("accepts a healthy quota after exhaustion resets", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime((reset - 1) * 1000);
+    const execute = vi.fn<ShellExecutor["execute"]>()
+      .mockResolvedValueOnce({ code: 1, stdout: response(), stderr: "quota exceeded" })
+      .mockResolvedValueOnce({ code: 0, stdout: response(1, "\n", reset + 3600), stderr: "" });
+    const executor = { execute };
+
+    await executeGraphql(executor, ["api", "graphql"]);
+    vi.setSystemTime(reset * 1000);
+    await executeGraphql(executor, ["api", "graphql"]);
+
+    await expect(getGraphqlRateLimit(executor)).resolves.toEqual({
+      resource: "GraphQL", limit: 5000, remaining: 4999, used: 1, reset: reset + 3600,
+    });
+  });
+
+  it("ignores responses from an expired window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(reset * 1000);
+    const execute = vi.fn<ShellExecutor["execute"]>()
+      .mockResolvedValueOnce({ code: 0, stdout: response(1, "\n", reset + 3600), stderr: "" })
+      .mockResolvedValueOnce({ code: 1, stdout: response(), stderr: "quota exceeded" });
+    const executor = { execute };
+
+    await executeGraphql(executor, ["api", "graphql"]);
+    await executeGraphql(executor, ["api", "graphql"]);
+
+    expect((await getGraphqlRateLimit(executor))?.remaining).toBe(4999);
   });
 });
