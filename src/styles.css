@@ -11,6 +11,14 @@
   box-sizing: border-box;
 }
 
+:root[data-screenshot] *,
+:root[data-screenshot] *::before,
+:root[data-screenshot] *::after {
+  animation: none !important;
+  transition: none !important;
+  pointer-events: none;
+}
+
 body {
   margin: 0;
   width: 100vw;

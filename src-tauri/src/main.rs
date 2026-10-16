@@ -24,6 +24,8 @@ fn get_build_sha() -> &'static str {
 }
 
 fn main() {
+    let context = tauri::generate_context!();
+
     let builder = tauri::Builder::default();
 
     // Hidden GTK windows can report invalid geometry, so restore and save explicitly.
@@ -92,7 +94,7 @@ fn main() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building GHA Watch")
         .run(|app, event| {
             #[cfg(target_os = "linux")]

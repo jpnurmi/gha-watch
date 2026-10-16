@@ -1,7 +1,8 @@
 NPM ?= npm
 NODE ?= node
+SCREENSHOT_DIR ?= $(CURDIR)/dist/screenshots
 
-.PHONY: help deps dev typecheck test check web-build build tauri-build install clean
+.PHONY: help deps dev typecheck test check web-build build tauri-build install clean screenshot
 
 help:
 	@printf '%s\n' \
@@ -14,7 +15,8 @@ help:
 		'  web-build    Build the web UI' \
 		'  build        Build the release app bundle' \
 		'  install      Install and restart the release app bundle' \
-		'  clean        Remove generated build output'
+		'  clean        Remove generated build output' \
+		'  screenshot   Render all platform screenshots'
 
 deps:
 	$(NPM) install
@@ -135,3 +137,6 @@ install:
 
 clean:
 	rm -rf dist src-tauri/target
+
+screenshot: | node_modules
+	$(NPM) run screenshot -- all "$(SCREENSHOT_DIR)"

@@ -4,6 +4,10 @@ A minimal tray watcher for GitHub Actions checks.
 
 GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system tray, watches GitHub Actions workflow runs, jobs, or pull requests through the GitHub CLI, and sends native desktop notifications when status changes.
 
+| Linux | macOS | Windows |
+| --- | --- | --- |
+| [![GHA Watch in the Linux top panel](.github/screenshots/linux.png)](.github/screenshots/linux.png) | [![GHA Watch in the macOS menu bar](.github/screenshots/macos.png)](.github/screenshots/macos.png) | [![GHA Watch in the Windows notification area](.github/screenshots/windows.png)](.github/screenshots/windows.png) |
+
 ## Features
 
 - Add a repository URL or slug to watch your open pull requests immediately.
