@@ -129,17 +129,6 @@ On Windows, the NSIS and MSI installers are written under:
 src-tauri/target/release/bundle/
 ```
 
-### Screenshots
-
-Screenshots show the real app UI with sample repositories inside illustrated desktop scenes. The clock, dark theme, fonts, and browser version are fixed so captures remain stable.
-
-```sh
-npx playwright install chromium
-make screenshot
-```
-
-All three images are written to `dist/screenshots/`. To render one platform, run `npm run screenshot -- windows` (or `linux` / `macos`). Screenshots do not require a native app build or GitHub authentication.
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
