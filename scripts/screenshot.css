@@ -180,5 +180,5 @@
 :root[data-screenshot-platform="windows"] .desktop-popup {
   top: auto;
   bottom: 72px;
-  border-radius: 0;
+  border-radius: 8px;
 }
