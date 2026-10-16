@@ -42,8 +42,8 @@ try {
     if (errors.length || /getsentry/i.test(content)) {
       throw new Error(`Invalid ${name} screenshot: ${errors.join("; ") || "getsentry repository"}`);
     }
-    if (await page.locator("#app .watch").count() === 0) {
-      throw new Error(`The ${name} screenshot has no rendered watches.`);
+    if (await page.locator("#app .watch").count() !== 4) {
+      throw new Error(`The ${name} screenshot must have exactly four rendered Inbox watches.`);
     }
     await mkdir(dirname(output), { recursive: true });
     await page.screenshot({ path: output, animations: "disabled" });
