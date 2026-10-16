@@ -1,15 +1,13 @@
 import type { WatchRecord } from "../domain/watches";
-import { invokeDesktop } from "../platform/desktop";
-import type { TrayState } from "./trayState";
 
 export const screenshotNow = new Date("2026-05-17T12:00:00Z");
 
 export function createScreenshotWatches(): WatchRecord[] {
   const pullRequest = (repo: string, number: string, title: string): WatchRecord => ({
-    id: `getsentry/${repo}/pull/${number}`,
+    id: `jpnurmi/${repo}/pull/${number}`,
     target: {
-      kind: "pr", owner: "getsentry", repo, prNumber: number,
-      url: `https://github.com/getsentry/${repo}/pull/${number}`,
+      kind: "pr", owner: "jpnurmi", repo, prNumber: number,
+      url: `https://github.com/jpnurmi/${repo}/pull/${number}`,
     },
     label: title,
     metadata: { prTitle: title, branchName: "feat/tray-badges" },
@@ -22,15 +20,15 @@ export function createScreenshotWatches(): WatchRecord[] {
   });
 
   return [
-    pullRequest("sentry", "12", "Add watched repository quick watches"),
+    pullRequest("gha-watch", "12", "Add workflow quick watches"),
     {
-      id: "getsentry/sentry/job/42",
+      id: "jpnurmi/gha-watch/job/42",
       target: {
-        kind: "job", owner: "getsentry", repo: "sentry", runId: "11", jobId: "42",
-        url: "https://github.com/getsentry/sentry/actions/runs/11/job/42",
+        kind: "job", owner: "jpnurmi", repo: "gha-watch", runId: "11", jobId: "42",
+        url: "https://github.com/jpnurmi/gha-watch/actions/runs/11/job/42",
       },
-      label: "Build / package app (macOS)",
-      metadata: { workflowName: "Build", jobName: "package app (macOS)", branchName: "main" },
+      label: "Build / package app",
+      metadata: { workflowName: "Build", jobName: "package app", branchName: "main" },
       status: "completed:failure",
       lastState: { status: "completed", conclusion: "failure" },
       timing: { startedAt: "2026-05-17T11:50:00Z", completedAt: "2026-05-17T11:54:00Z" },
@@ -40,10 +38,10 @@ export function createScreenshotWatches(): WatchRecord[] {
       error: undefined,
     },
     {
-      id: "getsentry/sentry/run/22",
+      id: "jpnurmi/gha-watch/run/22",
       target: {
-        kind: "run", owner: "getsentry", repo: "sentry", runId: "22",
-        url: "https://github.com/getsentry/sentry/actions/runs/22",
+        kind: "run", owner: "jpnurmi", repo: "gha-watch", runId: "22",
+        url: "https://github.com/jpnurmi/gha-watch/actions/runs/22",
       },
       label: "Release: Package app",
       metadata: { workflowName: "Release", runTitle: "Package app", branchName: "release/0.2" },
@@ -54,19 +52,19 @@ export function createScreenshotWatches(): WatchRecord[] {
       error: undefined,
     },
     {
-      ...pullRequest("relay", "812", "Keep discovery results compact"),
+      ...pullRequest("cuotax", "28", "Keep quota details compact"),
       status: "completed:success",
       lastState: { status: "completed", conclusion: "success" },
       timing: { startedAt: "2026-05-17T11:48:00Z", completedAt: "2026-05-17T11:51:00Z" },
       active: false,
     },
     {
-      ...pullRequest("sentry", "13", "Refine tray popup spacing"),
+      ...pullRequest("gha-watch", "13", "Refine tray popup spacing"),
       sourceState: "draft",
       triageState: "saved",
     },
     {
-      ...pullRequest("seer", "94", "Improve workflow status handling"),
+      ...pullRequest("gha-watch", "14", "Improve workflow status handling"),
       sourceState: "merged",
       triageState: "done",
       doneAt: screenshotNow.toISOString(),
@@ -75,13 +73,4 @@ export function createScreenshotWatches(): WatchRecord[] {
       active: false,
     },
   ];
-}
-
-export async function captureScreenshot(tray: Pick<TrayState, "status" | "tooltip" | "hasUnseenChanges">): Promise<void> {
-  await document.fonts.ready;
-  await new Promise<void>((resolve) => window.requestAnimationFrame(() => {
-    window.requestAnimationFrame(() => resolve());
-  }));
-  const { status, tooltip, hasUnseenChanges } = tray;
-  await invokeDesktop("screenshot_ready", { status, tooltip, hasUnseenChanges });
 }

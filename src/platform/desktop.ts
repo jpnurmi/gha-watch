@@ -3,7 +3,6 @@ import type { TrayStatus } from "../app/trayState";
 import type { WatchNotification } from "../app/watchNotification";
 
 type Commands = {
-  screenshot_ready: { args: { status: TrayStatus; tooltip: string; hasUnseenChanges: boolean }; result: void };
   get_build_sha: { args: undefined; result: string };
   set_tray_indicator: { args: { status: TrayStatus; tooltip: string; hasUnseenChanges: boolean }; result: void };
   show_desktop_notification: { args: { notification: WatchNotification }; result: void };

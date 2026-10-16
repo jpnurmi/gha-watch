@@ -1,0 +1,184 @@
+@font-face {
+  font-family: "Screenshot UI";
+  font-style: normal;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Screenshot UI";
+  font-style: italic;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-italic.woff2") format("woff2");
+}
+
+:root[data-screenshot-platform] {
+  font-family: "Screenshot UI", sans-serif;
+  color-scheme: dark;
+}
+
+:root[data-screenshot-platform] body {
+  background:
+    radial-gradient(ellipse at 12% 100%, #393456 0, transparent 65%),
+    linear-gradient(135deg, #182b3b, #263b4d 50%, #182331);
+}
+
+.desktop-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: #14161c;
+  color: #f0f1f5;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.desktop-menu,
+.desktop-notification-area,
+.desktop-status {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  gap: 16px;
+}
+
+.desktop-bar svg,
+.desktop-titlebar svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.desktop-tray {
+  display: grid;
+  width: 38px;
+  height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 15%);
+}
+
+.desktop-tray img {
+  width: 22px;
+  height: 22px;
+}
+
+.desktop-popup {
+  position: absolute;
+  top: 52px;
+  right: 24px;
+  width: 460px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #161b22;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 45%), 0 0 0 1px rgb(255 255 255 / 22%);
+}
+
+:root[data-screenshot-platform] #app {
+  height: 400px;
+}
+
+:root[data-screenshot-platform] .shell {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-screenshot-platform="linux"] body {
+  background:
+    radial-gradient(ellipse at 10% 90%, #623b57 0, transparent 65%),
+    linear-gradient(135deg, #342846, #262e42 60%, #1c2433);
+}
+
+:root[data-screenshot-platform="linux"] .desktop-bar {
+  background: #151515;
+}
+
+.desktop-workspaces svg {
+  width: 36px;
+  fill: currentColor;
+  stroke: none;
+}
+
+.desktop-date {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+:root[data-screenshot-platform="linux"] .desktop-popup {
+  top: 58px;
+}
+
+.desktop-titlebar {
+  display: flex;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid #101010;
+  background: linear-gradient(#303030, #292929);
+  color: #eeeeec;
+  font-size: 13px;
+}
+
+.desktop-titlebar svg {
+  position: absolute;
+  right: 14px;
+}
+
+:root[data-screenshot-platform="macos"] .desktop-bar {
+  background: #25313f;
+}
+
+:root[data-screenshot-platform="windows"] body {
+  background:
+    radial-gradient(ellipse at 30% 100%, #294f8b 0, transparent 60%),
+    linear-gradient(125deg, #142b4e, #263e70 50%, #252446);
+}
+
+:root[data-screenshot-platform="windows"] .desktop-bar {
+  inset: auto 0 0;
+  height: 56px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  background: #1d2434;
+}
+
+.desktop-start {
+  display: grid;
+  width: 40px;
+  place-items: center;
+  color: #8bc8ff;
+}
+
+.desktop-start svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+  stroke: none;
+}
+
+:root[data-screenshot-platform="windows"] .desktop-tray {
+  height: 40px;
+  background: rgb(255 255 255 / 9%);
+}
+
+.desktop-clock {
+  min-width: 70px;
+  text-align: right;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+:root[data-screenshot-platform="windows"] .desktop-popup {
+  top: auto;
+  bottom: 72px;
+  border-radius: 0;
+}

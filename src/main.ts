@@ -16,7 +16,7 @@ import {
 } from "./app/desktopNotificationActions";
 import { createAuthenticatedUserLoginProvider } from "./app/authenticatedUser";
 import { getFreshnessState } from "./app/freshness";
-import { createScreenshotWatches, screenshotNow, captureScreenshot } from "./app/screenshot";
+import { createScreenshotWatches, screenshotNow } from "./app/screenshot";
 import { defaultAppSettings } from "./domain/settings";
 import { getRefreshHealth } from "./app/refreshHealth";
 import { createApplicationSession } from "./app/applicationSession";
@@ -425,7 +425,6 @@ bindEvents();
 render();
 if (isScreenshotMode) {
   document.documentElement.dataset.screenshot = "true";
-  void captureScreenshot(createTrayState(controller.getWatches()));
 } else {
   void updateTrayIndicator();
   void refreshAutoStartState();
@@ -491,18 +490,19 @@ window.addEventListener("keydown", (event) => {
     void hideMainWindow();
   }
 });
-void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-  if (isScreenshotMode) return;
-  isPopupOpen = focused;
-  polling.handleFocusChanged(focused);
+if (!isScreenshotMode) {
+  void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+    isPopupOpen = focused;
+    polling.handleFocusChanged(focused);
 
-  if (focused) {
-    render();
-    void refreshListedRepositoryCiStatuses();
-  } else {
-    void acknowledgePopupDismissal();
-  }
-});
+    if (focused) {
+      render();
+      void refreshListedRepositoryCiStatuses();
+    } else {
+      void acknowledgePopupDismissal();
+    }
+  });
+}
 
 function renderRateLimitBar(): string {
   const usedPct = rateLimit ? Math.round((rateLimit.used / rateLimit.limit) * 100) : 0;

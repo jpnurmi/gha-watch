@@ -1278,7 +1278,6 @@ dependencies = [
 name = "gha-watch"
 version = "0.1.0"
 dependencies = [
- "cairo-rs",
  "gtk",
  "mac-notification-sys",
  "notify-rust",
@@ -1287,7 +1286,6 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "serde",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -1297,8 +1295,6 @@ dependencies = [
  "tauri-plugin-window-state",
  "tauri-winrt-notification",
  "tempfile",
- "webkit2gtk",
- "webview2-com",
  "windows",
  "zbus",
 ]

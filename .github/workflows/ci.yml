@@ -171,21 +171,10 @@ jobs:
 
   screenshot:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            platform: linux
-          - runner: macos-26
-            platform: macos
-          - runner: windows-2025
-            platform: windows
 
     steps:
       - name: Check out repository
@@ -195,10 +184,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: ${{ github.event_name == 'pull_request' }}
 
-      - name: Install GNU Make
-        if: runner.os == 'Windows'
-        run: choco install make --yes --no-progress
-
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -206,69 +191,30 @@ jobs:
           check-latest: true
           cache: npm
 
-      - name: Set up Rust
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            build-essential \
-            dbus-x11 \
-            fonts-dejavu-core \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev \
-            xauth \
-            xvfb
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate screenshot
-        shell: bash
-        run: make screenshot
-        env:
-          GDK_BACKEND: x11
-          GDK_SCALE: "1"
-          GTK_THEME: Adwaita:dark
-          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
-          LANG: en_US.UTF-8
-          TZ: UTC
+      - name: Install screenshot browser
+        run: npx playwright install --with-deps chromium
 
-      - name: Commit screenshot
+      - name: Generate screenshots
+        run: make screenshot
+
+      - name: Commit screenshots
         if: github.event_name == 'pull_request'
         shell: bash
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PLATFORM: ${{ matrix.platform }}
         run: |
           mkdir -p .github/screenshots
-          if [ "$PLATFORM" = macos ]; then
-            if [ -f ".github/screenshots/${PLATFORM}.png" ] && cmp -s "dist/screenshots/${PLATFORM}.sha256" ".github/screenshots/${PLATFORM}.sha256"; then
-              exit 0
-            fi
-            cp "dist/screenshots/${PLATFORM}.sha256" .github/screenshots/
-            git add ".github/screenshots/${PLATFORM}.sha256"
-          fi
-          cp "dist/screenshots/${PLATFORM}.png" .github/screenshots/
-          git add ".github/screenshots/${PLATFORM}.png"
+          cp dist/screenshots/*.png .github/screenshots/
+          git add .github/screenshots/*.png
           if git diff --cached --quiet; then
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update ${PLATFORM} screenshot"
+          git commit -m "chore: update screenshots"
           git push origin "HEAD:refs/heads/${HEAD_REF}"
-          echo "Screenshot was out of date and has been updated." >&2
+          echo "Screenshots were out of date and have been updated." >&2
           exit 1

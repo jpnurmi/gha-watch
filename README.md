@@ -6,7 +6,7 @@ GHA Watch sits in the macOS menu bar, Windows notification area, or Linux system
 
 | Linux | macOS | Windows |
 | --- | --- | --- |
-| [![GHA Watch on Linux](.github/screenshots/linux.png)](.github/screenshots/linux.png) | [![GHA Watch on macOS](.github/screenshots/macos.png)](.github/screenshots/macos.png) | [![GHA Watch on Windows](.github/screenshots/windows.png)](.github/screenshots/windows.png) |
+| [![GHA Watch in the Linux top panel](.github/screenshots/linux.png)](.github/screenshots/linux.png) | [![GHA Watch in the macOS menu bar](.github/screenshots/macos.png)](.github/screenshots/macos.png) | [![GHA Watch in the Windows notification area](.github/screenshots/windows.png)](.github/screenshots/windows.png) |
 
 ## Features
 
@@ -128,6 +128,17 @@ On Windows, the NSIS and MSI installers are written under:
 ```text
 src-tauri/target/release/bundle/
 ```
+
+### Screenshots
+
+Screenshots show the real app UI with sample repositories inside illustrated desktop scenes. The clock, dark theme, fonts, and browser version are fixed so captures remain stable.
+
+```sh
+npx playwright install chromium
+make screenshot
+```
+
+All three images are written to `dist/screenshots/`. To render one platform, run `npm run screenshot -- windows` (or `linux` / `macos`). Screenshots do not require a native app build or GitHub authentication.
 
 ## License
 

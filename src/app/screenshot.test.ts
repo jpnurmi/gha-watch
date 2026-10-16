@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { captureScreenshot, createScreenshotWatches, screenshotNow } from "./screenshot";
+import { createScreenshotWatches, screenshotNow } from "./screenshot";
 import { createWatchController } from "./watchController";
 import { getWatchViewCounts } from "./watchViewCounts";
-import { invokeDesktop } from "../platform/desktop";
-
-vi.mock("../platform/desktop", () => ({ invokeDesktop: vi.fn(async () => {}) }));
 
 describe("screenshots", () => {
   it("retains all three views with the fixture clock", () => {
@@ -23,27 +20,10 @@ describe("screenshots", () => {
     expect(counts.inbox.unseen).toBeGreaterThan(0);
   });
 
-  it("waits for fonts and painted frames before capturing", async () => {
-    let fontsReady!: () => void;
-    const frames: FrameRequestCallback[] = [];
-    vi.stubGlobal("document", { fonts: { ready: new Promise<void>((resolve) => { fontsReady = resolve; }) } });
-    vi.stubGlobal("window", { requestAnimationFrame: (callback: FrameRequestCallback) => frames.push(callback) });
-    vi.mocked(invokeDesktop).mockClear();
-
-    try {
-      const tray = { status: "mixed" as const, tooltip: "GHA Watch", hasUnseenChanges: true };
-      const capture = captureScreenshot(tray);
-      expect(frames).toHaveLength(0);
-      expect(invokeDesktop).not.toHaveBeenCalled();
-      fontsReady();
-      await Promise.resolve();
-      frames.shift()!(0);
-      expect(invokeDesktop).not.toHaveBeenCalled();
-      frames.shift()!(0);
-      await capture;
-      expect(invokeDesktop).toHaveBeenCalledWith("screenshot_ready", tray);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+  it("uses only the example repositories", () => {
+    const watches = createScreenshotWatches();
+    expect(new Set(watches.map(({ target }) => `${target.owner}/${target.repo}`)))
+      .toEqual(new Set(["jpnurmi/gha-watch", "jpnurmi/cuotax"]));
+    expect(JSON.stringify(watches)).not.toMatch(/getsentry/i);
   });
 });

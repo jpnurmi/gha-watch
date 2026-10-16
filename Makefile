@@ -16,7 +16,7 @@ help:
 		'  build        Build the release app bundle' \
 		'  install      Install and restart the release app bundle' \
 		'  clean        Remove generated build output' \
-		'  screenshot   Capture a screenshot'
+		'  screenshot   Render all platform screenshots'
 
 deps:
 	$(NPM) install
@@ -139,21 +139,4 @@ clean:
 	rm -rf dist src-tauri/target
 
 screenshot: | node_modules
-	$(NPM) run tauri -- build --features screenshots --no-bundle
-	@set -eu; \
-	case "$$(uname -s)" in \
-		Linux*) \
-			dbus-run-session -- xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
-				$(NPM) run screenshot -- "$(SCREENSHOT_DIR)/linux.png"; \
-			;; \
-		MINGW*|MSYS*|CYGWIN*) \
-			$(NPM) run screenshot -- "$(SCREENSHOT_DIR)/windows.png"; \
-			;; \
-		Darwin*) \
-			$(NPM) run screenshot -- "$(SCREENSHOT_DIR)/macos.png"; \
-			;; \
-		*) \
-			printf 'Unsupported platform: %s\n' "$$(uname -s)" >&2; \
-			exit 1; \
-			;; \
-	esac
+	$(NPM) run screenshot -- all "$(SCREENSHOT_DIR)"
