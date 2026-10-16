@@ -18,10 +18,12 @@ export async function executeGraphql(executor: ShellExecutor, args: string[]): P
   const remaining = read("remaining");
   const used = read("used");
   const reset = read("reset");
-  if (limit > 0 && [limit, remaining, used, reset].every(Number.isFinite)) {
+  const now = Date.now() / 1000;
+  if (limit > 0 && [limit, remaining, used, reset].every(Number.isFinite) && reset > now) {
     const previous = quotas.get(executor);
-    if (!previous || previous.account !== account || reset > previous.quota.reset ||
-      (reset === previous.quota.reset && used >= previous.quota.used)) {
+    if (!previous || previous.account !== account || previous.quota.reset <= now ||
+      remaining / limit < previous.quota.remaining / previous.quota.limit ||
+      (remaining / limit === previous.quota.remaining / previous.quota.limit && reset >= previous.quota.reset)) {
       quotas.set(executor, { account, quota: { resource: "GraphQL", limit, remaining, used, reset } });
     }
   }
