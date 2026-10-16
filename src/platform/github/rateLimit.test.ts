@@ -82,6 +82,8 @@ describe("GraphQL quota headers", () => {
   });
 
   it.each([false, true])("keeps exhaustion across overlapping windows (healthy response first: %s)", async (healthyFirst) => {
+    vi.useFakeTimers();
+    vi.setSystemTime((reset - 1) * 1000);
     const exhausted = { code: 1, stdout: response(), stderr: "quota exceeded" };
     const healthy = { code: 0, stdout: response(568, "\n", reset + 120), stderr: "" };
     const execute = vi.fn<ShellExecutor["execute"]>()
