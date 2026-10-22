@@ -61,4 +61,27 @@ describe("watch records", () => {
     expect(decodeWatchRecords([{ ...watch, metadata: { prLabels: "bad" } }]))
       .toEqual([{ ...watch, metadata: {} }]);
   });
+
+  it("restores check counts and ignores invalid counts", () => {
+    const state = { status: "in_progress", conclusion: null };
+    const counted = { ...watch, lastState: { ...state, checkCounts: { passed: 48, total: 62 } } };
+    expect(decodeWatchRecords([counted])).toEqual([counted]);
+    for (const checkCounts of [null, {}, { passed: -1, total: 2 }, { passed: 3, total: 2 },
+      { passed: "1", total: 2 }, { passed: 1.5, total: 2 }, { passed: 1, total: 2.5 }]) {
+      expect(decodeWatchRecords([{ ...watch, lastState: { ...state, checkCounts } }]))
+        .toEqual([{ ...watch, lastState: state }]);
+    }
+  });
+
+  it("restores result counts and ignores incomplete or invalid breakdowns", () => {
+    const counts = { passed: 70, total: 70 };
+    const state = { status: "completed", conclusion: "success", checkCounts: counts };
+    const results = { successful: 68, skipped: 1, neutral: 1 };
+    const detailed = { ...watch, lastState: { ...state, checkCounts: { ...counts, results } } };
+    expect(decodeWatchRecords([detailed])).toEqual([detailed]);
+    for (const results of [null, "bad", { successful: 68 }, { successful: -1 }, { successful: 69.5, skipped: 0.5 }]) {
+      expect(decodeWatchRecords([{ ...watch, lastState: { ...state, checkCounts: { ...counts, results } } }]))
+        .toEqual([{ ...watch, lastState: state }]);
+    }
+  });
 });

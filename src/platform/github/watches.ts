@@ -20,7 +20,7 @@ export async function fetchWatchState(
         "-R",
         `${target.owner}/${target.repo}`,
         "--json",
-        "bucket,completedAt,startedAt",
+        "bucket,completedAt,startedAt,state",
       ]);
 
       assertSuccessfulGhResult(result, result.stdout.trim() ? [1, 8] : [8]);

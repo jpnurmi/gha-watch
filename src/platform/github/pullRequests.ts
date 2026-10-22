@@ -31,7 +31,9 @@ async function fetchOpenPullRequestList(
     const fields = `number title isDraft author { login } headRefName updatedAt url
       stack { number size } stackEntry { position }
       labels(first: 100) { nodes { name color description } }
-      ${includeChecks ? `commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+      ${includeChecks ? `commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) {
+        totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }
+        nodes {
         ... on CheckRun { name status conclusion startedAt completedAt checkSuite { workflowRun { workflow { name } } } }
         ... on StatusContext { context state }
       } } } } } }` : ""}`;

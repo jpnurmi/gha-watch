@@ -440,6 +440,7 @@ describe("fetchWatchState", () => {
       status: "in_progress",
       conclusion: null,
       title: "Pull request #51",
+      checkCounts: { passed: 2, total: 3, results: { successful: 1, pending: 1, skipped: 1 } },
       prNumber: "51",
       timing: {
         startedAt: "2026-05-16T12:00:00.000Z",
@@ -457,7 +458,7 @@ describe("fetchWatchState", () => {
           "-R",
           "getsentry/sentry",
           "--json",
-          "bucket,completedAt,startedAt",
+          "bucket,completedAt,startedAt,state",
         ],
       },
     ]);
@@ -1508,6 +1509,7 @@ describe("fetchOpenPullRequests", () => {
         checkSnapshot: {
           status: "in_progress",
           conclusion: null,
+          checkCounts: { passed: 1, total: 2 },
           title: "Pull request #51",
           prNumber: "51",
           timing: { startedAt: "2026-05-17T12:00:00.000Z" },
@@ -1521,6 +1523,7 @@ describe("fetchOpenPullRequests", () => {
     expect(calls[0].args[3]).toContain("stack { number size } stackEntry { position }");
     expect(calls[0].args[3]).toContain("commits(last: 1)");
     expect(calls[0].args[3]).toContain("contexts(first: 100)");
+    expect(calls[0].args[3]).toContain("totalCount checkRunCountsByState { state count } statusContextCountsByState { state count }");
     expect(calls[0].args[3]).toContain("labels(first: 100) { nodes { name color description } }");
   });
 
@@ -2335,5 +2338,88 @@ describe("rerunWatch", () => {
     ).rejects.toThrow("This job link does not include a workflow run id.");
 
     expect(calls).toEqual([]);
+  });
+});
+
+describe("pull request check counts", () => {
+  it.each([
+    { buckets: ["pass", "pass"], counts: { passed: 2, total: 2, results: { successful: 2 } } },
+    { buckets: ["pass", "skipping", "pending", "fail", "cancel"], counts: {
+      passed: 2, total: 5, results: { successful: 1, skipped: 1, pending: 1, failing: 1, cancelled: 1 },
+    } },
+    { buckets: ["fail", "pending"], counts: { passed: 0, total: 2, results: { failing: 1, pending: 1 } } },
+    { buckets: [], counts: undefined },
+  ])("counts $buckets without another request", async ({ buckets, counts }) => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify(buckets.map((bucket) => ({ bucket }))),
+      stderr: "",
+    });
+    const snapshot = await fetchWatchState({
+      kind: "pr", owner: "getsentry", repo: "sentry", prNumber: "51",
+      url: "https://github.com/getsentry/sentry/pull/51",
+    }, executor);
+
+    expect(snapshot.checkCounts).toEqual(counts);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("includes checks beyond the first page in counts and status", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify({ data: { repository: { pullRequests: { nodes: [{
+        number: 51,
+        title: "Large check suite",
+        url: "https://github.com/getsentry/sentry/pull/51",
+        commits: { nodes: [{ commit: { statusCheckRollup: { contexts: {
+          totalCount: 137,
+          checkRunCountsByState: [
+            { state: "SUCCESS", count: 130 },
+            { state: "SKIPPED", count: 2 },
+            { state: "NEUTRAL", count: 1 },
+            { state: "FAILURE", count: 1 },
+            { state: "IN_PROGRESS", count: 1 },
+            { state: "CANCELLED", count: 0 },
+          ],
+          statusContextCountsByState: [{ state: "SUCCESS", count: 1 }, { state: "PENDING", count: 1 }],
+          nodes: Array.from({ length: 100 }, (_, index) => ({
+            name: `Check ${index}`, status: "COMPLETED", conclusion: "SUCCESS",
+            startedAt: "2026-05-17T12:00:00Z", completedAt: "2026-05-17T12:02:00Z",
+          })),
+        } } } }] },
+      }] } } } }),
+      stderr: "",
+    });
+
+    const [pullRequest] = await fetchOpenPullRequestsWithChecks({ owner: "getsentry", repo: "sentry" }, {}, executor);
+
+    expect(pullRequest.checkSnapshot).toMatchObject({
+      status: "in_progress", conclusion: null, hasFailedChildren: true,
+      checkCounts: { passed: 134, total: 137, results: { successful: 131, skipped: 2, neutral: 1, failing: 1, pending: 2 } },
+      timing: { startedAt: "2026-05-17T12:00:00.000Z" },
+    });
+    expect(pullRequest.checkSnapshot?.timing?.completedAt).toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps skipped and neutral results separate during individual polling", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify([
+        { bucket: "pass", state: "SUCCESS" },
+        { bucket: "skipping", state: "SKIPPED" },
+        { bucket: "skipping", state: "NEUTRAL" },
+      ]),
+      stderr: "",
+    });
+    const snapshot = await fetchWatchState({
+      kind: "pr", owner: "getsentry", repo: "sentry", prNumber: "51",
+      url: "https://github.com/getsentry/sentry/pull/51",
+    }, executor);
+
+    expect(snapshot.checkCounts).toEqual({
+      passed: 3, total: 3, results: { successful: 1, skipped: 1, neutral: 1 },
+    });
+    expect(calls).toHaveLength(1);
   });
 });

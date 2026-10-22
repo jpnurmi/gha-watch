@@ -766,6 +766,7 @@ export function createWatchController(
         status: snapshot.status,
         conclusion: snapshot.conclusion,
         ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
+        ...(snapshot.checkCounts ? { checkCounts: snapshot.checkCounts } : {}),
       };
       const status = formatWatchState(nextState);
 
@@ -2028,6 +2029,7 @@ export function createWatchController(
           status: snapshot.status,
           conclusion: snapshot.conclusion,
           ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
+          ...(snapshot.checkCounts ? { checkCounts: snapshot.checkCounts } : {}),
         };
         const status = formatWatchState(nextState);
         const transition = getStatusTransition(current.lastState, nextState);
@@ -2235,6 +2237,7 @@ function withBaselineSnapshot(watch: WatchRecord, snapshot: WatchSnapshot): Watc
       status: snapshot.status,
       conclusion: snapshot.conclusion,
       ...(snapshot.hasFailedChildren ? { hasFailedChildren: true } : {}),
+      ...(snapshot.checkCounts ? { checkCounts: snapshot.checkCounts } : {}),
     },
     timing: snapshot.timing,
     active: shouldPollWatch(snapshot),

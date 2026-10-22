@@ -1,4 +1,5 @@
 import { getRepositoryKey } from "../domain/identity";
+import { checkResultNames } from "../domain/status";
 import { isDoneCandidate, isDraftPullRequestWatch, getWatchDisplayLabel, canRerun, canRerunFailed } from "../domain/watchPolicy";
 export { canRerun, canRerunFailed, isDraftPullRequestWatch } from "../domain/watchPolicy";
 import type { WatchedRepo } from "../domain/watchedRepos";
@@ -47,6 +48,8 @@ export type WatchRowViewModel = {
   description: string;
   tone: RowTone;
   hasFailedChildren: boolean;
+  checkCountsText?: string;
+  checkCountsDescription?: string;
   timingText?: string;
   unseenStatusChange: boolean;
   canRerun: boolean;
@@ -150,6 +153,8 @@ export function createWatchRowViewModel(
       description: watch.error,
       tone: "error",
       hasFailedChildren: false,
+      checkCountsText: getCheckCountsText(watch),
+      checkCountsDescription: getCheckCountsDescription(watch),
       timingText: getTimingText(watch, "error", now),
       unseenStatusChange: hasUnseenStatusChange(watch),
       canRerun: canRerun(watch),
@@ -225,6 +230,8 @@ function createRow(
     description,
     tone,
     hasFailedChildren: Boolean(getWatchState(watch)?.hasFailedChildren),
+    checkCountsText: getCheckCountsText(watch),
+    checkCountsDescription: getCheckCountsDescription(watch),
     timingText: getTimingText(watch, tone, now),
     unseenStatusChange: hasUnseenStatusChange(watch),
     canRerun: canRerun(watch),
@@ -239,6 +246,20 @@ function createRow(
 
 
 
+
+function getCheckCountsText(watch: WatchRecord): string | undefined {
+  const counts = watch.target.kind === "pr" ? getWatchState(watch)?.checkCounts : undefined;
+  return counts && counts.total > 0 ? `${counts.passed}/${counts.total}` : undefined;
+}
+
+function getCheckCountsDescription(watch: WatchRecord): string | undefined {
+  const counts = watch.target.kind === "pr" ? getWatchState(watch)?.checkCounts : undefined;
+  if (!counts?.results || counts.total === 0) return undefined;
+  const parts = checkResultNames.map((name) => countLabel(counts.results?.[name] ?? 0, name)).filter(isString);
+  return parts.length > 0
+    ? `${parts.length === 2 ? parts.join(" and ") : joinWithAnd(parts)} ${counts.total === 1 ? "check" : "checks"}`
+    : undefined;
+}
 
 function getWatchReference(watch: WatchRecord): string | undefined {
   if (watch.target.kind === "run") {

@@ -1947,9 +1947,11 @@ button.watch-workflow-status {
   line-height: inherit;
 }
 
-button.watch-workflow-status:hover,
-button.watch-workflow-status:focus-visible {
+button.watch-workflow-status:hover .watch-workflow-status-text,
+button.watch-workflow-status:focus-visible .watch-workflow-status-text {
   text-decoration: underline;
+  text-decoration-color: rgb(238 241 245 / 62%);
+  text-decoration-skip-ink: none;
   text-underline-offset: 2px;
 }
 
@@ -1960,6 +1962,11 @@ button.watch-workflow-status:focus-visible {
   transform-origin: center;
 }
 
+.watch-workflow-status-text > .watch-meta-separator {
+  color: rgb(238 241 245 / 60%);
+  font-weight: 650;
+}
+
 .watch-meta-text {
   min-width: 0;
   flex: 1 1 auto;
@@ -1967,6 +1974,10 @@ button.watch-workflow-status:focus-visible {
   color: rgb(238 241 245 / 62%);
   font-style: italic;
   text-overflow: ellipsis;
+}
+
+.watch-check-counts {
+  font-weight: 650;
 }
 
 .watch-stack {
