@@ -1,6 +1,6 @@
 import { type ActiveWorkflowRun, type AuthoredOpenPullRequest, type OpenPullRequest, type PullRequestDetails, type RepositoryCiStatus, type RepositoryCiStatusTone, type RepositoryCiWorkflowStatus, type RerunMode, type WatchSnapshot, type WorkflowDefinition, type WorkflowRunPullRequest, type WorkflowRunSummary } from "../../app/githubPort";
 import { type ParsedWatchTarget, type PrWatchTarget, type WatchTarget } from "../../domain/githubUrl";
-import { type WatchState } from "../../domain/status";
+import { type CheckResultCounts, type WatchState } from "../../domain/status";
 import { decodePullRequestStack } from "../../domain/pullRequestStack";
 import { decodePullRequestLabels } from "../../domain/pullRequestLabels";
 import { type PrSourceState, type WatchMetadata, type WatchTiming } from "../../domain/watches";
@@ -174,6 +174,7 @@ function normalizePullRequestChecks(responses: PullRequestCheckResponse[]): PrCh
 
   return [...latest.values()].map((response) => ({
     bucket: getPullRequestCheckBucket(response),
+    state: getPullRequestCheckState(response),
     completedAt: response.completedAt,
     startedAt: response.startedAt,
   }));
@@ -195,12 +196,16 @@ function getPullRequestCheckKey(response: PullRequestCheckResponse): string | un
   return `check:${response.checkSuite?.workflowRun?.workflow?.name?.trim() ?? ""}:${name}`;
 }
 
-function getPullRequestCheckBucket(response: PullRequestCheckResponse): string {
+function getPullRequestCheckState(response: PullRequestCheckResponse): string | undefined {
   const status = response.status?.trim().toUpperCase();
-  const state = (
+  return (
     response.state?.trim() ||
     (status === "COMPLETED" ? response.conclusion?.trim() : status)
   )?.toUpperCase();
+}
+
+function getPullRequestCheckBucket(response: PullRequestCheckResponse): string {
+  const state = getPullRequestCheckState(response);
 
   if (state === "SUCCESS") {
     return "pass";
@@ -236,15 +241,32 @@ function getPullRequestCheckSummary(contexts: PullRequestCheckContextsResponse |
 
   const states = [...contexts.checkRunCountsByState, ...contexts.statusContextCountsByState]
     .filter(({ count }) => count > 0)
-    .map(({ state, count }) => ({ bucket: getPullRequestCheckBucket({ state }), count }));
+    .map(({ state, count }) => ({ state, bucket: getPullRequestCheckBucket({ state }), count }));
 
   return {
     counts: {
       passed: states.reduce((sum, { bucket, count }) => sum + (bucket === "pass" || bucket === "skipping" ? count : 0), 0),
       total: contexts.totalCount,
+      results: countPrCheckResults(states),
     },
     buckets: states.map(({ bucket }) => bucket),
   };
+}
+
+function countPrCheckResults(checks: Array<PrCheckResponse & { count?: number }>): CheckResultCounts {
+  const results: CheckResultCounts = {};
+  const names = new Map<string, keyof CheckResultCounts>([
+    ["pass", "successful"], ["fail", "failing"], ["cancel", "cancelled"], ["skipping", "skipped"], ["pending", "pending"],
+  ]);
+
+  for (const check of checks) {
+    const bucket = check.bucket?.trim();
+    const name = bucket === "skipping" && check.state?.trim().toUpperCase() === "NEUTRAL"
+      ? "neutral" : names.get(bucket ?? "") ?? "pending";
+    results[name] = (results[name] ?? 0) + (check.count ?? 1);
+  }
+
+  return results;
 }
 
 export function normalizeAuthoredOpenPullRequest(
@@ -674,6 +696,7 @@ export function toPrSnapshot(target: PrWatchTarget, checks: PrCheckResponse[], s
   const counts = summary?.counts ?? {
     passed: buckets.filter((bucket) => bucket === "pass" || bucket === "skipping").length,
     total: checks.length,
+    results: countPrCheckResults(checks),
   };
   const timing = compactTiming({
     startedAt: getEarliestTimestamp(checks.map((check) => check.startedAt ?? undefined)),

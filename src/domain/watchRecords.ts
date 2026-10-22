@@ -1,4 +1,5 @@
 import { canonicalWatchId } from "./identity";
+import { checkResultNames, type CheckResultCounts } from "./status";
 import type { WatchTarget } from "./githubUrl";
 import { getWatchId, type WatchRecord } from "./watches";
 import { decodePullRequestStack } from "./pullRequestStack";
@@ -69,6 +70,16 @@ function decodeWatchRecord(value: unknown): WatchRecord | undefined {
         && typeof counts.total === "number" && Number.isInteger(counts.total) && counts.total >= counts.passed
         ? { checkCounts: { passed: counts.passed, total: counts.total } } : {}),
     };
+    if (watch.lastState.checkCounts && isRecord(counts) && isRecord(counts.results)) {
+      const results: CheckResultCounts = {};
+      for (const name of checkResultNames) {
+        const count = counts.results[name];
+        if (typeof count === "number" && Number.isInteger(count) && count >= 0) results[name] = count;
+      }
+      if (Object.values(results).reduce((sum, count) => sum + count, 0) === watch.lastState.checkCounts.total) {
+        watch.lastState.checkCounts.results = results;
+      }
+    }
   }
   if (isRecord(value.metadata)) {
     watch.metadata = {};

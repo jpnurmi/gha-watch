@@ -19,6 +19,8 @@ describe("UI regions", () => {
     const html = renderWatch(row);
     expect(html).not.toContain('<CI>');
     expect(html).toContain('&lt;CI&gt;');
+    expect(html).toContain('aria-label="Open Actions status for &lt;CI&gt; &quot;tests&quot;: Failed"');
+    expect(html).not.toContain('title="Open Actions status');
     expect(html).toContain('data-action="open-github-url"');
     expect(html).not.toContain('data-triage-state="saved"');
     expect(html).toContain('data-triage-state="done"');
@@ -193,16 +195,34 @@ describe("UI regions", () => {
       ...watch,
       id: "owner/repo/pull/1",
       target: { kind: "pr" as const, owner: "owner", repo: "repo", prNumber: "1", url: "https://github.com/owner/repo/pull/1" },
-      lastState: { status: "completed", conclusion: "failure", checkCounts: { passed: 48, total: 62 } },
+      lastState: { status: "completed", conclusion: "failure",
+        checkCounts: { passed: 48, total: 62, results: { successful: 48, failing: 14 } } },
       timing: { startedAt: "2026-05-17T12:00:00Z", completedAt: "2026-05-17T12:02:00Z" },
     };
     const html = renderWatch(createPopupViewModel([pr], new Date("2026-05-17T12:03:00Z")).rows[0]);
 
     expect(html).toMatch(/<span class="watch-workflow-status-text">Failed&ensp;<span class="watch-meta-separator">·<\/span>&ensp;<span class="watch-meta-text watch-check-counts">48\/62<\/span><\/span>\s*<\/button>\s*<span class="watch-meta-separator">·<\/span><span class="watch-meta-text">Completed/);
     expect(html.match(/data-url="https:\/\/github.com\/owner\/repo\/pull\/1\/checks"/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Open Actions status for &lt;CI&gt; &quot;tests&quot;: Failed, 14 failing and 48 successful checks"');
+    expect(html).toContain('title="14 failing and 48 successful checks"');
     expect(renderWatch(createPopupViewModel([{ ...pr, lastState: { status: "pending", conclusion: null } }]).rows[0]))
       .not.toContain('class="watch-meta-text watch-check-counts"');
     expect(renderWatch(createPopupViewModel([{ ...watch, lastState: pr.lastState }]).rows[0]))
       .not.toContain('class="watch-meta-text watch-check-counts"');
+  });
+
+  it.each([
+    { results: { successful: 68, skipped: 1, neutral: 1 }, passed: 70, total: 70,
+      title: "68 successful, 1 skipped, and 1 neutral checks" },
+    { results: { failing: 2, successful: 68, skipped: 1 }, passed: 69, total: 71,
+      title: "2 failing, 68 successful, and 1 skipped checks" },
+    { results: { successful: 1 }, passed: 1, total: 1, title: "1 successful check" },
+  ])("uses GitHub's check breakdown in the tooltip: $title", ({ results, passed, total, title }) => {
+    const pr = {
+      ...watch,
+      target: { kind: "pr" as const, owner: "owner", repo: "repo", prNumber: "1", url: "https://github.com/owner/repo/pull/1" },
+      lastState: { status: "completed", conclusion: "success", checkCounts: { passed, total, results } },
+    };
+    expect(renderWatch(createPopupViewModel([pr]).rows[0])).toContain(`title="${title}"`);
   });
 });

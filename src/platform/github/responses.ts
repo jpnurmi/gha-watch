@@ -40,6 +40,7 @@ export type JobViewResponse = {
 
 export type PrCheckResponse = {
   bucket?: string;
+  state?: string;
   completedAt?: string | null;
   link?: string;
   startedAt?: string | null;

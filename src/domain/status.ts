@@ -1,8 +1,11 @@
+export const checkResultNames = ["failing", "pending", "cancelled", "successful", "skipped", "neutral"] as const;
+export type CheckResultCounts = Partial<Record<typeof checkResultNames[number], number>>;
+
 export type WatchState = {
   status: string;
   conclusion: string | null;
   hasFailedChildren?: boolean;
-  checkCounts?: { passed: number; total: number };
+  checkCounts?: { passed: number; total: number; results?: CheckResultCounts };
 };
 
 export type StatusTransition =

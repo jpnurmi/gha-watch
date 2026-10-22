@@ -95,6 +95,7 @@ function renderWorkflowStatus(row: WatchRowViewModel): string {
     url: getWatchActionsUrl(row.subject, row.url),
     rowIds: [row.id],
     label: row.label,
+    title: row.checkCountsDescription,
   }, row.checkCountsText);
 }
 
@@ -103,7 +104,7 @@ function renderWorkflowStatusIcon(
   tone: RowTone,
   statusLabel: string,
   hasFailedChildren = false,
-  link?: { url: string; rowIds: string[]; label: string },
+  link?: { url: string; rowIds: string[]; label: string; title?: string },
   checkCountsText?: string,
 ): string {
   const className = `watch-workflow-status status-icon-${tone}${hasFailedChildren ? " has-failed-children" : ""}`;
@@ -116,6 +117,8 @@ function renderWorkflowStatusIcon(
     return `<span class="${className}">${content}</span>`;
   }
 
+  const description = `${statusLabel}${link.title ? `, ${link.title}` : checkCountsText ? `, ${checkCountsText} checks` : ""}`;
+
   return `
     <button
       class="${className}"
@@ -123,8 +126,8 @@ function renderWorkflowStatusIcon(
       data-action="open-github-url"
       data-url="${escapeHtml(link.url)}"
       data-row-ids="${escapeHtml(link.rowIds.join("\n"))}"
-      title="Open Actions status"
-      aria-label="Open Actions status for ${escapeHtml(link.label)}"
+      ${link.title ? `title="${escapeHtml(link.title)}"` : ""}
+      aria-label="Open Actions status for ${escapeHtml(link.label)}: ${escapeHtml(description)}"
     >
       ${content}
     </button>

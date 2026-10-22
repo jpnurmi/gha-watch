@@ -72,4 +72,16 @@ describe("watch records", () => {
         .toEqual([{ ...watch, lastState: state }]);
     }
   });
+
+  it("restores result counts and ignores incomplete or invalid breakdowns", () => {
+    const counts = { passed: 70, total: 70 };
+    const state = { status: "completed", conclusion: "success", checkCounts: counts };
+    const results = { successful: 68, skipped: 1, neutral: 1 };
+    const detailed = { ...watch, lastState: { ...state, checkCounts: { ...counts, results } } };
+    expect(decodeWatchRecords([detailed])).toEqual([detailed]);
+    for (const results of [null, "bad", { successful: 68 }, { successful: -1 }, { successful: 69.5, skipped: 0.5 }]) {
+      expect(decodeWatchRecords([{ ...watch, lastState: { ...state, checkCounts: { ...counts, results } } }]))
+        .toEqual([{ ...watch, lastState: state }]);
+    }
+  });
 });

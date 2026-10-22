@@ -440,7 +440,7 @@ describe("fetchWatchState", () => {
       status: "in_progress",
       conclusion: null,
       title: "Pull request #51",
-      checkCounts: { passed: 2, total: 3 },
+      checkCounts: { passed: 2, total: 3, results: { successful: 1, pending: 1, skipped: 1 } },
       prNumber: "51",
       timing: {
         startedAt: "2026-05-16T12:00:00.000Z",
@@ -458,7 +458,7 @@ describe("fetchWatchState", () => {
           "-R",
           "getsentry/sentry",
           "--json",
-          "bucket,completedAt,startedAt",
+          "bucket,completedAt,startedAt,state",
         ],
       },
     ]);
@@ -2343,9 +2343,11 @@ describe("rerunWatch", () => {
 
 describe("pull request check counts", () => {
   it.each([
-    { buckets: ["pass", "pass"], counts: { passed: 2, total: 2 } },
-    { buckets: ["pass", "skipping", "pending", "fail", "cancel"], counts: { passed: 2, total: 5 } },
-    { buckets: ["fail", "pending"], counts: { passed: 0, total: 2 } },
+    { buckets: ["pass", "pass"], counts: { passed: 2, total: 2, results: { successful: 2 } } },
+    { buckets: ["pass", "skipping", "pending", "fail", "cancel"], counts: {
+      passed: 2, total: 5, results: { successful: 1, skipped: 1, pending: 1, failing: 1, cancelled: 1 },
+    } },
+    { buckets: ["fail", "pending"], counts: { passed: 0, total: 2, results: { failing: 1, pending: 1 } } },
     { buckets: [], counts: undefined },
   ])("counts $buckets without another request", async ({ buckets, counts }) => {
     const { executor, calls } = createExecutor({
@@ -2393,10 +2395,31 @@ describe("pull request check counts", () => {
 
     expect(pullRequest.checkSnapshot).toMatchObject({
       status: "in_progress", conclusion: null, hasFailedChildren: true,
-      checkCounts: { passed: 134, total: 137 },
+      checkCounts: { passed: 134, total: 137, results: { successful: 131, skipped: 2, neutral: 1, failing: 1, pending: 2 } },
       timing: { startedAt: "2026-05-17T12:00:00.000Z" },
     });
     expect(pullRequest.checkSnapshot?.timing?.completedAt).toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps skipped and neutral results separate during individual polling", async () => {
+    const { executor, calls } = createExecutor({
+      code: 0,
+      stdout: JSON.stringify([
+        { bucket: "pass", state: "SUCCESS" },
+        { bucket: "skipping", state: "SKIPPED" },
+        { bucket: "skipping", state: "NEUTRAL" },
+      ]),
+      stderr: "",
+    });
+    const snapshot = await fetchWatchState({
+      kind: "pr", owner: "getsentry", repo: "sentry", prNumber: "51",
+      url: "https://github.com/getsentry/sentry/pull/51",
+    }, executor);
+
+    expect(snapshot.checkCounts).toEqual({
+      passed: 3, total: 3, results: { successful: 1, skipped: 1, neutral: 1 },
+    });
     expect(calls).toHaveLength(1);
   });
 });

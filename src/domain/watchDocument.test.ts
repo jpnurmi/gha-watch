@@ -30,7 +30,8 @@ describe("watch documents", () => {
 
   it("preserves check counts across storage", () => {
     const record = { ...watch, status: "completed:success",
-      lastState: { status: "completed", conclusion: "success", checkCounts: { passed: 67, total: 67 } } };
+      lastState: { status: "completed", conclusion: "success",
+        checkCounts: { passed: 67, total: 67, results: { successful: 65, skipped: 1, neutral: 1 } } } };
     expect(decodeStoredWatches(JSON.parse(JSON.stringify(encodeStoredWatches([record]))))).toEqual([record]);
   });
 });
