@@ -59,11 +59,15 @@ function decodeWatchRecord(value: unknown): WatchRecord | undefined {
   }
   if (isRecord(value.lastState) && typeof value.lastState.status === "string"
     && (value.lastState.conclusion === null || typeof value.lastState.conclusion === "string")) {
+    const counts = value.lastState.checkCounts;
     watch.lastState = {
       status: value.lastState.status,
       conclusion: value.lastState.conclusion,
       ...(typeof value.lastState.hasFailedChildren === "boolean"
         ? { hasFailedChildren: value.lastState.hasFailedChildren } : {}),
+      ...(isRecord(counts) && typeof counts.passed === "number" && Number.isInteger(counts.passed) && counts.passed >= 0
+        && typeof counts.total === "number" && Number.isInteger(counts.total) && counts.total >= counts.passed
+        ? { checkCounts: { passed: counts.passed, total: counts.total } } : {}),
     };
   }
   if (isRecord(value.metadata)) {

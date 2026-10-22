@@ -187,4 +187,22 @@ describe("UI regions", () => {
     expect(renderWatch({ ...row, labels: [{ name: "bug", color: 'red; background: url("bad")' }] }))
       .toContain('style="--label-color: #8b949e"');
   });
+
+  it("links PR status and check counts together before timing", () => {
+    const pr = {
+      ...watch,
+      id: "owner/repo/pull/1",
+      target: { kind: "pr" as const, owner: "owner", repo: "repo", prNumber: "1", url: "https://github.com/owner/repo/pull/1" },
+      lastState: { status: "completed", conclusion: "failure", checkCounts: { passed: 48, total: 62 } },
+      timing: { startedAt: "2026-05-17T12:00:00Z", completedAt: "2026-05-17T12:02:00Z" },
+    };
+    const html = renderWatch(createPopupViewModel([pr], new Date("2026-05-17T12:03:00Z")).rows[0]);
+
+    expect(html).toMatch(/<span class="watch-workflow-status-text">Failed&ensp;<span class="watch-meta-separator">·<\/span>&ensp;<span class="watch-meta-text watch-check-counts">48\/62<\/span><\/span>\s*<\/button>\s*<span class="watch-meta-separator">·<\/span><span class="watch-meta-text">Completed/);
+    expect(html.match(/data-url="https:\/\/github.com\/owner\/repo\/pull\/1\/checks"/g)).toHaveLength(1);
+    expect(renderWatch(createPopupViewModel([{ ...pr, lastState: { status: "pending", conclusion: null } }]).rows[0]))
+      .not.toContain('class="watch-meta-text watch-check-counts"');
+    expect(renderWatch(createPopupViewModel([{ ...watch, lastState: pr.lastState }]).rows[0]))
+      .not.toContain('class="watch-meta-text watch-check-counts"');
+  });
 });

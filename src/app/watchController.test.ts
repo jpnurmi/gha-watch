@@ -2362,6 +2362,7 @@ describe("watchController", () => {
       conclusion: "failure",
       title: "Pull request #51",
       prNumber: "51",
+      checkCounts: { passed: 48, total: 62 },
       timing: {
         startedAt: "2026-05-17T12:01:00Z",
         completedAt: "2026-05-17T12:03:00Z",
@@ -2423,12 +2424,28 @@ describe("watchController", () => {
     expect(pollResult.successfulWatchIds).toEqual([getWatchId(prTarget)]);
     expect(controller.getWatches()[0]).toMatchObject({
       status: "completed:failure",
+      lastState: { checkCounts: { passed: 48, total: 62 } },
       active: true,
       error: undefined,
     });
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toContain("Improve pull request polling:");
     expect(notifications[0]).toContain("Failed");
+  });
+
+  it("updates PR check counts without marking a status change", async () => {
+    const { deps, notifications } = createDeps([1, 2].map((passed) => ({
+      status: "in_progress", conclusion: null, checkCounts: { passed, total: 3 },
+      title: "Pull request #51", url: prTarget.url,
+    })));
+    const controller = createWatchController(deps);
+
+    await controller.add(prTarget);
+    expect(controller.getWatches()[0].lastState?.checkCounts).toEqual({ passed: 1, total: 3 });
+    await controller.pollNow();
+    expect(controller.getWatches()[0].lastState?.checkCounts).toEqual({ passed: 2, total: 3 });
+    expect(controller.getWatches()[0].lastSeenStatus).toBe(controller.getWatches()[0].status);
+    expect(notifications).toEqual([]);
   });
 
   it("fetches details for subscribed pull requests missing from repository discovery", async () => {

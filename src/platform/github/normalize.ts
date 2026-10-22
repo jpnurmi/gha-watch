@@ -5,7 +5,7 @@ import { decodePullRequestStack } from "../../domain/pullRequestStack";
 import { decodePullRequestLabels } from "../../domain/pullRequestLabels";
 import { type PrSourceState, type WatchMetadata, type WatchTiming } from "../../domain/watches";
 import { requiredString } from "../ghProtocol";
-import { type JobViewResponse, type PrCheckResponse, type PullRequestCheckResponse, type PullRequestDetailsResponse, type PullRequestListResponse, type PullRequestReference, type PullRequestSearchResponse, type RunJobsResponse, type RunViewResponse, type WorkflowListResponse, type WorkflowRunApiResponse, type WorkflowRunListResponse, type WorkflowRunPullRequestResponse } from "./responses";
+import { type JobViewResponse, type PrCheckResponse, type PullRequestCheckContextsResponse, type PullRequestCheckResponse, type PullRequestDetailsResponse, type PullRequestListResponse, type PullRequestReference, type PullRequestSearchResponse, type RunJobsResponse, type RunViewResponse, type WorkflowListResponse, type WorkflowRunApiResponse, type WorkflowRunListResponse, type WorkflowRunPullRequestResponse } from "./responses";
 
 export const workflowRunsPerPage = 100;
 
@@ -137,8 +137,8 @@ export function normalizeOpenPullRequest(
   const target = repo
     ? { kind: "pr" as const, ...repo, prNumber: number, url }
     : undefined;
-  const contexts = response.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.nodes;
-  const checks = response.commits ? normalizePullRequestChecks(contexts ?? []) : undefined;
+  const contexts = response.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts;
+  const checks = response.commits ? normalizePullRequestChecks(contexts?.nodes ?? []) : undefined;
   const stack = decodePullRequestStack({ ...response.stack, position: response.stackEntry?.position });
   const labels = decodePullRequestLabels(response.labels?.nodes);
 
@@ -150,7 +150,7 @@ export function normalizeOpenPullRequest(
     ...(response.headRefName?.trim() ? { headBranch: response.headRefName.trim() } : {}),
     ...(stack ? { stack } : {}),
     ...(labels ? { labels } : {}),
-    ...(target && checks ? { checkSnapshot: toPrSnapshot(target, checks) } : {}),
+    ...(target && checks ? { checkSnapshot: toPrSnapshot(target, checks, getPullRequestCheckSummary(contexts)) } : {}),
     ...(response.updatedAt ? { updatedAt: response.updatedAt } : {}),
     url,
   };
@@ -222,6 +222,29 @@ function getPullRequestCheckBucket(response: PullRequestCheckResponse): string {
   }
 
   return state === "CANCELLED" ? "cancel" : "pending";
+}
+
+type PrCheckSummary = {
+  counts: NonNullable<WatchState["checkCounts"]>;
+  buckets: string[];
+};
+
+function getPullRequestCheckSummary(contexts: PullRequestCheckContextsResponse | undefined): PrCheckSummary | undefined {
+  if (contexts?.totalCount === undefined || !contexts.checkRunCountsByState || !contexts.statusContextCountsByState) {
+    return undefined;
+  }
+
+  const states = [...contexts.checkRunCountsByState, ...contexts.statusContextCountsByState]
+    .filter(({ count }) => count > 0)
+    .map(({ state, count }) => ({ bucket: getPullRequestCheckBucket({ state }), count }));
+
+  return {
+    counts: {
+      passed: states.reduce((sum, { bucket, count }) => sum + (bucket === "pass" || bucket === "skipping" ? count : 0), 0),
+      total: contexts.totalCount,
+    },
+    buckets: states.map(({ bucket }) => bucket),
+  };
 }
 
 export function normalizeAuthoredOpenPullRequest(
@@ -645,17 +668,23 @@ export function toJobSnapshot(fallbackUrl: string, response: JobViewResponse): W
   };
 }
 
-export function toPrSnapshot(target: PrWatchTarget, checks: PrCheckResponse[]): WatchSnapshot {
+export function toPrSnapshot(target: PrWatchTarget, checks: PrCheckResponse[], summary?: PrCheckSummary): WatchSnapshot {
+  const buckets = checks.map((check) => check.bucket?.trim()).filter((bucket): bucket is string => Boolean(bucket));
+  const state = getPrChecksState(summary?.buckets ?? buckets);
+  const counts = summary?.counts ?? {
+    passed: buckets.filter((bucket) => bucket === "pass" || bucket === "skipping").length,
+    total: checks.length,
+  };
   const timing = compactTiming({
     startedAt: getEarliestTimestamp(checks.map((check) => check.startedAt ?? undefined)),
-    completedAt: prChecksAreCompleted(checks)
+    completedAt: state.status === "completed"
       ? getLatestTimestamp(checks.map((check) => check.completedAt ?? undefined))
       : undefined,
   });
-  const state = getPrChecksState(checks);
 
   return {
     ...state,
+    ...(counts.total > 0 ? { checkCounts: counts } : {}),
     title: `Pull request #${target.prNumber}`,
     prNumber: target.prNumber,
     ...(timing ? { timing } : {}),
@@ -663,9 +692,7 @@ export function toPrSnapshot(target: PrWatchTarget, checks: PrCheckResponse[]): 
   };
 }
 
-function getPrChecksState(checks: PrCheckResponse[]): WatchState {
-  const buckets = checks.map((check) => check.bucket?.trim()).filter((bucket): bucket is string => Boolean(bucket));
-
+function getPrChecksState(buckets: string[]): WatchState {
   if (buckets.length === 0) {
     return { status: "pending", conclusion: null };
   }
@@ -695,10 +722,6 @@ function getPrChecksState(checks: PrCheckResponse[]): WatchState {
   }
 
   return { status: "pending", conclusion: null };
-}
-
-function prChecksAreCompleted(checks: PrCheckResponse[]): boolean {
-  return checks.length > 0 && !checks.some((check) => check.bucket?.trim() === "pending");
 }
 
 function getEarliestTimestamp(values: Array<string | undefined>): string | undefined {

@@ -2,6 +2,7 @@ export type WatchState = {
   status: string;
   conclusion: string | null;
   hasFailedChildren?: boolean;
+  checkCounts?: { passed: number; total: number };
 };
 
 export type StatusTransition =

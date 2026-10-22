@@ -100,7 +100,7 @@ export type PullRequestListResponse = PullRequestDetailsResponse & {
     nodes?: Array<{
       commit?: {
         statusCheckRollup?: {
-          contexts?: { nodes?: PullRequestCheckResponse[] };
+          contexts?: PullRequestCheckContextsResponse;
         } | null;
       };
     }>;
@@ -124,6 +124,13 @@ export type PullRequestCheckResponse = {
   state?: string;
   status?: string;
   checkSuite?: { workflowRun?: { workflow?: { name?: string } } | null };
+};
+
+export type PullRequestCheckContextsResponse = {
+  nodes?: PullRequestCheckResponse[];
+  totalCount?: number;
+  checkRunCountsByState?: Array<{ state: string; count: number }> | null;
+  statusContextCountsByState?: Array<{ state: string; count: number }> | null;
 };
 
 export type PullRequestSearchResponse = PullRequestListResponse & {

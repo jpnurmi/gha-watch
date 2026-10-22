@@ -95,7 +95,7 @@ function renderWorkflowStatus(row: WatchRowViewModel): string {
     url: getWatchActionsUrl(row.subject, row.url),
     rowIds: [row.id],
     label: row.label,
-  });
+  }, row.checkCountsText);
 }
 
 function renderWorkflowStatusIcon(
@@ -104,9 +104,13 @@ function renderWorkflowStatusIcon(
   statusLabel: string,
   hasFailedChildren = false,
   link?: { url: string; rowIds: string[]; label: string },
+  checkCountsText?: string,
 ): string {
   const className = `watch-workflow-status status-icon-${tone}${hasFailedChildren ? " has-failed-children" : ""}`;
-  const content = `${getStatusIconSvg(tone, `${id}-workflow`)}<span>${escapeHtml(statusLabel)}</span>`;
+  const counts = checkCountsText
+    ? `&ensp;${renderMetaSeparator()}&ensp;<span class="watch-meta-text watch-check-counts">${escapeHtml(checkCountsText)}</span>`
+    : "";
+  const content = `${getStatusIconSvg(tone, `${id}-workflow`)}<span class="watch-workflow-status-text">${escapeHtml(statusLabel)}${counts}</span>`;
 
   if (!link) {
     return `<span class="${className}">${content}</span>`;

@@ -47,6 +47,7 @@ export type WatchRowViewModel = {
   description: string;
   tone: RowTone;
   hasFailedChildren: boolean;
+  checkCountsText?: string;
   timingText?: string;
   unseenStatusChange: boolean;
   canRerun: boolean;
@@ -150,6 +151,7 @@ export function createWatchRowViewModel(
       description: watch.error,
       tone: "error",
       hasFailedChildren: false,
+      checkCountsText: getCheckCountsText(watch),
       timingText: getTimingText(watch, "error", now),
       unseenStatusChange: hasUnseenStatusChange(watch),
       canRerun: canRerun(watch),
@@ -225,6 +227,7 @@ function createRow(
     description,
     tone,
     hasFailedChildren: Boolean(getWatchState(watch)?.hasFailedChildren),
+    checkCountsText: getCheckCountsText(watch),
     timingText: getTimingText(watch, tone, now),
     unseenStatusChange: hasUnseenStatusChange(watch),
     canRerun: canRerun(watch),
@@ -239,6 +242,11 @@ function createRow(
 
 
 
+
+function getCheckCountsText(watch: WatchRecord): string | undefined {
+  const counts = watch.target.kind === "pr" ? getWatchState(watch)?.checkCounts : undefined;
+  return counts && counts.total > 0 ? `${counts.passed}/${counts.total}` : undefined;
+}
 
 function getWatchReference(watch: WatchRecord): string | undefined {
   if (watch.target.kind === "run") {
