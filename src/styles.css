@@ -1763,7 +1763,6 @@ button.repo-ci-status:focus-visible {
 }
 
 .watch-note-row:not(:hover):not(:focus-within) .watch-note-remove {
-  visibility: hidden;
   opacity: 0;
   pointer-events: none;
 }
@@ -2096,7 +2095,7 @@ button.repo-ci-status:focus-visible {
   opacity: 0.6;
 }
 
-.watch .watch-action-button {
+.watch .watch-action-button:where(:not(.watch-note-remove)) {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;

@@ -114,7 +114,7 @@ describe("watch layout", () => {
     );
     expect(styles).toMatch(/\.watch-list\s*\{[^}]*--tree-actions-width:\s*43px;/s);
     expect(styles).toMatch(
-      /\.watch \.watch-action-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
+      /\.watch \.watch-action-button:where\(:not\(\.watch-note-remove\)\)\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
     );
     expect(styles).toMatch(
       /\.watch:hover \.watch-action-button,[^{]*\.watch:focus-within \.watch-action-button/s,
@@ -124,7 +124,7 @@ describe("watch layout", () => {
 
   it("only reveals row actions for the hovered or focused row", () => {
     expect(styles).toMatch(
-      /\.watch \.watch-action-button\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
+      /\.watch \.watch-action-button:where\(:not\(\.watch-note-remove\)\)\s*\{[^}]*visibility:\s*hidden;[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
     );
     expect(styles).toMatch(
       /\.watch:hover \.watch-action-button,[^{]*\.watch:focus-within \.watch-action-button,[^{]*\.watch-action-button\[aria-expanded="true"\]\s*\{[^}]*visibility:\s*visible;[^}]*opacity:\s*0\.6;[^}]*pointer-events:\s*auto;/s,
