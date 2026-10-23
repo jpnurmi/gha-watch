@@ -213,15 +213,17 @@ function renderNote(row: WatchRowViewModel, editing: boolean): string {
     ? `
       <form class="watch-note-form" data-action="save-note" data-id="${escapeHtml(row.id)}">
         <input name="note" type="text" data-draft-key="${escapeHtml(row.id)}" aria-label="Note for ${escapeHtml(row.label)}" placeholder="Add a note…" value="${escapeHtml(note.replace(/[\r\n]+/g, " "))}" />
-        <button class="watch-note-action" type="submit" title="Accept note (Enter)" aria-label="Accept note">
-          ${renderTriageIcon("done")}
-        </button>
       </form>
     `
     : `<button class="watch-note" type="button" data-action="edit-note" data-id="${escapeHtml(row.id)}" title="${escapeHtml(note)}" aria-label="Edit note for ${escapeHtml(row.label)}: ${escapeHtml(note)}">${escapeHtml(note)}</button>`;
 
   return `
     <div class="watch-note-row">
+      <span class="watch-note-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16">
+          <path d="M9.25 2.25h-6v11.5h9.5v-8ZM9.25 2.25v3.5h3.5M5.5 8h5M5.5 10.5h3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+        </svg>
+      </span>
       <button class="watch-action-button watch-note-remove" type="button" data-action="clear-note" data-id="${escapeHtml(row.id)}" title="Remove note" aria-label="Remove note for ${escapeHtml(row.label)}">
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>

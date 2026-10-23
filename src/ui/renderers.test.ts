@@ -166,7 +166,7 @@ describe("UI regions", () => {
     expect(html).toContain('<input name="note" type="text"');
     expect(renderWatch(row, undefined, "other")).not.toContain('<input name="note"');
     expect(html).toContain('data-action="clear-note"');
-    expect(html).toContain('aria-label="Accept note"');
+    expect(html).toContain('data-action="save-note"');
     expect(html).not.toMatch(/>\s*(Save|Cancel|Remove)\s*<|<textarea/);
   });
 

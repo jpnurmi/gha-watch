@@ -522,23 +522,17 @@ textarea {
   min-height: 36px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-}
-
-.add-field,
-.watch-note-form {
   border: 1px solid rgb(255 255 255 / 18%);
   border-radius: 6px;
   background: rgb(0 0 0 / 22%);
 }
 
-.add-field:focus-within,
-.watch-note-form:focus-within {
+.add-field:focus-within {
   border-color: #58a6ff;
   box-shadow: 0 0 0 3px rgb(88 166 255 / 18%);
 }
 
-.add-form input,
-.watch-note-form input {
+.add-form input {
   min-width: 0;
   border: 0;
   padding: 8px;
@@ -1722,79 +1716,77 @@ button.repo-ci-status:focus-visible {
   display: flex;
   min-width: 0;
   align-items: center;
+  gap: 4px;
   margin-top: 3px;
 }
 
-.watch-note {
+.watch-note,
+.watch-note-form input {
   min-width: 0;
+  height: 1.5em;
   flex: 1;
   overflow: hidden;
   border: 0;
   padding: 0;
   background: transparent;
   color: #b5c3d4;
-  cursor: pointer;
   font-size: 11px;
+  line-height: 1.5;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.watch-note:hover {
+.watch-note {
+  cursor: pointer;
+}
+
+.watch-note:hover,
+.watch-note-form:focus-within input {
   color: #eef1f5;
 }
 
 .watch-note-form {
   display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 26px;
   min-width: 0;
   flex: 1;
-  margin-left: -5px;
-  padding-right: 2px;
 }
 
 .watch-note-form input {
-  flex: 1;
-  padding: 4px 8px 4px 4px;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.watch-note-action {
-  display: inline-grid;
-  width: 20px;
-  height: 20px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 0;
-  border-radius: 3px;
-  padding: 3px;
-  background: transparent;
-  color: #b5c3d4;
-  cursor: pointer;
-}
-
-.watch-note-action:hover,
-.watch-note-action:focus-visible {
-  background: rgb(255 255 255 / 7%);
-  color: #eef1f5;
-}
-
-.watch-note-action[type="submit"] {
-  color: #79c0ff;
-}
-
-.watch-note-action svg {
-  width: 14px;
-  height: 14px;
+  outline: none;
 }
 
 .watch .watch-note-remove {
   position: absolute;
-  right: calc(100% + var(--tree-column-gap) + (var(--tree-leading-width) - 18px) / 2);
+  left: -2.5px;
   color: rgb(238 241 245 / 60%);
+}
+
+.watch-note-row:not(:hover):not(:focus-within) .watch-note-remove {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.watch-note-icon {
+  display: inline-grid;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: rgb(238 241 245 / 60%);
+  opacity: 0.6;
+}
+
+.watch-note-icon svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+.watch-note-row:hover .watch-note-icon,
+.watch-note-row:focus-within .watch-note-icon {
+  visibility: hidden;
 }
 
 .watch.has-done-candidate .watch-title-text {

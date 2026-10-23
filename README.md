@@ -47,7 +47,7 @@ Clicking a notification shows the GHA Watch popup; the Open action opens the wat
 
 On Windows and Linux, tray and notification behavior depends on the desktop environment, notification daemon, and tray support.
 
-Click the small status icon beside **Successful**, **In progress**, or another status to add or edit a note. The status text opens GitHub. Notes use a single-line field: **✓**, **Enter**, clicking outside, or closing the popup saves the note. Clicking the status icon again also saves and closes the editor. Only **Escape** cancels editing. The **×** before a note removes it directly, including while editing. Saved notes appear below the item and at the top of its notification body. Click a note to edit it. Notes persist across app restarts and follow the item's existing sync behavior: Drafts and Done sync between machines, while Inbox stays local.
+Click the small status icon beside **Successful**, **In progress**, or another status to add or edit a note. The status text opens GitHub. Click a note to edit its text inline. **Enter**, clicking outside, or closing the popup saves the note. Clicking the status icon again also saves and closes the editor. Only **Escape** cancels editing. Hover or focus a note to reveal **×** in place of its icon and remove it directly, including while editing. Saved notes appear below the item and at the top of its notification body. Notes persist across app restarts and follow the item's existing sync behavior: Drafts and Done sync between machines, while Inbox stays local.
 
 Use a repository's **⋮** menu to move all its items in the current tab to Drafts, Inbox, or Done, or remove them from Done. **Mark finished done** moves only items that are no longer active.
 
