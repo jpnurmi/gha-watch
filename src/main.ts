@@ -1457,8 +1457,10 @@ function bindEvents(): void {
 
     if (id && typeof note === "string") {
       editingNoteId = undefined;
-      controller.setNote(id, note);
-      queueSyncedStateUploadForWatchIds([id]);
+      if (note !== form.querySelector<HTMLInputElement>('input[name="note"]')?.defaultValue) {
+        controller.setNote(id, note);
+        queueSyncedStateUploadForWatchIds([id]);
+      }
       render();
     }
   });
