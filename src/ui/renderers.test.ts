@@ -157,14 +157,36 @@ describe("UI regions", () => {
       expect(html).not.toContain('<script>');
     }
     expect(renderWatch(noted, row.id)).toContain('>Edit note…</span>');
-    expect(renderWatch(noted, undefined, row.id)).toContain('data-action="remove-note"');
+    expect(renderWatch(noted, undefined, row.id)).toContain('value="&lt;/textarea&gt;&lt;script&gt;&quot;reminder&quot;&lt;/script&gt;"');
   });
 
   it("opens a note editor only for the selected item", () => {
     expect(renderWatch(row, row.id)).toContain('>Add note…</span>');
-    expect(renderWatch(row, undefined, row.id)).toContain('<textarea name="note"');
-    expect(renderWatch(row, undefined, "other")).not.toContain('<textarea');
-    expect(renderWatch(row, undefined, row.id)).not.toContain('data-action="remove-note"');
+    const html = renderWatch(row, undefined, row.id);
+    expect(html).toContain('<input name="note" type="text"');
+    expect(renderWatch(row, undefined, "other")).not.toContain('<input name="note"');
+    expect(html).toContain('data-action="clear-note"');
+    expect(html).toContain('aria-label="Accept note"');
+    expect(html).not.toMatch(/>\s*(Save|Cancel|Remove)\s*<|<textarea/);
+  });
+
+  it.each([
+    ["Successful", "success", false],
+    ["In progress", "in-progress", false],
+    ["Failing", "in-progress", true],
+    ["Failed", "failure", false],
+  ] as const)("opens notes from the %s icon and GitHub from the text", (statusLabel, tone, hasFailedChildren) => {
+    const html = renderWatch({ ...row, statusLabel, tone, hasFailedChildren });
+    expect(html).toMatch(/<button class="watch-note-shortcut"[^>]*data-action="edit-note"[^>]*aria-expanded="false">\s*<svg[\s\S]*?<\/svg>\s*<\/button>\s*<button\s+class="watch-workflow-status-link"[^>]*data-action="open-github-url"/);
+    expect(html).toContain(`<span class="watch-workflow-status-text">${statusLabel}</span>`);
+    expect(html).toContain('title="Add note"');
+    expect(renderWatch({ ...row, note: "Reminder" })).toContain('title="Edit note"');
+    expect(renderWatch(row, undefined, row.id)).toContain('aria-expanded="true"');
+  });
+
+  it("keeps words separated when editing an existing multiline note", () => {
+    expect(renderWatch({ ...row, note: "First line\r\nSecond line\nThird line" }, undefined, row.id))
+      .toContain('value="First line Second line Third line"');
   });
 
   it.each(["inbox", "saved", "done"] as const)("shows colored PR labels in %s even when checks fail to load", (triageState) => {
@@ -201,7 +223,7 @@ describe("UI regions", () => {
     };
     const html = renderWatch(createPopupViewModel([pr], new Date("2026-05-17T12:03:00Z")).rows[0]);
 
-    expect(html).toMatch(/<span class="watch-workflow-status-text">Failed&ensp;<span class="watch-meta-separator">·<\/span>&ensp;<span class="watch-meta-text watch-check-counts">48\/62<\/span><\/span>\s*<\/button>\s*<span class="watch-meta-separator">·<\/span><span class="watch-meta-text">Completed/);
+    expect(html).toMatch(/<span class="watch-workflow-status-text">Failed&ensp;<span class="watch-meta-separator">·<\/span>&ensp;<span class="watch-meta-text watch-check-counts">48\/62<\/span><\/span>\s*<\/button>\s*<\/span>\s*<span class="watch-meta-separator">·<\/span><span class="watch-meta-text">Completed/);
     expect(html.match(/data-url="https:\/\/github.com\/owner\/repo\/pull\/1\/checks"/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Open Actions status for &lt;CI&gt; &quot;tests&quot;: Failed, 14 failing and 48 successful checks"');
     expect(html).toContain('title="14 failing and 48 successful checks"');

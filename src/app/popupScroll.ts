@@ -18,7 +18,7 @@ type InputState = {
 
 export function replacePopupHtmlPreservingScroll(root: PopupRenderRoot, html: string): void {
   const scrollPosition = capturePopupScrollPosition(root);
-  const inputStates = ['input[name="url"]', 'input[name="pattern"]', 'textarea[name="note"]'].map((selector) => ({
+  const inputStates = ['input[name="url"]', 'input[name="pattern"]', 'input[name="note"]'].map((selector) => ({
     selector,
     state: captureInputState(root, selector),
   }));

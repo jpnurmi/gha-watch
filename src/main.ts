@@ -438,6 +438,14 @@ if (isScreenshotMode) {
 }
 document.addEventListener("click", (event) => {
   const target = event.target;
+  const action = target instanceof Element
+    ? target.closest<HTMLElement>('[data-action="edit-note"], [data-action="clear-note"]') : null;
+  if (editingNoteId && !(target instanceof Element && target.closest('.watch-note-form')) && action?.dataset.id !== editingNoteId) {
+    app.querySelector<HTMLFormElement>('.watch-note-form')?.requestSubmit();
+  }
+}, { capture: true });
+document.addEventListener("click", (event) => {
+  const target = event.target;
 
   if (isClearMenuOpen) {
     if (target instanceof Element && target.closest(".clear-menu")) {
@@ -1428,10 +1436,14 @@ function bindEvents(): void {
   });
 
   on("click", '[data-action="edit-note"]', (_event, button: HTMLButtonElement) => {
+    if (button.classList.contains("watch-note-shortcut") && editingNoteId === button.dataset.id) {
+      app.querySelector<HTMLFormElement>('.watch-note-form')?.requestSubmit();
+      return;
+    }
     editingNoteId = button.dataset.id;
     watchMenuId = undefined;
     renderNow();
-    const input = app.querySelector<HTMLTextAreaElement>('.watch-note-form textarea');
+    const input = app.querySelector<HTMLInputElement>('.watch-note-form input');
     if (input) {
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
@@ -1451,19 +1463,14 @@ function bindEvents(): void {
     }
   });
 
-  on("keydown", '.watch-note-form textarea', (event, input: HTMLTextAreaElement) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+  on("keydown", '.watch-note-form input', (event, input: HTMLInputElement) => {
+    if (event.key === "Enter" && !event.isComposing) {
       event.preventDefault();
       input.form?.requestSubmit();
     }
   });
 
-  on("click", '[data-action="cancel-note"]', () => {
-    editingNoteId = undefined;
-    render();
-  });
-
-  on("click", '[data-action="remove-note"]', (_event, button: HTMLButtonElement) => {
+  on("click", '[data-action="clear-note"]', (_event, button: HTMLButtonElement) => {
     const id = button.dataset.id;
     if (id) {
       editingNoteId = undefined;
@@ -1608,7 +1615,7 @@ function getWatchRowPressTarget(
     return undefined;
   }
 
-  if (event.target.closest('.watch-actions, .watch-note-form, [data-action="edit-note"], [data-action="mark-seen"], [data-action="open-github-url"]')) {
+  if (event.target.closest('.watch-actions, .watch-note-row, [data-action="edit-note"], [data-action="mark-seen"], [data-action="open-github-url"]')) {
     return undefined;
   }
 
@@ -2598,7 +2605,11 @@ async function openExternalUrl(url: string): Promise<void> {
 }
 
 async function acknowledgePopupDismissal(): Promise<void> {
+  if (editingNoteId) {
+    app.querySelector<HTMLFormElement>('.watch-note-form')?.requestSubmit();
+  }
   watchMenuId = undefined;
+  editingNoteId = undefined;
   cancelRepoPointerDrag();
   cancelWatchPointerDrag();
   const dismissedState = dismissPopupUi({

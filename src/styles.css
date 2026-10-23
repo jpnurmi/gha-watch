@@ -522,17 +522,23 @@ textarea {
   min-height: 36px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+}
+
+.add-field,
+.watch-note-form {
   border: 1px solid rgb(255 255 255 / 18%);
   border-radius: 6px;
   background: rgb(0 0 0 / 22%);
 }
 
-.add-field:focus-within {
+.add-field:focus-within,
+.watch-note-form:focus-within {
   border-color: #58a6ff;
   box-shadow: 0 0 0 3px rgb(88 166 255 / 18%);
 }
 
-.add-form input {
+.add-form input,
+.watch-note-form input {
   min-width: 0;
   border: 0;
   padding: 8px;
@@ -1711,10 +1717,20 @@ button.repo-ci-status:focus-visible {
   text-align: left;
 }
 
+.watch-note-row {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  margin-top: 3px;
+}
+
 .watch-note {
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
   border: 0;
-  padding: 2px 0 0;
+  padding: 0;
   background: transparent;
   color: #b5c3d4;
   cursor: pointer;
@@ -1730,47 +1746,55 @@ button.repo-ci-status:focus-visible {
 
 .watch-note-form {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 6px;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  min-width: 0;
+  flex: 1;
+  margin-left: -5px;
+  padding-right: 2px;
 }
 
-.watch-note-form textarea {
-  width: 100%;
-  resize: none;
-  border: 1px solid rgb(139 148 158 / 35%);
-  border-radius: 5px;
-  padding: 6px 8px;
-  background: #0d1117;
-  color: #eef1f5;
-  font-size: 12px;
+.watch-note-form input {
+  flex: 1;
+  padding: 4px 8px 4px 4px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
-.watch-note-form textarea:focus {
-  outline: 1px solid #79c0ff;
-  outline-offset: -1px;
-}
-
-.watch-note-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.watch-note-actions button[type="button"] {
+.watch-note-action {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
   border: 0;
-  border-radius: 5px;
-  padding: 4px 8px;
+  border-radius: 3px;
+  padding: 3px;
   background: transparent;
   color: #b5c3d4;
   cursor: pointer;
-  font-size: 11px;
 }
 
-.watch-note-actions button[type="button"]:hover {
+.watch-note-action:hover,
+.watch-note-action:focus-visible {
   background: rgb(255 255 255 / 7%);
   color: #eef1f5;
+}
+
+.watch-note-action[type="submit"] {
+  color: #79c0ff;
+}
+
+.watch-note-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.watch .watch-note-remove {
+  position: absolute;
+  right: calc(100% + var(--tree-column-gap) + (var(--tree-leading-width) - 18px) / 2);
+  color: rgb(238 241 245 / 60%);
 }
 
 .watch.has-done-candidate .watch-title-text {
@@ -1937,18 +1961,25 @@ button.repo-ci-status:focus-visible {
   font-weight: 750;
 }
 
-button.watch-workflow-status {
+.watch-note-shortcut,
+.watch-workflow-status-link {
   border: 0;
   padding: 0;
   background: transparent;
+  color: inherit;
   cursor: pointer;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
+  font: inherit;
 }
 
-button.watch-workflow-status:hover .watch-workflow-status-text,
-button.watch-workflow-status:focus-visible .watch-workflow-status-text {
+.watch-note-shortcut {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 3px;
+}
+
+.watch-workflow-status-link:hover .watch-workflow-status-text,
+.watch-workflow-status-link:focus-visible .watch-workflow-status-text {
   text-decoration: underline;
   text-decoration-color: rgb(238 241 245 / 62%);
   text-decoration-skip-ink: none;
