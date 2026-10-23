@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 describe("watch action menu", () => {
-  it.each(["inbox", "saved", "done"] as const)("keeps only the prioritized action and More as shortcuts in %s", (triageState) => {
+  it.each(["inbox", "saved", "done"] as const)("keeps the action toolbar compact in %s", (triageState) => {
     const current = { ...row, triageState, canRerun: true, canRerunFailed: true };
     document.body.innerHTML = renderWatch(current);
     const shortcuts = Array.from(document.querySelectorAll<HTMLButtonElement>(".watch-action-button"));
@@ -31,7 +31,8 @@ describe("watch action menu", () => {
     expect(shortcuts[0]?.title).toBe(
       triageState === "inbox" ? "Done" : triageState === "saved" ? "Move to Inbox" : "More",
     );
-    expect(document.querySelector('[data-action="edit-note"]')).toBeNull();
+    expect(document.querySelector('.watch-actions [data-action="edit-note"]')).toBeNull();
+    expect(document.querySelector('.watch-workflow-status [data-action="edit-note"]')).not.toBeNull();
     expect(document.querySelector('[data-action="rerun-all"]')).toBeNull();
 
     document.body.innerHTML = renderWatch(current, row.id);

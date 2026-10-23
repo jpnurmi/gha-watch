@@ -1,4 +1,4 @@
-import type { WatchRowViewModel, RowTone } from "../app/viewModel";
+import type { WatchRowViewModel } from "../app/viewModel";
 import { renderWatchLeadingSlot } from "../app/dragGlyph";
 import { getStatusIconSvg } from "../app/statusIcon";
 import { getWatchActionsUrl } from "../app/watchLinks";
@@ -31,7 +31,7 @@ export function renderWatch(row: WatchRowViewModel, watchMenuId?: string, editin
           ${row.stack ? renderStackBadge(row.stack) : ""}
           ${renderLabels(row.labels)}
         </span>
-        ${renderMetadata(row)}
+        ${renderMetadata(row, editingNoteId === row.id)}
         ${renderNote(row, editingNoteId === row.id)}
       </div>
       ${renderWatchActions(row, menuOpen)}
@@ -66,10 +66,10 @@ function renderUnseenDot(): string {
   return `<span class="unseen-dot" aria-hidden="true"></span>`;
 }
 
-function renderMetadata(row: WatchRowViewModel): string {
+function renderMetadata(row: WatchRowViewModel, editingNote: boolean): string {
   const items: string[] = [];
 
-  items.push(renderWorkflowStatus(row));
+  items.push(renderWorkflowStatus(row, editingNote));
 
   const detail = getMetadataDetail(row);
 
@@ -90,47 +90,33 @@ function renderMetaSeparator(): string {
   return `<span class="watch-meta-separator">·</span>`;
 }
 
-function renderWorkflowStatus(row: WatchRowViewModel): string {
-  return renderWorkflowStatusIcon(row.id, row.tone, row.statusLabel, row.hasFailedChildren, {
-    url: getWatchActionsUrl(row.subject, row.url),
-    rowIds: [row.id],
-    label: row.label,
-    title: row.checkCountsDescription,
-  }, row.checkCountsText);
-}
-
-function renderWorkflowStatusIcon(
-  id: string,
-  tone: RowTone,
-  statusLabel: string,
-  hasFailedChildren = false,
-  link?: { url: string; rowIds: string[]; label: string; title?: string },
-  checkCountsText?: string,
-): string {
-  const className = `watch-workflow-status status-icon-${tone}${hasFailedChildren ? " has-failed-children" : ""}`;
-  const counts = checkCountsText
-    ? `&ensp;${renderMetaSeparator()}&ensp;<span class="watch-meta-text watch-check-counts">${escapeHtml(checkCountsText)}</span>`
+function renderWorkflowStatus(row: WatchRowViewModel, editingNote: boolean): string {
+  const className = `watch-workflow-status status-icon-${row.tone}${row.hasFailedChildren ? " has-failed-children" : ""}`;
+  const counts = row.checkCountsText
+    ? `&ensp;${renderMetaSeparator()}&ensp;<span class="watch-meta-text watch-check-counts">${escapeHtml(row.checkCountsText)}</span>`
     : "";
-  const content = `${getStatusIconSvg(tone, `${id}-workflow`)}<span class="watch-workflow-status-text">${escapeHtml(statusLabel)}${counts}</span>`;
-
-  if (!link) {
-    return `<span class="${className}">${content}</span>`;
-  }
-
-  const description = `${statusLabel}${link.title ? `, ${link.title}` : checkCountsText ? `, ${checkCountsText} checks` : ""}`;
+  const content = `<span class="watch-workflow-status-text">${escapeHtml(row.statusLabel)}${counts}</span>`;
+  const url = getWatchActionsUrl(row.subject, row.url);
+  const description = `${row.statusLabel}${row.checkCountsDescription ? `, ${row.checkCountsDescription}` : row.checkCountsText ? `, ${row.checkCountsText} checks` : ""}`;
+  const noteAction = editingNote ? "Save note" : row.note ? "Edit note" : "Add note";
 
   return `
-    <button
-      class="${className}"
-      type="button"
-      data-action="open-github-url"
-      data-url="${escapeHtml(link.url)}"
-      data-row-ids="${escapeHtml(link.rowIds.join("\n"))}"
-      ${link.title ? `title="${escapeHtml(link.title)}"` : ""}
-      aria-label="Open Actions status for ${escapeHtml(link.label)}: ${escapeHtml(description)}"
-    >
-      ${content}
-    </button>
+    <span class="${className}">
+      <button class="watch-note-shortcut" type="button" data-action="edit-note" data-id="${escapeHtml(row.id)}" title="${noteAction}" aria-label="${noteAction} for ${escapeHtml(row.label)}" aria-expanded="${editingNote}">
+        ${getStatusIconSvg(row.tone, `${row.id}-workflow`)}
+      </button>
+      <button
+        class="watch-workflow-status-link"
+        type="button"
+        data-action="open-github-url"
+        data-url="${escapeHtml(url)}"
+        data-row-ids="${escapeHtml(row.id)}"
+        ${row.checkCountsDescription ? `title="${escapeHtml(row.checkCountsDescription)}"` : ""}
+        aria-label="Open Actions status for ${escapeHtml(row.label)}: ${escapeHtml(description)}"
+      >
+        ${content}
+      </button>
+    </span>
   `;
 }
 
@@ -218,22 +204,34 @@ function renderWatchActions(row: WatchRowViewModel, menuOpen: boolean): string {
 }
 
 function renderNote(row: WatchRowViewModel, editing: boolean): string {
-  if (editing) {
-    return `
-      <form class="watch-note-form" data-action="save-note" data-id="${escapeHtml(row.id)}">
-        <textarea name="note" rows="2" data-draft-key="${escapeHtml(row.id)}" aria-label="Note for ${escapeHtml(row.label)}" placeholder="Add a reminder for the notification…">${escapeHtml(row.note ?? "")}</textarea>
-        <div class="watch-note-actions">
-          <button class="add-form-submit" type="submit">Save</button>
-          <button type="button" data-action="cancel-note">Cancel</button>
-          ${row.note ? `<button type="button" data-action="remove-note" data-id="${escapeHtml(row.id)}">Remove</button>` : ""}
-        </div>
-      </form>
-    `;
+  const note = row.note ?? "";
+  if (!editing && !note) {
+    return "";
   }
 
-  return row.note
-    ? `<button class="watch-note" type="button" data-action="edit-note" data-id="${escapeHtml(row.id)}" title="${escapeHtml(row.note)}" aria-label="Edit note for ${escapeHtml(row.label)}: ${escapeHtml(row.note)}">${escapeHtml(row.note)}</button>`
-    : "";
+  const content = editing
+    ? `
+      <form class="watch-note-form" data-action="save-note" data-id="${escapeHtml(row.id)}">
+        <input name="note" type="text" data-draft-key="${escapeHtml(row.id)}" aria-label="Note for ${escapeHtml(row.label)}" placeholder="Add a note…" value="${escapeHtml(note.replace(/[\r\n]+/g, " "))}" />
+      </form>
+    `
+    : `<button class="watch-note" type="button" data-action="edit-note" data-id="${escapeHtml(row.id)}" title="${escapeHtml(note)}" aria-label="Edit note for ${escapeHtml(row.label)}: ${escapeHtml(note)}">${escapeHtml(note)}</button>`;
+
+  return `
+    <div class="watch-note-row">
+      <span class="watch-note-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16">
+          <path d="M9.25 2.25h-6v11.5h9.5v-8ZM9.25 2.25v3.5h3.5M5.5 8h5M5.5 10.5h3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+        </svg>
+      </span>
+      <button class="watch-action-button watch-note-remove" type="button" data-action="clear-note" data-id="${escapeHtml(row.id)}" title="Remove note" aria-label="Remove note for ${escapeHtml(row.label)}">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/>
+        </svg>
+      </button>
+      ${content}
+    </div>
+  `;
 }
 
 function renderStackBadge(stack: NonNullable<WatchRowViewModel["stack"]>): string {
