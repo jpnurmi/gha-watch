@@ -25,9 +25,9 @@ export function createApplicationSession<View>(deps: {
     },
   });
 
-  function upload(): void {
+  function upload(state = deps.getState()): void {
     if (!deps.enabled) return;
-    void deps.sync.push(deps.getState()).catch((error) => {
+    void deps.sync.push(state).catch((error) => {
       deps.reportError("Could not upload synced state.", error);
     });
   }
@@ -54,8 +54,9 @@ export function createApplicationSession<View>(deps: {
     refresh: refresh.refresh,
     async updateSettings(settings: AppSettings, syncRemote: boolean) {
       revision++;
+      // Queue before saving, or a following sync drops the unpushed edit.
+      if (syncRemote) upload({ ...deps.getState(), settings });
       await deps.applySettings(settings);
-      if (syncRemote) upload();
     },
     changed() {
       revision++;

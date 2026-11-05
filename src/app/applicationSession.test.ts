@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApplicationSession } from "./applicationSession";
+import { createSettingsSync } from "./settingsSync";
 import type { SyncedState } from "../platform/settingsGist";
 
 const state: SyncedState = { settings: { watchedRepos: [], repoOrder: [], dismissedPullRequests: [] }, watches: [] };
@@ -64,5 +65,30 @@ describe("application session", () => {
     expect(deps.sync.acknowledge).not.toHaveBeenCalled();
     expect(deps.onSynced).not.toHaveBeenCalled();
     expect(deps.poll).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a settings edit when a refresh follows it", async () => {
+    let local = state;
+    let remote = state;
+    const session = createApplicationSession({
+      ...setup(async () => state).deps,
+      sync: createSettingsSync({
+        load: async () => remote,
+        save: async (next) => { remote = next; },
+      }),
+      getState: () => local,
+      applySettings: async (settings) => {
+        local = { ...local, settings };
+        await new Promise((resolve) => setTimeout(resolve));
+      },
+    });
+    const settings = { ...state.settings, repoOrder: ["getsentry/sentry"] };
+    await session.refresh();
+
+    void session.updateSettings(settings, true);
+    await session.refresh();
+
+    expect(local.settings).toEqual(settings);
+    expect(remote.settings).toEqual(settings);
   });
 });
