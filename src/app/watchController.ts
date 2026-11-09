@@ -835,6 +835,11 @@ export function createWatchController(
       return;
     }
 
+    // Explicitly added runs and jobs should stay in Inbox even when linked to a draft PR.
+    if (reactivateExisting && target.kind !== "pr") {
+      baselineOutcome.watch = { ...baselineOutcome.watch, triageState: "inbox" };
+    }
+
     setWatches([...watchState.get(), baselineOutcome.watch]);
 
     void refreshRepositoryIcon(target);

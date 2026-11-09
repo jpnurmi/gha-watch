@@ -572,6 +572,34 @@ describe("watchController", () => {
     ]);
   });
 
+  it("adds runs linked to draft pull requests to Inbox", async () => {
+    const { deps } = createDeps([
+      {
+        status: "in_progress",
+        conclusion: null,
+        title: "CI",
+        prNumber: "51",
+        url: runTarget.url,
+      },
+    ]);
+    const controller = createWatchController({
+      ...deps,
+      async fetchPullRequestDetails() {
+        return [{ branchName: "feature/flaky-ci", state: "draft", title: "Pull request #51" }];
+      },
+    });
+
+    await controller.add(runTarget);
+
+    expect(controller.getWatches()).toMatchObject([
+      {
+        id: "getsentry/sentry/run/123",
+        sourceState: "draft",
+        triageState: "inbox",
+      },
+    ]);
+  });
+
   it("surfaces pull request metadata failures after adding the watch", async () => {
     const { deps } = createDeps([
       {
