@@ -1149,7 +1149,7 @@ describe("watchController", () => {
       },
     ]);
     expect(notificationRecords).toMatchObject([
-      { watchId: "getsentry/sentry/run/900", title: "CI: Fast checks" },
+      { watchId: "getsentry/sentry/run/900", title: "[getsentry/sentry] CI: Fast checks" },
     ]);
   });
 
@@ -1716,7 +1716,7 @@ describe("watchController", () => {
     }]);
     expect(notificationRecords).toMatchObject([{
       watchId: "getsentry/sentry/pull/52",
-      title: "Fix offline PR discovery",
+      title: "[getsentry/sentry#52] Fix offline PR discovery",
     }]);
   });
 
@@ -3132,14 +3132,12 @@ describe("watchController", () => {
     expect(notificationRecords).toEqual([
       {
         watchId: "getsentry/sentry/run/123",
-        title: "CI: tests",
+        title: "[getsentry/sentry] CI: tests",
         url: "https://github.com/getsentry/sentry/actions/runs/123",
         body:
-          "getsentry/sentry\n" +
           "Successful - This check was successful.\n" +
           "Completed 1m ago · 7m",
         largeBody:
-          "getsentry/sentry\n" +
           "Successful - This check was successful.\n" +
           "Completed 1m ago · 7m",
         persistent: false,
@@ -3177,7 +3175,7 @@ describe("watchController", () => {
     expect(notificationRecords).toMatchObject([
       {
         watchId: "getsentry/sentry/job/456",
-        title: "CI: macOS",
+        title: "[getsentry/sentry] CI: macOS",
         url: "https://github.com/getsentry/sentry/actions/runs/123/job/456",
       },
     ]);

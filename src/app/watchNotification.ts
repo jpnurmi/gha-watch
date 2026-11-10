@@ -37,7 +37,6 @@ export function createWatchNotification(
   const note = watch.note?.trim() || undefined;
   const lines = [
     note,
-    repoLabel,
     `${row.statusLabel} - ${row.description}`,
     row.timingText,
   ].filter(isString);
@@ -46,7 +45,7 @@ export function createWatchNotification(
 
   return {
     watchId: watch.id,
-    title: row.label,
+    title: `[${repoLabel}] ${row.label}`,
     url: watch.target.url,
     body,
     largeBody: body,
@@ -82,7 +81,7 @@ function getNotificationActions(
 
 function getNotificationRepoLabel(watch: WatchRecord): string {
   const repoLabel = `${watch.target.owner}/${watch.target.repo}`;
-  return watch.target.prNumber ? `${repoLabel} #${watch.target.prNumber}` : repoLabel;
+  return watch.target.prNumber ? `${repoLabel}#${watch.target.prNumber}` : repoLabel;
 }
 
 function isPersistentNotification(tone: string, note: string | undefined): boolean {

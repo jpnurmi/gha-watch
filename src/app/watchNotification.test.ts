@@ -30,14 +30,12 @@ describe("createWatchNotification", () => {
   it("formats notification content like a watch item", () => {
     expect(createWatchNotification(watch(), new Date("2026-05-16T12:10:00Z"))).toEqual({
       watchId: "getsentry/sentry/run/123",
-      title: "CI: tests",
+      title: "[getsentry/sentry] CI: tests",
       url: "https://github.com/getsentry/sentry/actions/runs/123",
       body:
-        "getsentry/sentry\n" +
         "Successful - This check was successful.\n" +
         "Completed 1m ago · 7m",
       largeBody:
-        "getsentry/sentry\n" +
         "Successful - This check was successful.\n" +
         "Completed 1m ago · 7m",
       summary: "getsentry/sentry",
@@ -66,9 +64,9 @@ describe("createWatchNotification", () => {
         }),
       ),
     ).toMatchObject({
-      body: expect.stringContaining("getsentry/sentry #51"),
-      summary: "getsentry/sentry #51",
-      group: "getsentry/sentry #51",
+      title: "[getsentry/sentry#51] CI: tests",
+      summary: "getsentry/sentry#51",
+      group: "getsentry/sentry#51",
     });
   });
 
@@ -206,7 +204,7 @@ describe("createWatchNotification", () => {
       lastState: { status: "completed", conclusion },
     }));
 
-    expect(notification.body).toMatch(/^Deploy after CI passes\nCheck the release tag\ngetsentry\/sentry\n/);
+    expect(notification.body).toMatch(/^Deploy after CI passes\nCheck the release tag\n/);
     expect(notification.largeBody).toBe(notification.body);
   });
 
